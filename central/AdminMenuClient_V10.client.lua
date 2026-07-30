@@ -6,20 +6,28 @@
 -- REMOVER:   AdminMenuClient V9
 -- ============================================
 -- (V10) ALTERAÇÃO ÚNICA — TEXTO, NENHUMA LÓGICA
--- O AwakeningSystemServer_V4 passou a aceitar UM ID de Model com
--- várias Tools dentro, no lugar de um ID por Tool. A lógica do painel
--- já funcionava para isso sem mudar nada (é o mesmo campo de ID), mas
--- o recurso ficava invisível: o label dizia só "TOOLS DESPERTAS
--- (máx. 7)" e ninguém adivinharia que pode pôr um Model ali.
---   • Label agora: "máx. 7 no TOTAL — 1 ID de Model com Tools dentro
---     vale por todas". O "no TOTAL" também corrige o sentido: o teto
---     do V4 é sobre a quantidade de Tools, não de IDs.
---   • Placeholder do primeiro campo: "Tool ou Model".
+-- O AwakeningSystemServer_V4 e o CharacterCatalogServer_V7 passaram a
+-- aceitar UM ID de Model com várias Tools dentro, no lugar de um ID por
+-- Tool. A lógica do painel já funcionava para isso sem mudar nada (é o
+-- mesmo campo de ID), mas o recurso ficava invisível — ninguém
+-- adivinharia que pode pôr um Model naquele campo.
+--
+-- Os DOIS formulários receberam a dica:
+--   • PASSO 2/3 do wizard (personagem NORMAL): "máx. 7 no TOTAL", o
+--     aviso agora diz "UM Model com várias Tools dentro vale por
+--     todas", e o primeiro campo virou "ID de uma Tool OU de um Model
+--     com várias".
+--   • Formulário de DESPERTAR: "máx. 7 no TOTAL — 1 ID de Model com
+--     Tools dentro vale por todas", primeiro campo "Tool ou Model".
+--
+-- O "no TOTAL" também corrige o sentido: o teto agora é sobre a
+-- quantidade de Tools, não de IDs.
+--
 -- Instalar isto é OPCIONAL — sem o V10 o Model funciona igual, você só
 -- não vê a dica no painel.
 -- ============================================
 -- DEPENDE DE: AdminRegistryServer_V1 (novo, no ServerScriptService)
---             CharacterCatalogServer_V5 / AwakeningSystemServer_V4
+--             CharacterCatalogServer_V7 / AwakeningSystemServer_V4
 -- ============================================
 -- (V9) ALTERAÇÕES:
 -- • LISTA "ADMIN_IDS" REMOVIDA DO CÓDIGO: o painel agora pergunta
@@ -963,15 +971,25 @@ local function createAdminInterface()
 	-- ---------- VIEW: PASSO 2 — TOOLS (até 7) ----------
 
 	local function renderStep2()
-		label(catalogContent, "[ PASSO 2/3 — HABILIDADES (TOOLS) — máx. 7 ]", UDim2.new(1, 0, 0.06, 0), UDim2.new(0, 0, 0, 0), COLORS.catalog)
-		label(catalogContent, "Cole o Model ID de cada Tool publicada. Vazio = não usa.", UDim2.new(0.96, 0, 0.05, 0), UDim2.new(0.02, 0, 0.06, 0), Color3.fromRGB(180, 180, 180))
+		label(catalogContent, "[ PASSO 2/3 — HABILIDADES (TOOLS) — máx. 7 no TOTAL ]", UDim2.new(1, 0, 0.06, 0), UDim2.new(0, 0, 0, 0), COLORS.catalog)
+		-- (V10) A dica do Model entrou no aviso que já existia aqui, sem
+		-- elemento novo: as 7 linhas de campo ocupam de 0.13 a 0.70 em
+		-- Scale e outra linha empurraria os botões.
+		label(
+			catalogContent,
+			"Cole o Model ID de cada Tool. UM Model com várias Tools dentro vale por todas. Vazio = não usa.",
+			UDim2.new(0.96, 0, 0.05, 0),
+			UDim2.new(0.02, 0, 0.06, 0),
+			Color3.fromRGB(180, 180, 180)
+		)
 
 		for i = 1, 7 do
 			local rowY = 0.13 + (i - 1) * 0.095
 			label(catalogContent, "TOOL " .. i .. ":", UDim2.new(0.15, 0, 0.06, 0), UDim2.new(0.02, 0, rowY, 0))
 			local box = textBox(
 				catalogContent,
-				"Model ID da Tool (opcional)",
+				-- (V10) O primeiro campo é onde se põe o Model único
+				i == 1 and "ID de uma Tool OU de um Model com várias" or "Model ID da Tool (opcional)",
 				UDim2.new(0.8, 0, 0.06, 0),
 				UDim2.new(0.18, 0, rowY, 0),
 				wizardDraft.toolIds[i]
