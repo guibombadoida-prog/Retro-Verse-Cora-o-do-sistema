@@ -9,6 +9,7 @@
 #   4. central/ vazia (senão, promoção pendente)
 #   5. regras de código do projeto: wait()/spawn()/:Destroy()
 #   6. nome do arquivo batendo com o `-- Nome:` do cabeçalho
+#   7. sintaxe Lua de todos os scripts (se houver luac instalado)
 #
 # Uso: tools/validar.sh
 # Sai com 1 se achar erro; avisos não derrubam o código de saída.
@@ -260,6 +261,41 @@ for f in "${ATIVOS[@]}"; do
 done
 ((divergentes == 0)) && ok "$((${#ATIVOS[@]} - sem_nome)) nomes conferem com o cabeçalho"
 ((sem_nome > 0)) && aviso "$sem_nome script(s) sem '-- Nome:' no cabeçalho — nome no Studio não verificável"
+
+# ---------------------------------------------------------------
+titulo "7. Sintaxe"
+# ---------------------------------------------------------------
+# O Roblox usa Luau, e não existe luau aqui — mas o luac do Lua 5.4
+# pega erro de estrutura (bloco sem end, parêntese aberto) desde que as
+# construções que só o Luau tem sejam traduzidas antes. A tradução
+# preserva a estrutura de blocos, que é justamente o que importa:
+#   x += e   ->  x = x + e
+#   continue ->  do end   (statement neutro, mantém o bloco)
+# Isso pode deixar passar um erro de TIPO/semântica, nunca um erro de
+# estrutura — e é erro de estrutura que quebra o script no Studio.
+
+LUAC="$(command -v luac5.4 || command -v luac5.3 || command -v luac || true)"
+
+if [[ -z "$LUAC" ]]; then
+	aviso "luac não instalado — sintaxe não verificada (apt-get install lua5.4)"
+else
+	tmpdir="$(mktemp -d)"
+	trap 'rm -rf "$tmpdir"' EXIT
+	sint_ok=0
+	for f in "${ATIVOS[@]}"; do
+		sed -E \
+			-e 's/^([[:space:]]*)([A-Za-z_][A-Za-z0-9_.]*(\[[^]]*\])?)[[:space:]]*\.\.=[[:space:]]*/\1\2 = \2 .. /' \
+			-e 's/^([[:space:]]*)([A-Za-z_][A-Za-z0-9_.]*(\[[^]]*\])?)[[:space:]]*([+*\/%^-])=[[:space:]]*/\1\2 = \2 \4 /' \
+			-e 's/^([[:space:]]*)continue([[:space:]]*)$/\1do end\2/' \
+			"$f" >"$tmpdir/x.lua"
+		if "$LUAC" -p "$tmpdir/x.lua" 2>"$tmpdir/err"; then
+			sint_ok=$((sint_ok + 1))
+		else
+			falha "sintaxe — ${f#$RAIZ/}: $(sed -E "s|.*x\.lua:([0-9]+): |linha \1: |" "$tmpdir/err" | head -1)"
+		fi
+	done
+	((sint_ok == ${#ATIVOS[@]})) && ok "$sint_ok scripts sem erro de sintaxe"
+fi
 
 # ---------------------------------------------------------------
 titulo "Resultado"
