@@ -17,7 +17,7 @@ src/ServerScriptService/DataManager.server.lua
 
 | Pasta | Corresponde no Studio a | Conteúdo |
 |---|---|---|
-| `src/ServerScriptService/` | `ServerScriptService` | 29 `Script` de servidor |
+| `src/ServerScriptService/` | `ServerScriptService` | 31 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
 | `src/ServerScriptService/RetroVerse/` | `ServerScriptService > RetroVerse` | 1 `ModuleScript` (Núcleo de Combate) |
 | `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 18 `LocalScript` de interface/cliente |
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
@@ -60,7 +60,7 @@ Cada script sobe sozinho e espera pelas suas dependências via `_G`
 o que importa é **não faltar ninguém na pasta**:
 
 1. **Base** — `DataManager` (dono de `_G.PlayerDataManager`), `AdminRegistryServer`
-2. **Serviços de stats** — `StatService`, `CharacterLevelServer`, `PassiveCatalog` ⚠️ *(ver "Dependências ausentes")*
+2. **Serviços de stats** — `StatService`, `CharacterLevelServer`, `PassiveCatalog`
 3. **Catálogo e jogo** — `CharacterCatalogServer`, `GameManager`, `SpawnSystem`
 4. **Combate** — `DamageAttribution`, `RetroVerse/NucleoCombate_V2`, `StatusEffectServer`, `EnergySystemServer`, `PassiveSystemServer`, `TeamDamageProtection`
 5. **Demais sistemas de servidor** — o resto de `ServerScriptService`
@@ -72,36 +72,23 @@ o que importa é **não faltar ninguém na pasta**:
 
 ---
 
-## ⚠️ Dependências ausentes neste pacote
+## ⚠️ Dependências ainda ausentes
 
-A análise cruzada das APIs `_G` encontrou **três scripts que os arquivos aqui
-consomem mas que não vieram no pacote**. Sem eles, três sistemas travam:
+A cadeia `_G` está **fechada** para tudo que bloqueia: nenhuma barreira de espera
+(`repeat task.wait() until _G.X`) depende de script que não esteja aqui.
 
-| Falta | Tipo / Local | Expõe | Quem trava sem isso |
-|---|---|---|---|
-| `StatService` (V3) | `Script` · ServerScriptService | `_G.StatService` | `PassiveSystemServer`, `NpcPassiveBridge`, `StatusEffectServer` |
-| `CharacterLevelServer` (V1) | `Script` · ServerScriptService | `_G.CharacterLevel` | `PassiveSystemServer`, `NpcPassiveBridge` |
-| `PassiveCatalog` | `ModuleScript` · ServerScriptService | tabela de passivas | `PassiveSystemServer` |
+Restam duas APIs consumidas mas **não definidas** em nenhum script do repositório.
+As duas estão protegidas por `if`, então a ausência só desliga o recurso — não trava
+sistema nenhum:
 
-Isso **não** é um bug de código — é arquivo faltando. Os scripts afetados usam
-uma barreira de espera bloqueante:
+| API | Consumidor | O que se perde |
+|---|---|---|
+| `_G.PassiveVFX` | `PassiveSystemServer` (linhas 430, 511, 536) | Efeitos visuais das passivas (`vfx` do `PassiveCatalog` fica sem dono) |
+| `_G.SetCoinMultiplier` | `DailyRewardsServer` (linhas 268, 529) | Multiplicador de moedas da recompensa diária |
 
-```lua
--- PassiveSystemServer.server.lua:75
-repeat
-    task.wait()
-until _G.PlayerDataManager and _G.CharacterLevel and _G.StatService
-```
-
-Como nada define `_G.CharacterLevel` nem `_G.StatService`, esse `repeat` **espera
-para sempre** e o sistema de passivas nunca inicia (silenciosamente, sem erro no
-Output). Vale o mesmo para `StatusEffectServer.server.lua:64`.
-
-Duas outras APIs são consumidas mas **opcionais** — estão protegidas por `if`, então
-a ausência delas só desliga o efeito, sem travar nada:
-
-- `_G.PassiveVFX` — efeitos visuais das passivas (`PassiveSystemServer`)
-- `_G.SetCoinMultiplier` — multiplicador de moedas do login diário (`DailyRewardsServer`)
+Cada passiva do `PassiveCatalog` já declara seu `vfx` (`BRILHO_METALICO`,
+`ESPELHO_INVERTIDO`, `CHAMA_RETRO`…), então o catálogo está pronto para o
+`PassiveVFX` no dia em que ele existir — nada precisa mudar aqui quando entrar.
 
 ---
 

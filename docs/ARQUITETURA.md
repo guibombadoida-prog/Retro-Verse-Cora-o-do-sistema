@@ -21,6 +21,7 @@ de cada arquivo e o mapa de dependências entre eles.
 | `AwakeningSystemServer.server.lua` | `AwakeningSystemServer` | V2 | Sistema de Despertar (personagens evoluídos) |
 | `BossRaidServer.server.lua` | `BossRaidServer` | V2 | Catálogo de bosses via DataStore + teleporte para a *place* do chefe |
 | `CharacterCatalogServer.server.lua` | `CharacterCatalogServer` | V6 | Catálogo de personagens 100% dinâmico |
+| `CharacterLevelServer.server.lua` | `CharacterLevelServer` | V1 | Nível **por personagem** (1–30): curva de XP, slots de passiva e energia |
 | `CharacterStatsServer.server.lua` | `CharacterStatsServer` | V2 | Atributos por personagem |
 | `DailyRewardsServer.server.lua` | `DailyRewardsServer` | V5 | Recompensas diárias e recuperação de dia perdido |
 | `DamageAttribution.server.lua` | `DamageAttribution` | V4 | Atribui a autoria de cada dano — base do sistema de kill |
@@ -36,6 +37,7 @@ de cada arquivo e o mapa de dependências entre eles.
 | `NpcPassiveBridge.server.lua` | `NpcPassiveBridge` | V2 | Faz as passivas do jogador valerem contra NPCs |
 | `PassiveSystemServer.server.lua` | `PassiveSystemServer` | V8 | Sistema de passivas |
 | `SpawnSystem.server.lua` | `SpawnSystem` | V8 | Lobby, zona segura, spawn no mapa, modo espectador |
+| `StatService.server.lua` | `StatService` | V3 | **Dono único** de MaxHealth/WalkSpeed/Jump. Agrega os 23 atributos por fonte e resolve a fórmula de dano |
 | `StatusEffectServer.server.lua` | `StatusEffectServer` | V1 | Efeitos temporários de status |
 | `TeamDamageProtection.server.lua` | `TeamDamageProtection` | V4 | Bloqueia dano entre membros do mesmo time |
 | `TeamSystemServer.server.lua` | `TeamSystemServer` | V4 | Times e convites |
@@ -43,14 +45,22 @@ de cada arquivo e o mapa de dependências entre eles.
 | `TutorialSystemServer.server.lua` | `TutorialSystemServer` | V3 | Tutorial em passos |
 | `WantedSystemServer.server.lua` | `WantedSystemServer` | V2 | Bounty / procurado |
 
-### `ServerScriptService > RetroVerse` — ModuleScript
+### ModuleScripts
 
-| Arquivo | Nome no Studio | Ver. | Função |
-|---|---|:--:|---|
-| `RetroVerse/NucleoCombate_V2.lua` | `NucleoCombate_V2` | V2 | Pipeline único de cálculo de dano (Regra 12). Consumido por `require(ServerScriptService.RetroVerse.NucleoCombate_V2)` |
+| Arquivo | Nome no Studio | Local | Ver. | Função |
+|---|---|---|:--:|---|
+| `PassiveCatalog.lua` | `PassiveCatalog` | `ServerScriptService` | V1 | **Conteúdo** das 27 passivas (stats, gatilhos, custo por nível, vfx). Separado de propósito: o servidor tem a lógica, este arquivo tem os dados |
+| `RetroVerse/NucleoCombate_V2.lua` | `NucleoCombate_V2` | `ServerScriptService > RetroVerse` | V2 | Pipeline único de cálculo de dano (Regra 12) |
 
-O nome com `_V2` é **obrigatório** aqui: o caminho do `require` é literal, então
-renomear o objeto quebra todas as Tools que consomem o núcleo.
+`PassiveCatalog` é carregado por `PassiveSystemServer` via
+`ServerScriptService:WaitForChild("PassiveCatalog", 30)` — precisa estar na **raiz**
+de `ServerScriptService`, não dentro da pasta `RetroVerse`. Adicionar passiva nova é
+mexer só nele.
+
+`NucleoCombate_V2` é consumido por
+`require(ServerScriptService.RetroVerse.NucleoCombate_V2)`. O nome com `_V2` é
+**obrigatório**: o caminho do `require` é literal, então renomear o objeto quebra
+todas as Tools que consomem o núcleo.
 
 ---
 
@@ -117,24 +127,26 @@ tabelas e funções publicadas em `_G`. Cada API tem **um dono único**.
 
 | API `_G` | Dono | Consumido por |
 |---|---|---|
-| `PlayerDataManager` | `DataManager` | 23 scripts — é a base de tudo |
+| `PlayerDataManager` | `DataManager` | 25 scripts — é a base de tudo |
 | `GameContentConfig` | `DataManager` | `CharacterCatalogServer`, `GameManager` |
+| `StatService` | `StatService` | `PassiveSystemServer`, `NpcPassiveBridge`, `StatusEffectServer`, `CharacterStatsServer`, `NucleoCombate_V2` |
+| `CharacterLevel` | `CharacterLevelServer` | `PassiveSystemServer`, `NpcPassiveBridge`, `EnergySystemServer` |
 | `AdminRegistry` | `AdminRegistryServer` | `AchievementSystemServer`, `AdminSystemServer`, `AwakeningSystemServer`, `BossRaidServer`, `CharacterCatalogServer`, `CharacterStatsServer` |
 | `CharacterCatalog` | `CharacterCatalogServer` | `AchievementSystemServer`, `AdminSystemServer` |
-| `GameManagerConfig` | `GameManager` | `AwakeningSystemServer`, `CharacterCatalogServer`, `TradeSystemServer` |
+| `GameManagerConfig` | `GameManager` | `AwakeningSystemServer`, `CharacterCatalogServer`, `TradeSystemServer`, `StatService` |
 | `SelectCharacterFunction` | `GameManager` (embrulhado por `MainSystemInitializer`) | `MainSystemInitializer` |
-| `OnCharacterSelected` | `SpawnSystem` | `GameManager`, `GlobalSync`, `MainSystemInitializer` |
+| `OnCharacterSelected` | `SpawnSystem` (embrulhado por `StatService`, com vigia) | `GameManager`, `GlobalSync`, `MainSystemInitializer` |
 | `SetSpectatorMode`, `ReloadMapSpawnPoints`, `DebugSpawnState`, `ListAllPlayers` | `SpawnSystem` | `MainSystemInitializer` |
 | `DebugPlayerStatus`, `TeleportToSafeZone`, `ForceSelectCharacter` | `GlobalSync` | `MainSystemInitializer` |
 | `ResetPlayerBarrier` | `MainSystemInitializer` | — (debug manual) |
 | `RegisterAttack`, `DamageAttribution` | `DamageAttribution` | `NPC_Server_V2`, `TeamSystemServer`, `PassiveSystemServer`, `StatusEffectServer`, `NucleoCombate_V2` |
 | `CanDamagePlayer`, `CreateTeamBlockEffect` | `TeamDamageProtection` | `NucleoCombate_V2` |
 | `GetPlayerTeam`, `IsTeammate`, `GetAllTeams`, `GetTeamMembers`, `GetAvailableTeamColors` | `TeamSystemServer` | `BossRaidServer`, `DuelSystemServer`, `GlobalSync`, `TeamDamageProtection`, `MainSystemInitializer` |
-| `AwakeningSystem` | `AwakeningSystemServer` | `GameManager` |
-| `PassiveSystem` | `PassiveSystemServer` | `NpcPassiveBridge`, `Health` |
+| `AwakeningSystem` | `AwakeningSystemServer` | `GameManager`, `StatService` |
+| `PassiveSystem` | `PassiveSystemServer` | `NpcPassiveBridge`, `Health`, `StatService` |
 | `EnergySystem` | `EnergySystemServer` | `PassiveSystemServer` |
 | `StatusEffect` | `StatusEffectServer` | — |
-| `CharacterStats` | `CharacterStatsServer` | — (só servidor; o `CharacterStatsAdminClient` fala com ele por Remote, não por `_G`) |
+| `CharacterStats` | `CharacterStatsServer` | `StatService` (chama `.refresh` ao equipar). O `CharacterStatsAdminClient` fala por Remote, não por `_G` |
 | `DailyRewards` | `DailyRewardsServer` | — |
 | `BossRaid` | `BossRaidServer` | — |
 | `WantedSystem` | `WantedSystemServer` | — |
@@ -156,42 +168,102 @@ tabelas e funções publicadas em `_G`. Cada API tem **um dono único**.
 
 Cada sistema expõe seu próprio `_G.Debug*` para uso no console do servidor:
 `DebugAchievements`, `DebugAdmins`, `DebugAntiTool`, `DebugAttribution`,
-`DebugAwakening`, `DebugCatalog`, `DebugCharacterStats`, `DebugDailyRewards`,
-`DebugEfeitos`, `DebugEnergy`, `DebugGameManager`, `DebugNpcBridge`, `DebugNucleo`,
-`DebugPassives`, `DebugPlayerStatus`, `DebugSpawnState`, `DebugTeams`, `DebugTutorial`.
+`DebugAwakening`, `DebugCatalog`, `DebugCharacterLevel`, `DebugCharacterStats`,
+`DebugDailyRewards`, `DebugEfeitos`, `DebugEnergy`, `DebugGameManager`,
+`DebugMovement`, `DebugNpcBridge`, `DebugNucleo`, `DebugPassives`,
+`DebugPlayerStatus`, `DebugSpawnState`, `DebugStats`, `DebugTeams`, `DebugTutorial`.
+
+O `StatService` traz também `_G.SimulateDamage("Atacante", "Vítima", 50, "Melee")`,
+que roda a fórmula de dano inteira e imprime cada etapa — dá para conferir
+balanceamento sem bater em ninguém.
+
+### ⚠️ `_G.OnCharacterSelected` tem três donos
+
+Esse é o ponto mais frágil da arquitetura, e é intencionalmente documentado assim
+no cabeçalho do `StatService` V3:
+
+- `SpawnSystem` (linha 1043) faz **atribuição direta**: `_G.OnCharacterSelected = function...`
+- `StatService` (V3) **embrulha** o anterior e chama quem estava antes
+- `MainSystemInitializer` faz o mesmo com `_G.SelectCharacterFunction`
+
+Como a ordem de carga de `Script` em `ServerScriptService` não é garantida, o
+`SpawnSystem` pode carregar **depois** do `StatService` e apagar o wrapper em
+silêncio. Por isso o `StatService` tem um **vigia** que reconfere a cada 10s e
+reinstala o wrapper por cima, sem quebrar quem sobrescreveu. Se você ver
+`[STAT V3] _G.OnCharacterSelected foi sobrescrito — reinstalado por cima` no Output,
+é esse mecanismo funcionando — não é erro.
+
+Consequência prática: **qualquer script novo que precise reagir ao equipar deve
+embrulhar, nunca sobrescrever** `_G.OnCharacterSelected`.
 
 ---
 
-## 6. ⚠️ Dependências ausentes
+## 6. Barreiras de espera e o que ainda falta
 
-Três arquivos consumidos pelo código **não estão no repositório**:
+### Cadeia bloqueante — fechada ✅
 
-| Falta | Tipo / Local | Expõe |
-|---|---|---|
-| `StatService` (V3) | `Script` · ServerScriptService | `_G.StatService` |
-| `CharacterLevelServer` (V1) | `Script` · ServerScriptService | `_G.CharacterLevel` |
-| `PassiveCatalog` | `ModuleScript` · ServerScriptService | tabela de passivas (via `require`) |
+São **22 barreiras** `repeat task.wait() until ...` no projeto. Se a dependência não
+existir, elas esperam **para sempre, sem erro no Output** — daí a importância de
+conferir esta lista antes de remover qualquer script de `ServerScriptService`.
 
-### Impacto
+Todas estão hoje satisfeitas. As de dependência composta (número = linha do `until`):
 
-| Script afetado | Linha | Comportamento sem a dependência |
-|---|---|---|
-| `PassiveSystemServer.server.lua` | 75 | `repeat` infinito — passivas nunca iniciam, sem erro no Output |
-| `NpcPassiveBridge.server.lua` | 78 | `repeat` infinito — passivas não valem contra NPC |
-| `StatusEffectServer.server.lua` | 64 | `repeat` infinito — efeitos de status nunca iniciam |
-| `PassiveSystemServer.server.lua` | 77-81 | `WaitForChild("PassiveCatalog", 30)` expira → `warn` e `return` |
+| Script | Linha | Espera por | Atendido por |
+|---|:--:|---|---|
+| `PassiveSystemServer` | 75 | `PlayerDataManager` + `CharacterLevel` + `StatService` | `DataManager`, `CharacterLevelServer`, `StatService` |
+| `PassiveSystemServer` | 77 | `WaitForChild("PassiveCatalog", 30)` | `PassiveCatalog.lua` |
+| `NpcPassiveBridge` | 78 | `PlayerDataManager` + `CharacterLevel` + `PassiveSystem` + `StatService` | idem + `PassiveSystemServer` |
+| `CharacterStatsServer` | 83 | `PlayerDataManager` + `StatService` | `DataManager`, `StatService` |
+| `EnergySystemServer` | 50 | `PlayerDataManager` + `CharacterLevel` | `DataManager`, `CharacterLevelServer` |
+| `CharacterLevelServer` | 41 | `PlayerDataManager.getCharacterProgress` | `DataManager` V8 |
+| `StatusEffectServer` | 64 | `StatService` | `StatService` |
+| `TeamDamageProtection` | 28 | `IsTeammate` | `TeamSystemServer` |
 
-Só o último caso avisa no Output. Os três `repeat` falham em **silêncio**, o que
-faz o sintoma parecer "a passiva não funciona" em vez de "falta um script".
+As outras 15 esperam **só** por `_G.PlayerDataManager`, ou seja, todas dependem do
+`DataManager` estar presente: `AchievementSystemServer`:101 · `AdminSystemServer`:42 ·
+`AwakeningSystemServer`:51 · `BossRaidServer`:28 · `DailyRewardsServer`:34 ·
+`DuelSystemServer`:47 · `GameManager`:39 · `MissionSystemServer`:12 ·
+`NPC_Server_V2`:46 · `SimpleCharacterCoinDrop`:20 · `StatService`:146 ·
+`TeamSystemServer`:24 · `TradeSystemServer`:44 · `TutorialSystemServer`:23 ·
+`WantedSystemServer`:55
 
-### Opcionais (não travam nada)
+Note que `PassiveCatalog` é o único caso que **avisa** quando falta: o
+`WaitForChild` expira em 30s, emite `warn` e faz `return`. Os 22 `repeat` falham
+calados.
 
-Protegidas por `if`, então a ausência só desliga o recurso:
+### Compatibilidade verificada
+
+O `CharacterLevelServer` exige cinco funções do `DataManager`, todas presentes na V8:
+`getCharacterProgress`, `addCharacterXp`, `setCharacterLevel`, `getPlayerData`,
+`savePlayerData`. Os cabeçalhos do `StatService` e do `CharacterLevelServer` dizem
+"DEPENDE DE: DataManager V7" — a V8 é compatível, apenas ampliou os limites de passiva.
+
+O `PassiveSystemServer` consome dez APIs do `PassiveCatalog` (`LISTA`, `MAX_NIVEL`,
+`obter`, `custoDoNivel`, `contar`, `statsNoNivel`, `statsRecargaNoNivel`,
+`specialNoNivel`, `chanceNoNivel`, `descricaoNoNivel`) — todas existem na V1 do catálogo.
+
+### ⚠️ Ainda ausente (opcional, não trava)
+
+Duas APIs são consumidas mas não têm dono no repositório. As duas estão protegidas
+por `if`, então só desligam o recurso:
 
 | API | Consumidor | O que se perde |
 |---|---|---|
 | `_G.PassiveVFX` | `PassiveSystemServer` (linhas 430, 511, 536) | Efeitos visuais das passivas |
 | `_G.SetCoinMultiplier` | `DailyRewardsServer` (linhas 268, 529) | Multiplicador de moedas da recompensa diária |
+
+As 27 passivas do `PassiveCatalog` já declaram seu campo `vfx` (`BRILHO_METALICO`,
+`ESPELHO_INVERTIDO`, `CHAMA_RETRO`, `NEGACAO_BRANCA`…), e o `PassiveSystemServer`
+chama `_G.PassiveVFX.disparar(player, passiva.vfx, duracao)`. O contrato está
+definido dos dois lados — falta só o script que implementa.
+
+### Escopo declarado do `StatService`
+
+O cabeçalho do `StatService` V3 avisa que ele **não aplica dano** — só calcula e
+guarda. Quem deveria chamar `computeDamage` é um `DamageService` que não existe. Na
+prática, hoje quem faz essa conta em combate é o `NucleoCombate_V2`, que consome
+`_G.StatService.getEffectiveResistance` / `getDamageMultiplier` diretamente
+(linhas 392-426) e degrada com aviso se o `StatService` não estiver carregado.
 
 ---
 
