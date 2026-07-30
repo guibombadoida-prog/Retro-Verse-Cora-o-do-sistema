@@ -41,6 +41,28 @@
 --       🔒 PRECISA DO ORIGINAL ...... não tem o personagem base
 --    O pulso de destaque agora só acontece quando há ação a tomar.
 -- ============================================
+-- (V8) POPUP DE HABILIDADES MOSTRA AS FERRAMENTAS
+--
+-- Os ATRIBUTOS do popup só existem para admin (vêm do
+-- CharacterStatsServer). Para o público, o popup só tinha HP e
+-- descrição — não dizia o que o personagem faz.
+--
+-- ✅ Nova seção "🛠️ FERRAMENTAS CARREGADAS (n)", que aparece SEMPRE,
+--    inclusive quando não há atributos:
+--      ⚔️ Tools normais, em ordem
+--      ⚡ Tools da forma desperta, em magenta e marcadas "(desperta)"
+--
+--    A leitura é DIRETA de ReplicatedStorage.Characters[nome] e
+--    .AwakenedForm, que já são replicados ao cliente — nenhum remote
+--    novo. E é de propósito: mostra o que está REALMENTE carregado, não
+--    o que o catálogo diz que deveria estar. Se um Model ID falhou, a
+--    Tool não aparece na lista, e essa é justamente a informação útil
+--    para diagnosticar.
+--
+-- ✅ Título "📊 ATRIBUTOS" separando as duas listas, que antes viravam
+--    um bloco só. E o popup ficou mais alto (0.78 desktop / 0.88 mobile)
+--    para as quatro seções caberem sem apertar nenhuma.
+-- ============================================
 -- (V7) ALTERAÇÕES — EDIÇÃO CIRÚRGICA, DE PROPÓSITO:
 -- Só UMA função mudou: `createAbilitiesPopup`. Todo o resto do
 -- arquivo (Loja, Inventário, Despertar, Venda, Lore, abas, cards)
@@ -784,6 +806,41 @@ end
 -- tabela fixa local
 -- =====================================
 
+-- (V8) DETECÇÃO DE TOOLS DO PERSONAGEM
+-- =====================================
+-- As Tools montadas pelo CharacterCatalogServer ficam em
+-- ReplicatedStorage.Characters[nome], e a forma desperta em
+-- .AwakenedForm. Isso é replicado ao cliente, então dá para listar sem
+-- remote nenhum — é leitura direta do que REALMENTE está carregado, não
+-- do que o catálogo diz que deveria estar. Se um ID falhou ao carregar,
+-- a Tool não aparece aqui, e é exatamente essa a informação útil.
+local function collectCharacterTools(characterName)
+	local normais, despertas = {}, {}
+
+	local pasta = ReplicatedStorage:FindFirstChild("Characters")
+	pasta = pasta and pasta:FindFirstChild(characterName)
+	if not pasta then
+		return normais, despertas
+	end
+
+	for _, item in ipairs(pasta:GetChildren()) do
+		if item:IsA("Tool") then
+			table.insert(normais, item.Name)
+		end
+	end
+
+	local formaDesperta = pasta:FindFirstChild("AwakenedForm")
+	if formaDesperta then
+		for _, item in ipairs(formaDesperta:GetChildren()) do
+			if item:IsA("Tool") then
+				table.insert(despertas, item.Name)
+			end
+		end
+	end
+
+	return normais, despertas
+end
+
 local function createAbilitiesPopup(characterName)
 	playSound(sounds.info)
 	local def = getCatalogDef(characterName)
@@ -803,7 +860,9 @@ local function createAbilitiesPopup(characterName)
 	background.Parent = infoGui
 
 	local popup = Instance.new("Frame")
-	popup.Size = isMobile and UDim2.new(0.9, 0, 0.7, 0) or UDim2.new(0.5, 0, 0.6, 0)
+	-- (V8) Mais alto que o V7: agora cabe HP + FERRAMENTAS + atributos +
+	-- descrição sem apertar nenhuma seção.
+	popup.Size = isMobile and UDim2.new(0.92, 0, 0.88, 0) or UDim2.new(0.55, 0, 0.78, 0)
 	popup.Position = UDim2.new(0.5, 0, 0.5, 0)
 	popup.AnchorPoint = Vector2.new(0.5, 0.5)
 	popup.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
@@ -812,7 +871,7 @@ local function createAbilitiesPopup(characterName)
 	popup.Parent = infoGui
 
 	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1, 0, 0.15, 0)
+	header.Size = UDim2.new(1, 0, 0.12, 0)
 	header.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
 	header.BorderSizePixel = 0
 	header.Parent = popup
@@ -820,7 +879,7 @@ local function createAbilitiesPopup(characterName)
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Size = UDim2.new(0.85, 0, 1, 0)
 	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "⚔️ " .. characterName:upper() .. " - HABILIDADES"
+	titleLabel.Text = "⚔️ " .. characterName:upper() .. " — HABILIDADES"
 	titleLabel.TextColor3 = Color3.new(1, 1, 1)
 	titleLabel.TextScaled = true
 	titleLabel.Font = Enum.Font.Arcade
@@ -864,8 +923,8 @@ local function createAbilitiesPopup(characterName)
 	end
 
 	local statsLabel = Instance.new("TextLabel")
-	statsLabel.Size = UDim2.new(0.96, 0, 0.12, 0)
-	statsLabel.Position = UDim2.new(0.02, 0, 0.17, 0)
+	statsLabel.Size = UDim2.new(0.96, 0, 0.10, 0)
+	statsLabel.Position = UDim2.new(0.02, 0, 0.14, 0)
 	statsLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 	statsLabel.BorderSizePixel = 0
 	statsLabel.Text = healthText .. archetypeText
@@ -942,16 +1001,93 @@ local function createAbilitiesPopup(characterName)
 		end)
 	end
 
+	-- =====================================
+	-- (V8) FERRAMENTAS CARREGADAS NO PERSONAGEM
+	-- =====================================
+	-- Os ATRIBUTOS só existem para quem é admin (vêm do
+	-- CharacterStatsServer). As Tools, não: elas são o que o público
+	-- precisa ver para saber o que o personagem faz. Por isso esta seção
+	-- aparece SEMPRE, inclusive quando statsInfo é nil.
+	local toolsNormais, toolsDespertas = collectCharacterTools(characterName)
+	local totalTools = #toolsNormais + #toolsDespertas
+
+	local toolsTitle = Instance.new("TextLabel")
+	toolsTitle.Size = UDim2.new(0.96, 0, 0.055, 0)
+	toolsTitle.Position = UDim2.new(0.02, 0, 0.30, 0)
+	toolsTitle.BackgroundTransparency = 1
+	toolsTitle.Text = string.format("🛠️ FERRAMENTAS CARREGADAS (%d)", totalTools)
+	toolsTitle.TextColor3 = Color3.fromRGB(0, 220, 255)
+	toolsTitle.TextScaled = true
+	toolsTitle.Font = Enum.Font.Arcade
+	toolsTitle.TextXAlignment = Enum.TextXAlignment.Left
+	toolsTitle.Parent = popup
+
+	local toolsFrame = Instance.new("ScrollingFrame")
+	toolsFrame.Size = UDim2.new(0.96, 0, 0.20, 0)
+	toolsFrame.Position = UDim2.new(0.02, 0, 0.36, 0)
+	toolsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	toolsFrame.BorderSizePixel = 0
+	toolsFrame.ScrollBarThickness = 5
+	toolsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+	toolsFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	toolsFrame.Parent = popup
+
+	local toolsLayout = Instance.new("UIListLayout")
+	toolsLayout.Padding = UDim.new(0.02, 0)
+	toolsLayout.Parent = toolsFrame
+
+	local function linhaTool(texto, cor, ordem)
+		local entry = Instance.new("TextLabel")
+		entry.Size = UDim2.new(0.96, 0, 0.3, 0)
+		entry.BackgroundTransparency = 1
+		entry.Text = texto
+		entry.TextColor3 = cor
+		entry.TextScaled = true
+		entry.Font = Enum.Font.Code
+		entry.TextXAlignment = Enum.TextXAlignment.Left
+		entry.LayoutOrder = ordem
+		entry.Parent = toolsFrame
+	end
+
+	local ordemTool = 0
+	for _, nome in ipairs(toolsNormais) do
+		ordemTool = ordemTool + 1
+		linhaTool(ordemTool .. ". ⚔️ " .. nome, Color3.fromRGB(220, 220, 220), ordemTool)
+	end
+	for _, nome in ipairs(toolsDespertas) do
+		ordemTool = ordemTool + 1
+		-- Magenta é a cor de AWAKENED no resto da tela; mantém a leitura
+		linhaTool(ordemTool .. ". ⚡ " .. nome .. "  (desperta)", Color3.fromRGB(255, 100, 255), ordemTool)
+	end
+
+	if totalTools == 0 then
+		linhaTool("Nenhuma ferramenta carregada neste personagem.", Color3.fromRGB(150, 150, 150), 1)
+	end
+
 	-- Com atributos, a descrição divide espaço com eles.
-	-- Sem atributos, a descrição ocupa tudo (idêntico ao V6).
+	-- Sem atributos, a descrição ocupa o que sobra abaixo das Tools.
 	local hasStats = #statLines > 0
-	local descHeight = hasStats and 0.30 or 0.65
-	local descY = hasStats and 0.66 or 0.31
+	local descHeight = hasStats and 0.16 or 0.38
+	local descY = hasStats and 0.81 or 0.58
 
 	if hasStats then
+		-- (V8) Título para separar visualmente o que é público (as Tools)
+		-- do que é de arquétipo/admin (os atributos). Sem ele as duas
+		-- listas viravam um bloco só e ninguém sabia o que estava lendo.
+		local attrTitle = Instance.new("TextLabel")
+		attrTitle.Size = UDim2.new(0.96, 0, 0.05, 0)
+		attrTitle.Position = UDim2.new(0.02, 0, 0.575, 0)
+		attrTitle.BackgroundTransparency = 1
+		attrTitle.Text = "📊 ATRIBUTOS"
+		attrTitle.TextColor3 = Color3.fromRGB(255, 255, 0)
+		attrTitle.TextScaled = true
+		attrTitle.Font = Enum.Font.Arcade
+		attrTitle.TextXAlignment = Enum.TextXAlignment.Left
+		attrTitle.Parent = popup
+
 		local statsFrame = Instance.new("ScrollingFrame")
-		statsFrame.Size = UDim2.new(0.96, 0, 0.32, 0)
-		statsFrame.Position = UDim2.new(0.02, 0, 0.31, 0)
+		statsFrame.Size = UDim2.new(0.96, 0, 0.17, 0)
+		statsFrame.Position = UDim2.new(0.02, 0, 0.625, 0)
 		statsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 		statsFrame.BorderSizePixel = 0
 		statsFrame.ScrollBarThickness = 5
@@ -1988,6 +2124,9 @@ print([[
 ║  * Card separado da forma desperta no INVENTÁRIO     ║
 ║  * Estados claros: DESPERTO / DESBLOQUEAR / FALTA    ║
 ║    O EMBLEMA / PRECISA DO ORIGINAL                   ║
+║  * Popup de habilidades lista as FERRAMENTAS         ║
+║    carregadas (normais + despertas), lendo direto    ║
+║    de ReplicatedStorage.Characters — sem remote      ║
 ╠══════════════════════════════════════════════════════╣
 ║  V6 MUDANÇAS:                                        ║
 ║  * ABA GRÁTIS REMOVIDA (Mandatory vai direto pro     ║
