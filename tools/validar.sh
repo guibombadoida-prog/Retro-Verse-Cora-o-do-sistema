@@ -9,7 +9,7 @@
 #   4. central/ vazia (senão, promoção pendente)
 #   5. regras de código do projeto: wait()/spawn()/:Destroy()
 #   6. nome do arquivo batendo com o `-- Nome:` do cabeçalho
-#   7. sintaxe Lua de todos os scripts (se houver luac instalado)
+#   7. sintaxe Lua de todos os scripts, incluindo boss-place/ (se houver luac)
 #
 # Uso: tools/validar.sh
 # Sai com 1 se achar erro; avisos não derrubam o código de saída.
@@ -19,6 +19,10 @@ set -uo pipefail
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$RAIZ/src"
 CENTRAL="$RAIZ/central"
+# Place SEPARADA do chefão: mesma convenção interna, outro DataModel.
+# Entra na checagem de sintaxe, mas NÃO na de duplicata de família — um
+# script pode legitimamente existir nas duas places.
+BOSS="$RAIZ/boss-place"
 
 ERROS=0
 AVISOS=0
@@ -299,6 +303,11 @@ else
 	for p in "${pendentes[@]}"; do
 		SINTAXE_ALVOS+=("$p")
 	done
+	# boss-place/ também: script da place do chefe quebra o jogo do mesmo
+	# jeito que script da principal.
+	while IFS= read -r bp; do
+		[[ -n "$bp" ]] && SINTAXE_ALVOS+=("$bp")
+	done < <(find "$BOSS" -type f -name "*.lua" 2>/dev/null | sort)
 	for f in "${SINTAXE_ALVOS[@]}"; do
 		sed -E \
 			-e 's/^([[:space:]]*)([A-Za-z_][A-Za-z0-9_.]*(\[[^]]*\])?)[[:space:]]*\.\.=[[:space:]]*/\1\2 = \2 .. /' \
@@ -311,7 +320,7 @@ else
 			falha "sintaxe — ${f#$RAIZ/}: $(sed -E "s|.*x\.lua:([0-9]+): |linha \1: |" "$tmpdir/err" | head -1)"
 		fi
 	done
-	((sint_ok == ${#SINTAXE_ALVOS[@]})) && ok "$sint_ok scripts sem erro de sintaxe (src/ + central/)"
+	((sint_ok == ${#SINTAXE_ALVOS[@]})) && ok "$sint_ok scripts sem erro de sintaxe (src/ + central/ + boss-place/)"
 fi
 
 # ---------------------------------------------------------------

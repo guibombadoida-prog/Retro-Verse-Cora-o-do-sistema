@@ -3,6 +3,9 @@
 Repositório de código-fonte dos scripts do **RetroVerse** (jogo de combate no Roblox),
 da Retro-Verse Studios.
 
+O projeto tem **duas Places** do Roblox: a principal (`133619220682618`) em `src/`,
+e a Place do Chefão em `boss-place/`. Cada uma tem seu próprio DataModel.
+
 A árvore de pastas em `src/` **espelha exatamente a hierarquia do Roblox Studio**.
 O caminho do arquivo é o lugar onde o script vive no Studio — não existe adivinhação:
 
@@ -23,6 +26,7 @@ src/ServerScriptService/DataManager.server.lua
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
 | `src/ReplicatedFirst/` | `ReplicatedFirst` | 1 `LocalScript` (tela de carregamento) |
 | `docs/` | — | Diretrizes formais e mapa da arquitetura |
+| `boss-place/` | **outra Place do Roblox** | Scripts exclusivos da Place do Chefão — ver `boss-place/LEIA-ME.md` |
 | `central/` | — | **Aguardando instalação no Studio.** Vazia = tudo sincronizado |
 | `tools/` | — | `promover.sh` (confirma instalação no Studio) e `validar.sh` (7 checagens) |
 
@@ -135,7 +139,7 @@ git show <commit>:src/ServerScriptService/DataManager.server.lua > recuperado.lu
 | 4 | `central/` vazia | Lista o que falta colar no Studio, e qual versão substitui |
 | 5 | `wait()` / `spawn()` / `:Destroy()` | As regras de código do projeto, ignorando comentário e bloco `--[[ ]]` |
 | 6 | Nome do arquivo × `-- Nome:` | O caminho do arquivo é a instrução de instalação; divergência faz colar no lugar errado |
-| 7 | Sintaxe (`src/` + `central/`) | Pega erro de estrutura antes de você colar no Studio |
+| 7 | Sintaxe (`src/` + `central/` + `boss-place/`) | Pega erro de estrutura antes de você colar no Studio |
 
 Sai com código 1 se achar erro, então dá para usar como *gate* antes de comitar.
 
