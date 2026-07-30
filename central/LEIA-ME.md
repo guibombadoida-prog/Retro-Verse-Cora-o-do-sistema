@@ -1,63 +1,68 @@
-# central/ — área de trânsito
+# central/ — aguardando instalação no Studio
 
-Esta pasta é **passagem, não depósito**. O normal é ela estar vazia.
+**O que está nesta pasta ainda NÃO está rodando no jogo.**
 
-## Para que serve
-
-Uma versão nova de script chega aqui, é promovida para a pasta ativa em `src/`, e
-a pasta volta a ficar vazia. Nada mora aqui permanentemente.
-
-```
-        versão nova chega
-               ↓
-          central/  ←──── área de trânsito (esta pasta)
-               ↓  tools/promover.sh
-   src/<local do Studio>/  ←── pasta específica: a versão ATIVA
-               ↓
-      versão antiga é APAGADA
-   (fica no histórico do Git, recuperável)
-```
+É a sua lista de pendências: script entregue, revisado, mas que ainda precisa
+ser colado no Roblox Studio.
 
 ## A regra que isto garante
 
-**Existe exatamente uma versão de cada script no repositório: a atual.**
+**`src/` espelha o que está rodando no Studio agora. `central/` é o que falta subir.**
 
-Sem cópia de segurança em pasta paralela, sem `_V6` ao lado de `_V8`, sem dúvida
-sobre qual arquivo é o que está no jogo. O que está em `src/` é o que está valendo.
+`central/` vazia (só este arquivo) = repositório e Studio em sincronia, nada pendente.
 
-O histórico faz o papel de arquivo morto — é para isso que ele existe:
-
-```bash
-# ver como o DataManager era antes
-git log --oneline -- src/ServerScriptService/DataManager.server.lua
-
-# recuperar uma versão apagada
-git show <commit>:src/ServerScriptService/DataManager.server.lua > recuperado.lua
+```
+   script alterado / novo
+            ↓
+       central/          ←── ENTREGUE, mas ainda não está no jogo
+            ↓  você cola no Studio
+            ↓  tools/promover.sh   ("já instalei")
+ src/<local do Studio>/  ←── o que está REALMENTE rodando
+            ↓
+   versão anterior APAGADA
+   (fica no histórico do Git)
 ```
 
-## Como usar
+Nenhum arquivo existe nos dois lugares ao mesmo tempo — é isso que mata a
+duplicação. Cada versão está em `central/` **ou** em `src/`, nunca nos dois.
+
+## Seu ciclo de trabalho
 
 ```bash
-# 1. coloque a versão nova aqui, com a versão no nome
-#    central/SpawnSystem_V9.server.lua
-
-# 2. promova
-tools/promover.sh SpawnSystem_V9.server.lua
-
-# ou promova tudo que estiver aqui de uma vez
-tools/promover.sh --todos
-
-# 3. confira
+# 1. veja o que está pendente
 tools/validar.sh
+#    → AGUARDA INSTALAÇÃO NO STUDIO: AwakeningSystemServer_V3.server.lua
+#      (substitui V2 que está no ar)
+
+# 2. cole o script no Studio, no local e nome que o cabeçalho manda,
+#    apagando a versão anterior
+
+# 3. confirme que instalou
+tools/promover.sh AwakeningSystemServer_V3.server.lua
+
+# 4. comite
+git add -A && git commit -m "AwakeningSystemServer V2 -> V3 instalado"
 ```
 
-O `promover.sh` **não adivinha** o destino: ele lê `-- Nome:` e `-- Coloque em ...`
-do cabeçalho do próprio script. Se o cabeçalho estiver no padrão do projeto, o
-arquivo vai para o lugar certo sozinho.
+⚠️ **Rode o `promover.sh` só DEPOIS de colar no Studio.** Antes disso o `src/`
+estaria mentindo sobre o que está no ar.
+
+## Cabeçalho de entrega
+
+Toda alteração vem acompanhada de:
+
+```
+## Scripts Entregues — [Sistema]
+Scripts Novos:        [Nome_V1] — o que faz
+Scripts Modificados:  [Nome_V1] → [Nome_V2] — o que mudou
+Scripts Substituídos: ⚠️ REMOVER [Nome_V1]
+```
+
+Se um script aparecer aqui sem esse cabeçalho no chat, cobre.
 
 ## Nome do arquivo aqui
 
-Use `NomeDoScript_V<n>` + o sufixo de classe:
+`NomeDoScript_V<n>` + o sufixo de classe:
 
 | Classe no Studio | Sufixo |
 |---|---|
@@ -65,9 +70,21 @@ Use `NomeDoScript_V<n>` + o sufixo de classe:
 | `LocalScript` | `.client.lua` |
 | `ModuleScript` | `.lua` |
 
-Exemplos: `SpawnSystem_V9.server.lua` · `HealthDisplay_V5.client.lua` ·
+Exemplos: `AwakeningSystemServer_V3.server.lua` · `HealthDisplay_V5.client.lua` ·
 `PassiveCatalog_V2.lua`
 
-O `_V<n>` existe só aqui, para você saber o que está promovendo. Ao entrar em
+O `_V<n>` existe só aqui, para você saber o que está instalando. Ao entrar em
 `src/` o arquivo assume o nome do objeto no Studio, sem versão — porque é aquele
 nome que o Studio precisa ver.
+
+O `promover.sh` não adivinha o destino: lê `-- Nome:` e `-- Coloque em ...` do
+cabeçalho do próprio script.
+
+## Recuperar uma versão anterior
+
+Apagar não perde nada:
+
+```bash
+git log --oneline -- src/ServerScriptService/AwakeningSystemServer.server.lua
+git show <commit>:src/ServerScriptService/AwakeningSystemServer.server.lua > antiga.lua
+```

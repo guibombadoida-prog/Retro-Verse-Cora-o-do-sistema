@@ -18,7 +18,7 @@ de cada arquivo e o mapa de dependências entre eles.
 | `AdminSystemServer.server.lua` | `AdminSystemServer` | V8 | Comandos e ações de admin |
 | `AntiLag.server.lua` | *(não declarado)* | V2 | Varre a Workspace e remove objetos de lag sem tocar em materiais/VFX |
 | `AntiToolSystem.server.lua` | `AntiToolSystem` | V2 | Bloqueio de ferramentas indevidas |
-| `AwakeningSystemServer.server.lua` | `AwakeningSystemServer` | V2 | Sistema de Despertar (personagens evoluídos) |
+| `AwakeningSystemServer.server.lua` | `AwakeningSystemServer` | V2 | Sistema de Despertar (personagens evoluídos). ⚠️ **V3 em `central/`, aguardando instalação** — corrige a criação de Despertar sem personagem original |
 | `BossRaidServer.server.lua` | `BossRaidServer` | V2 | Catálogo de bosses via DataStore + teleporte para a *place* do chefe |
 | `CharacterCatalogServer.server.lua` | `CharacterCatalogServer` | V6 | Catálogo de personagens 100% dinâmico |
 | `CharacterLevelServer.server.lua` | `CharacterLevelServer` | V1 | Nível **por personagem** (1–30): curva de XP, slots de passiva e energia |

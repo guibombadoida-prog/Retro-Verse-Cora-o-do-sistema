@@ -177,10 +177,21 @@ titulo "4. Área de trânsito (central/)"
 
 mapfile -t pendentes < <(find "$CENTRAL" -maxdepth 1 -type f -name "*.lua" 2>/dev/null | sort)
 if ((${#pendentes[@]} == 0)); then
-	ok "central/ vazia — tudo que existe está ativo e atual"
+	ok "central/ vazia — repositório e Studio em sincronia"
 else
 	for p in "${pendentes[@]}"; do
-		aviso "promoção pendente: ${p#$RAIZ/}  (rode: tools/promover.sh $(basename "$p"))"
+		base_p="$(basename "$p")"
+		fam_p="$(familia_de "$p")"
+		# Qual versão está no ar agora, para o aviso dizer o que substitui
+		no_ar=""
+		for a in "${ATIVOS[@]}"; do
+			if [[ "$(familia_de "$a")" == "$fam_p" ]]; then
+				no_ar=" (substitui $(head -12 "$a" | grep -oiE '\bV[0-9]+' | head -1) que está no ar)"
+				break
+			fi
+		done
+		aviso "AGUARDA INSTALAÇÃO NO STUDIO: $base_p$no_ar"
+		printf '      após colar no Studio, rode: tools/promover.sh %s\n' "$base_p"
 	done
 fi
 
@@ -282,7 +293,13 @@ else
 	tmpdir="$(mktemp -d)"
 	trap 'rm -rf "$tmpdir"' EXIT
 	sint_ok=0
-	for f in "${ATIVOS[@]}"; do
+	# central/ entra aqui de propósito: um script entregue com erro de
+	# sintaxe tem que ser pego ANTES de ser colado no Studio, não depois.
+	SINTAXE_ALVOS=("${ATIVOS[@]}")
+	for p in "${pendentes[@]}"; do
+		SINTAXE_ALVOS+=("$p")
+	done
+	for f in "${SINTAXE_ALVOS[@]}"; do
 		sed -E \
 			-e 's/^([[:space:]]*)([A-Za-z_][A-Za-z0-9_.]*(\[[^]]*\])?)[[:space:]]*\.\.=[[:space:]]*/\1\2 = \2 .. /' \
 			-e 's/^([[:space:]]*)([A-Za-z_][A-Za-z0-9_.]*(\[[^]]*\])?)[[:space:]]*([+*\/%^-])=[[:space:]]*/\1\2 = \2 \4 /' \
@@ -294,7 +311,7 @@ else
 			falha "sintaxe — ${f#$RAIZ/}: $(sed -E "s|.*x\.lua:([0-9]+): |linha \1: |" "$tmpdir/err" | head -1)"
 		fi
 	done
-	((sint_ok == ${#ATIVOS[@]})) && ok "$sint_ok scripts sem erro de sintaxe"
+	((sint_ok == ${#SINTAXE_ALVOS[@]})) && ok "$sint_ok scripts sem erro de sintaxe (src/ + central/)"
 fi
 
 # ---------------------------------------------------------------

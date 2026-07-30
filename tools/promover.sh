@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 #
-# promover.sh — promove uma versão nova de central/ para a pasta ativa em src/
+# promover.sh — CONFIRMA que uma versão de central/ já foi instalada
+#                no Studio, movendo-a para a pasta ativa em src/
 #
-# O que faz, em uma tacada:
+# ⚠️ RODE ISTO DEPOIS DE COLAR O SCRIPT NO STUDIO, não antes.
+#
+# A regra do repositório: src/ espelha o que está RODANDO no Studio.
+# Enquanto um script está em central/, ele foi entregue mas ainda não
+# subiu no jogo. Este comando é o "já instalei":
 #   1. descobre a qual script a versão nova pertence
-#   2. apaga a versão que estava ativa (o Git guarda o histórico)
+#   2. apaga a versão anterior de src/ (o Git guarda o histórico)
 #   3. move a nova para o lugar exato do Studio
 #
 # Uso:
-#   tools/promover.sh SpawnSystem_V9.server.lua
+#   tools/promover.sh AwakeningSystemServer_V3.server.lua
 #   tools/promover.sh central/DataManager_V9.server.lua
-#   tools/promover.sh --todos          # promove tudo que estiver em central/
+#   tools/promover.sh --todos          # confirma tudo que estiver em central/
 #
 # O destino não é adivinhado: vem do cabeçalho do próprio script
 # (`-- Nome: "..."` e `-- Coloque em ...`), a mesma convenção que o
@@ -161,7 +166,7 @@ promover() {
 		fi
 
 		git -C "$RAIZ" rm -q -f "$antigo"
-		verde "  ✓ removido  ${antigo#$RAIZ/}  ($versao_antiga)  — recuperável no histórico do Git"
+		verde "  ✓ saiu do ar  ${antigo#$RAIZ/}  ($versao_antiga)  — recuperável no histórico do Git"
 	fi
 
 	# ---- move a nova para o lugar ----
@@ -172,7 +177,7 @@ promover() {
 		mv -f "$novo" "$destino"
 		git -C "$RAIZ" add "$destino"
 	fi
-	verde "  ✓ promovido ${novo#$RAIZ/} → ${destino#$RAIZ/}  ($versao_nova)"
+	verde "  ✓ no ar      ${novo#$RAIZ/} → ${destino#$RAIZ/}  ($versao_nova)"
 }
 
 # ---------------------------------------------------------------
@@ -182,7 +187,7 @@ promover() {
 git -C "$RAIZ" rev-parse --git-dir >/dev/null 2>&1 || erro "isto precisa rodar dentro do repositório Git"
 
 if (($# == 0)); then
-	sed -n '3,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+	sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 	exit 1
 fi
 
@@ -192,7 +197,7 @@ if [[ "$1" == "--todos" ]]; then
 		alvos+=("$f")
 	done < <(find "$CENTRAL" -maxdepth 1 -type f -name "*.lua" | sort)
 	((${#alvos[@]} > 0)) || {
-		amarelo "central/ está vazia — nada a promover"
+		amarelo "central/ está vazia — nada pendente de instalação no Studio"
 		exit 0
 	}
 else
@@ -214,3 +219,4 @@ done
 
 echo
 amarelo "Rode 'tools/validar.sh' antes de comitar."
+amarelo "Lembre: isto só vale se o script JÁ estiver colado no Studio."

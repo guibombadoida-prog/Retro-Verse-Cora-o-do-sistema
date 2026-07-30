@@ -23,8 +23,8 @@ src/ServerScriptService/DataManager.server.lua
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
 | `src/ReplicatedFirst/` | `ReplicatedFirst` | 1 `LocalScript` (tela de carregamento) |
 | `docs/` | — | Diretrizes formais e mapa da arquitetura |
-| `central/` | — | Área de **trânsito** para versão nova. Normalmente vazia |
-| `tools/` | — | `promover.sh` (troca de versão) e `validar.sh` (conferência) |
+| `central/` | — | **Aguardando instalação no Studio.** Vazia = tudo sincronizado |
+| `tools/` | — | `promover.sh` (confirma instalação no Studio) e `validar.sh` (7 checagens) |
 
 ### Convenção de extensão
 
@@ -56,40 +56,65 @@ com sufixo de versão — o nome do arquivo respeita isso:
 
 ## 🔄 Fluxo de atualização de script
 
-**A regra: existe exatamente uma versão de cada script no repositório — a atual.**
+**Duas regras, e é o que faz este repositório valer algo:**
 
-Não há pasta de versões antigas em paralelo. Nada de `_V6` ao lado de `_V8`, nada de
-dúvida sobre qual arquivo é o que está no jogo. O que está em `src/` é o que está
-valendo. O histórico do Git faz o papel de arquivo morto.
+1. **`src/` espelha o que está rodando no Studio agora.** Não "o mais novo que
+   existe" — o que está *no ar*.
+2. **`central/` é o que falta subir.** Vazia = repositório e Studio em sincronia.
+
+Existe exatamente uma versão de cada script no repositório, em `central/` **ou** em
+`src/`, nunca nos dois. Nada de `_V6` ao lado de `_V8`. O histórico do Git faz o
+papel de arquivo morto.
 
 ```
-      versão nova chega
-             ↓
-        central/  ←──── trânsito (normalmente vazia)
-             ↓  tools/promover.sh
- src/<local do Studio>/  ←── pasta específica: a versão ATIVA
-             ↓
-    versão antiga APAGADA
- (fica no histórico do Git)
+   script alterado / novo
+            ↓
+       central/          ←── ENTREGUE, mas ainda não está no jogo
+            ↓  você cola no Studio
+            ↓  tools/promover.sh   ("já instalei")
+ src/<local do Studio>/  ←── o que está REALMENTE rodando
+            ↓
+   versão anterior APAGADA
+   (fica no histórico do Git)
 ```
 
 ### Na prática
 
 ```bash
-# 1. ponha a versão nova em central/, com a versão no nome
-#    central/SpawnSystem_V9.server.lua
-
-# 2. promova — apaga a V8 ativa e põe a V9 no lugar exato
-tools/promover.sh SpawnSystem_V9.server.lua
-
-# 3. confira que nada duplicou nem quebrou
+# 1. veja o que está pendente de instalação
 tools/validar.sh
+#    → AGUARDA INSTALAÇÃO NO STUDIO: AwakeningSystemServer_V3.server.lua
+#      (substitui V2 que está no ar)
+
+# 2. cole no Studio, no local e nome que o cabeçalho manda,
+#    apagando a versão anterior
+
+# 3. confirme que instalou
+tools/promover.sh AwakeningSystemServer_V3.server.lua
+
+# 4. comite
+git add -A && git commit -m "AwakeningSystemServer V2 -> V3 instalado"
 ```
+
+⚠️ **`promover.sh` só depois de colar no Studio.** Antes disso o `src/` estaria
+mentindo sobre o que está no ar — e é justamente essa mentira que o fluxo existe
+para impedir.
 
 O `promover.sh` não adivinha nada: o destino sai do `-- Nome:` e do
 `-- Coloque em ...` do cabeçalho do próprio script. Ele também **se recusa** a
 apagar um arquivo que ainda não foi comitado, porque aí a versão antiga seria
 perdida de verdade em vez de ir para o histórico.
+
+### Cabeçalho de entrega
+
+Toda alteração de script vem acompanhada disto, no chat:
+
+```
+## Scripts Entregues — [Sistema]
+Scripts Novos:        [Nome_V1] — o que faz
+Scripts Modificados:  [Nome_V1] → [Nome_V2] — o que mudou
+Scripts Substituídos: ⚠️ REMOVER [Nome_V1]
+```
 
 ### Recuperar uma versão apagada
 
@@ -107,9 +132,10 @@ git show <commit>:src/ServerScriptService/DataManager.server.lua > recuperado.lu
 | 1 | Duplicata de família em `src/` | É a regra "nunca dois scripts da mesma família rodando ao mesmo tempo", virando checagem em vez de disciplina |
 | 2 | Barreiras `repeat ... until _G.X` | Se a dependência não existir, o script espera **para sempre sem erro no Output** — a falha mais difícil de achar no projeto |
 | 3 | APIs `_G` sem dono | Pega dependência quebrada antes de virar bug em jogo |
-| 4 | `central/` vazia | Avisa se sobrou promoção pendente |
+| 4 | `central/` vazia | Lista o que falta colar no Studio, e qual versão substitui |
 | 5 | `wait()` / `spawn()` / `:Destroy()` | As regras de código do projeto, ignorando comentário e bloco `--[[ ]]` |
 | 6 | Nome do arquivo × `-- Nome:` | O caminho do arquivo é a instrução de instalação; divergência faz colar no lugar errado |
+| 7 | Sintaxe (`src/` + `central/`) | Pega erro de estrutura antes de você colar no Studio |
 
 Sai com código 1 se achar erro, então dá para usar como *gate* antes de comitar.
 
