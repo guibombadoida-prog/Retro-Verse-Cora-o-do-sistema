@@ -23,7 +23,8 @@ src/ServerScriptService/DataManager.server.lua
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
 | `src/ReplicatedFirst/` | `ReplicatedFirst` | 1 `LocalScript` (tela de carregamento) |
 | `docs/` | — | Diretrizes formais e mapa da arquitetura |
-| `legacy/` | — | Versões **substituídas**, guardadas só como histórico |
+| `central/` | — | Área de **trânsito** para versão nova. Normalmente vazia |
+| `tools/` | — | `promover.sh` (troca de versão) e `validar.sh` (conferência) |
 
 ### Convenção de extensão
 
@@ -50,6 +51,67 @@ com sufixo de versão — o nome do arquivo respeita isso:
 - `TutorialMenuClient_V2.client.lua` (código na V6)
 - `NPC_Server_V2.server.lua` (código na V2)
 - `RetroVerse/NucleoCombate_V2.lua` (exigido pelo `require`)
+
+---
+
+## 🔄 Fluxo de atualização de script
+
+**A regra: existe exatamente uma versão de cada script no repositório — a atual.**
+
+Não há pasta de versões antigas em paralelo. Nada de `_V6` ao lado de `_V8`, nada de
+dúvida sobre qual arquivo é o que está no jogo. O que está em `src/` é o que está
+valendo. O histórico do Git faz o papel de arquivo morto.
+
+```
+      versão nova chega
+             ↓
+        central/  ←──── trânsito (normalmente vazia)
+             ↓  tools/promover.sh
+ src/<local do Studio>/  ←── pasta específica: a versão ATIVA
+             ↓
+    versão antiga APAGADA
+ (fica no histórico do Git)
+```
+
+### Na prática
+
+```bash
+# 1. ponha a versão nova em central/, com a versão no nome
+#    central/SpawnSystem_V9.server.lua
+
+# 2. promova — apaga a V8 ativa e põe a V9 no lugar exato
+tools/promover.sh SpawnSystem_V9.server.lua
+
+# 3. confira que nada duplicou nem quebrou
+tools/validar.sh
+```
+
+O `promover.sh` não adivinha nada: o destino sai do `-- Nome:` e do
+`-- Coloque em ...` do cabeçalho do próprio script. Ele também **se recusa** a
+apagar um arquivo que ainda não foi comitado, porque aí a versão antiga seria
+perdida de verdade em vez de ir para o histórico.
+
+### Recuperar uma versão apagada
+
+Apagar não perde nada — só sai do caminho:
+
+```bash
+git log --oneline -- src/ServerScriptService/DataManager.server.lua
+git show <commit>:src/ServerScriptService/DataManager.server.lua > recuperado.lua
+```
+
+### O que o `validar.sh` confere
+
+| # | Checagem | Por que importa |
+|:--:|---|---|
+| 1 | Duplicata de família em `src/` | É a regra "nunca dois scripts da mesma família rodando ao mesmo tempo", virando checagem em vez de disciplina |
+| 2 | Barreiras `repeat ... until _G.X` | Se a dependência não existir, o script espera **para sempre sem erro no Output** — a falha mais difícil de achar no projeto |
+| 3 | APIs `_G` sem dono | Pega dependência quebrada antes de virar bug em jogo |
+| 4 | `central/` vazia | Avisa se sobrou promoção pendente |
+| 5 | `wait()` / `spawn()` / `:Destroy()` | As regras de código do projeto, ignorando comentário e bloco `--[[ ]]` |
+| 6 | Nome do arquivo × `-- Nome:` | O caminho do arquivo é a instrução de instalação; divergência faz colar no lugar errado |
+
+Sai com código 1 se achar erro, então dá para usar como *gate* antes de comitar.
 
 ---
 
@@ -111,6 +173,22 @@ Válidas para qualquer script novo ou alterado:
 - `ResetOnSpawn = false` em `ScreenGui` persistente
 - Nunca dois scripts da mesma família rodando ao mesmo tempo — ao subir uma versão
   nova, o cabeçalho informa qual remover
+
+O `tools/validar.sh` confere as três primeiras automaticamente.
+
+### ⚠️ Uma exceção pendente de decisão
+
+`src/ServerScriptService/AntiLag.server.lua:56` usa `obj:Destroy()`, contra a regra.
+É código anterior a esta organização e **não foi alterado** — a regra diz "nunca
+`:Destroy()` **sem autorização**", e trocar por `.Parent = nil` num script cuja
+função é justamente remover objetos de lag é decisão sua, não automática.
+
+Está registrado em `EXCECOES_DESTROY`, no topo do `validar.sh`, e aparece como aviso
+em toda execução — para não sumir de vista nem deixar o validador vermelho para
+sempre. Ao decidir, tire da lista.
+
+Vale notar que os outros 29 casos de `:Destroy()` no repositório são todos
+comentários do tipo `-- regra do projeto: sem :Destroy()`. Só este é código de verdade.
 
 ## 💾 DataStore
 
