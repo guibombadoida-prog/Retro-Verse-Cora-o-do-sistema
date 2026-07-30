@@ -117,7 +117,12 @@ titulo "2. Barreiras de espera (repeat ... until _G.X)"
 # Se a dependência não existir, o repeat espera para sempre SEM erro no
 # Output. É a falha mais difícil de diagnosticar no projeto.
 
-mapfile -t DEFINIDAS < <(grep -rhoE '_G\.[A-Za-z_][A-Za-z0-9_]* *=[^=]' "$SRC" |
+# (correção) Só CÓDIGO. Antes isto varria o arquivo inteiro, então uma
+# menção a `_G.Alguma` dentro de um comentário de cabeçalho contava como
+# dependência real — e um `_G.X` escrito em prosa explicativa virava erro.
+CODIGO_TODO="$(somente_codigo "${ATIVOS[@]}")"
+
+mapfile -t DEFINIDAS < <(grep -oE '_G\.[A-Za-z_][A-Za-z0-9_]* *=[^=]' <<<"$CODIGO_TODO" |
 	sed -E 's/_G\.//; s/ *=.*//' | sort -u)
 
 esta_definida() {
@@ -153,7 +158,7 @@ done < <(grep -rn --include=*.lua -E '^[[:space:]]*until[[:space:]]+_G\.' "$SRC"
 titulo "3. APIs _G consumidas sem dono"
 # ---------------------------------------------------------------
 
-mapfile -t CONSUMIDAS < <(grep -rhoE '_G\.[A-Za-z_][A-Za-z0-9_]*' "$SRC" | sed 's/_G\.//' | sort -u)
+mapfile -t CONSUMIDAS < <(grep -oE '_G\.[A-Za-z_][A-Za-z0-9_]*' <<<"$CODIGO_TODO" | sed 's/_G\.//' | sort -u)
 
 orfas=()
 for api in "${CONSUMIDAS[@]}"; do
@@ -203,7 +208,7 @@ fi
 titulo "5. Regras de código do projeto"
 # ---------------------------------------------------------------
 
-codigo="$(somente_codigo "${ATIVOS[@]}")"
+codigo="$CODIGO_TODO"
 
 conta_e_reporta() {
 	local rotulo="$1" padrao="$2" excluir="$3" excecoes="${4:-}"
