@@ -1,11 +1,49 @@
 -- ============================================
--- AWAKENING SYSTEM SERVER V2 — DESPERTAR (SEM STUDIO)
+-- AWAKENING SYSTEM SERVER V3 — DESPERTAR (SEM STUDIO)
 -- Coloque em ServerScriptService
 -- Nome: "AwakeningSystemServer"
--- SUBSTITUI: AwakeningSystemServer V1
--- REMOVER:   AwakeningSystemServer V1
--- DEPENDE DE: AdminRegistryServer_V1 (novo, no ServerScriptService)
---             GameManager_V9 (usa AwakenedForm)
+-- SUBSTITUI: AwakeningSystemServer V2
+-- REMOVER:   AwakeningSystemServer V2
+-- DEPENDE DE: AdminRegistryServer_V1, GameManager_V9 (usa AwakenedForm),
+--             CharacterCatalogServer_V6 (_G.CharacterCatalog — NOVO no V3)
+-- ============================================
+-- (V3) BUG GRAVE CORRIGIDO — DESPERTAR SOLTO, SEM ORIGINAL
+--
+-- Um Despertar existe SEMPRE em cima de um personagem que já existe.
+-- No V2 dava para criar um Despertar do nada, e o resultado era um
+-- personagem destravado só por Badge — ou seja, um personagem de
+-- emblema comum, criado pela porta errada.
+--
+-- 🐛 CAUSA 1 — VALIDAÇÃO NÃO OLHAVA O CATÁLOGO.
+--    `validatePayload` conferia tamanho do nome e Badge ID, e nada
+--    mais. Digitar "Gokú" (ou qualquer nome inventado, ou um nome
+--    certo com erro de digitação) passava direto.
+--
+-- 🐛 CAUSA 2 — A CONSTRUÇÃO CRIAVA O PERSONAGEM FANTASMA.
+--    `buildAwakenedAssets` fazia:
+--        if not baseFolder then ... baseFolder.Parent = charactersFolder
+--    Ou seja: personagem não existia, então ele CRIAVA a pasta em
+--    ReplicatedStorage.Characters. Isso dava ao fantasma a mesma
+--    estrutura de um personagem de verdade, e é por isso que ele
+--    "virava um personagem de emblema normal".
+--
+--    Efeito colateral cruel: como `ownsCharacter(player, fantasma)`
+--    é sempre falso, NINGUÉM conseguia desbloquear aquele Despertar.
+--    Era configuração morta sujando o ReplicatedStorage e a lista do
+--    painel admin, sem nenhum erro no Output.
+--
+-- ✅ CORREÇÃO:
+--    • `validatePayload` agora exige que o personagem exista no
+--      catálogo (_G.CharacterCatalog.getDefinition). Sem original,
+--      o painel recebe "Personagem 'X' não existe no catálogo".
+--    • `buildAwakenedAssets` NUNCA cria a pasta base. Se ela não
+--      existe, ele recusa e devolve erro.
+--    • `bootLoadAwakenings` espera o catálogo carregar antes de
+--      reconstruir (senão a checagem acusaria falso negativo na
+--      corrida de boot) e agora ACUSA os Despertares órfãos que o
+--      V2 já pode ter salvo, em vez de recriar o fantasma.
+--    • `_G.DebugAwakening()` marca os órfãos com ⚠️ e explica como
+--      limpar.
 -- ============================================
 -- (V2) ALTERAÇÕES:
 -- • LISTA "ADMIN_IDS" REMOVIDA DO CÓDIGO (o V1 tinha só
@@ -63,6 +101,10 @@ local CONFIG = {
 	STORE_NAME = "RVAwakeningCatalogV1",
 	SYNC_TOPIC = "RVAwakeningSync",
 	LOAD_RETRIES = 2,
+	-- (V3) Segundos de espera pelo catálogo no boot antes de reconstruir
+	-- os Despertares. Sem essa espera, a checagem de personagem original
+	-- rodaria com o catálogo vazio e marcaria tudo como órfão.
+	CATALOG_WAIT = 30,
 }
 
 -- (V2) Admin dinâmico via registro central
@@ -124,6 +166,41 @@ local catalogAnnouncement = ensureRemote("CatalogAnnouncement", "RemoteEvent") -
 
 local awakenDefs = {} -- [characterName] = definição
 
+-- (V3) Despertares salvos cujo personagem original não existe. Ficam
+-- FORA de awakenDefs (não são construídos nem ficam equipáveis), mas
+-- são guardados aqui para aparecerem na lista do painel admin — senão
+-- o admin não teria como removê-los.
+local orphanDefs = {} -- [characterName] = definição
+local orphanNames = {} -- ordem de descoberta, para a mensagem de boot
+
+-- =====================================
+-- (V3) O ORIGINAL EXISTE?
+-- =====================================
+-- Um Despertar é uma FORMA de um personagem existente, nunca um
+-- personagem por conta própria. Esta é a única função que responde
+-- isso, e todo caminho de criação passa por ela.
+--
+-- A autoridade é o catálogo (_G.CharacterCatalog, respaldado por
+-- DataStore), não a pasta em ReplicatedStorage — a pasta é efeito,
+-- não causa. Se o catálogo não estiver instalado, cai para a pasta
+-- como último recurso, mas nunca dá o "sim" de graça.
+
+local function originalExists(name)
+	if type(name) ~= "string" or #name < 2 then
+		return false
+	end
+
+	if _G.CharacterCatalog and _G.CharacterCatalog.getDefinition then
+		local ok, def = pcall(_G.CharacterCatalog.getDefinition, name)
+		if ok then
+			return def ~= nil
+		end
+	end
+
+	-- Sem catálogo disponível: a pasta é o que sobra para consultar
+	return charactersFolder:FindFirstChild(name) ~= nil
+end
+
 _G.AwakeningSystem = {
 	getDefinition = function(name)
 		return awakenDefs[name]
@@ -175,7 +252,7 @@ local function enforceToolRules(tool)
 	if not tool:FindFirstChild("Handle") then
 		warn(
 			string.format(
-				"[AWAKENING V2] ⚠️ Tool '%s' carregada SEM Handle — não vai funcionar até corrigir o modelo de origem.",
+				"[AWAKENING V3] ⚠️ Tool '%s' carregada SEM Handle — não vai funcionar até corrigir o modelo de origem.",
 				tool.Name
 			)
 		)
@@ -188,12 +265,19 @@ end
 -- GameManager_V9 já sabe procurar aqui quando hasAwakening é true.
 -- =====================================
 
+-- Devolve: lista de avisos, erro (string) ou nil
+-- Erro não-nil significa que NADA foi construído.
 local function buildAwakenedAssets(def)
+	-- (V3) NUNCA criar a pasta base aqui. O V2 criava, e era isso que
+	-- transformava um nome inventado num personagem de aparência
+	-- legítima em ReplicatedStorage.Characters. A pasta base é
+	-- responsabilidade exclusiva do CharacterCatalogServer.
 	local baseFolder = charactersFolder:FindFirstChild(def.characterName)
 	if not baseFolder then
-		baseFolder = Instance.new("Folder")
-		baseFolder.Name = def.characterName
-		baseFolder.Parent = charactersFolder
+		return {}, string.format(
+			"Personagem '%s' não existe — o Despertar precisa de um personagem original. Crie o personagem no catálogo primeiro.",
+			def.characterName
+		)
 	end
 
 	local oldAwakened = baseFolder:FindFirstChild("AwakenedForm")
@@ -240,7 +324,7 @@ local function buildAwakenedAssets(def)
 		table.insert(warnings, "Sem Image ID — forma despertada ficará sem aparência própria")
 	end
 
-	return warnings
+	return warnings, nil
 end
 
 local function removeAwakenedAssets(name)
@@ -328,6 +412,18 @@ local function validatePayload(payload)
 	if payload.toolIds and #payload.toolIds > CONFIG.MAX_TOOLS_PER_CHARACTER then
 		return false, "Máximo de " .. CONFIG.MAX_TOOLS_PER_CHARACTER .. " Tools na forma despertada!"
 	end
+
+	-- (V3) A REGRA QUE FALTAVA: sem personagem original, não há
+	-- Despertar. Um Despertar destravado só por Badge, sem original,
+	-- é um personagem de emblema comum criado pela porta errada.
+	if not originalExists(payload.characterName) then
+		return false,
+			string.format(
+				"Personagem '%s' não existe no catálogo! O Despertar é uma FORMA de um personagem que já existe — crie o personagem primeiro na aba CATÁLOGO. (Confira também se o nome está escrito exatamente igual.)",
+				payload.characterName
+			)
+	end
+
 	return true, "OK"
 end
 
@@ -365,16 +461,24 @@ local function applyRemoteChange(action, name, adminName, isUpdate)
 	if action == "set" then
 		local def = loadDefinition(name)
 		if def then
-			local warnings = buildAwakenedAssets(def)
+			-- (V3) Se o original não existe neste servidor, não constrói
+			-- nem registra. Antes isso criava o fantasma aqui também,
+			-- espalhando o problema para toda a frota de servidores.
+			local warnings, err = buildAwakenedAssets(def)
+			if err then
+				warn("[AWAKENING V3] Sync de '" .. name .. "' ignorado: " .. err)
+				return
+			end
 			awakenDefs[name] = def
 			broadcastAnnouncementLocally(setAnnouncementText(adminName, name, isUpdate), true)
 			if #warnings > 0 then
-				warn("[AWAKENING V2] Avisos ao sincronizar '" .. name .. "': " .. table.concat(warnings, " | "))
+				warn("[AWAKENING V3] Avisos ao sincronizar '" .. name .. "': " .. table.concat(warnings, " | "))
 			end
 		end
 	elseif action == "remove" then
 		removeAwakenedAssets(name)
 		awakenDefs[name] = nil
+		orphanDefs[name] = nil -- (V3)
 		broadcastAnnouncementLocally(
 			string.format("🗑️ %s removeu o Despertar de '%s'!", adminName or "Um admin", name),
 			false
@@ -421,8 +525,17 @@ adminSetAwakening.OnServerInvoke = function(player, payload)
 		addedAt = os.time(),
 	}
 
-	local warnings = buildAwakenedAssets(def)
+	-- (V3) Segunda barreira, de propósito. O validatePayload já barrou
+	-- o caso normal; esta pega a corrida em que o personagem é apagado
+	-- do catálogo entre a validação e a construção. Nada é salvo nem
+	-- propagado se a construção recusar.
+	local warnings, err = buildAwakenedAssets(def)
+	if err then
+		return false, err
+	end
+
 	awakenDefs[def.characterName] = def
+	orphanDefs[def.characterName] = nil -- (V3) deixou de ser órfão
 	saveDefinition(def)
 
 	publishSync("set", def.characterName, player.Name, isUpdate)
@@ -430,7 +543,7 @@ adminSetAwakening.OnServerInvoke = function(player, payload)
 
 	print(
 		string.format(
-			"[AWAKENING V2] %s %s Despertar de '%s'",
+			"[AWAKENING V3] %s %s Despertar de '%s'",
 			player.Name,
 			isUpdate and "atualizou" or "configurou",
 			def.characterName
@@ -457,6 +570,7 @@ adminRemoveAwakening.OnServerInvoke = function(player, characterName)
 
 	removeAwakenedAssets(characterName)
 	awakenDefs[characterName] = nil
+	orphanDefs[characterName] = nil -- (V3) limpar órfão também
 	deleteDefinition(characterName)
 
 	publishSync("remove", characterName, player.Name)
@@ -465,7 +579,7 @@ adminRemoveAwakening.OnServerInvoke = function(player, characterName)
 		false
 	)
 
-	print(string.format("[AWAKENING V2] %s removeu Despertar de '%s'", player.Name, characterName))
+	print(string.format("[AWAKENING V3] %s removeu Despertar de '%s'", player.Name, characterName))
 	return true, "Despertar removido em todos os servidores!"
 end
 
@@ -477,6 +591,25 @@ adminListAwakenings.OnServerInvoke = function(player)
 	for _, def in pairs(awakenDefs) do
 		table.insert(list, def)
 	end
+
+	-- (V3) Os órfãos TAMBÉM entram na lista. Eles não estão em
+	-- awakenDefs porque não foram construídos, mas se ficarem fora
+	-- daqui o admin não tem como clicar em 🗑️ para limpá-los — a
+	-- correção viraria um beco sem saída.
+	--
+	-- O aviso vai no displayName porque é o campo que o painel já
+	-- mostra: aparece sem precisar mexer no AdminMenuClient. A cópia
+	-- é rasa e descartável, então o displayName salvo não é tocado.
+	for _, def in pairs(orphanDefs) do
+		local copia = {}
+		for k, v in pairs(def) do
+			copia[k] = v
+		end
+		copia.isOrphan = true
+		copia.displayName = "⚠️ ÓRFÃO (sem personagem original) — " .. tostring(def.displayName or def.characterName)
+		table.insert(list, copia)
+	end
+
 	return list
 end
 
@@ -554,7 +687,7 @@ equipAwakeningRemote.OnServerEvent:Connect(function(player, characterName)
 		end
 	end
 
-	print(string.format("[AWAKENING V2] %s desbloqueou o Despertar de '%s'", player.Name, characterName))
+	print(string.format("[AWAKENING V3] %s desbloqueou o Despertar de '%s'", player.Name, characterName))
 end)
 
 -- =====================================
@@ -562,23 +695,67 @@ end)
 -- =====================================
 
 local function bootLoadAwakenings()
-	print("[AWAKENING V2] Carregando configurações de Despertar salvas...")
+	-- (V3) Esperar o catálogo. Sem isso a checagem de original daria
+	-- falso negativo na corrida de boot e TODO Despertar legítimo
+	-- seria marcado como órfão.
+	if _G.CharacterCatalog and _G.CharacterCatalog.isReady then
+		local esperou = 0
+		while not _G.CharacterCatalog.isReady() and esperou < CONFIG.CATALOG_WAIT do
+			task.wait(0.5)
+			esperou += 0.5
+		end
+		if not _G.CharacterCatalog.isReady() then
+			warn(
+				string.format(
+					"[AWAKENING V3] Catálogo não ficou pronto em %ds — seguindo com a pasta Characters como referência",
+					CONFIG.CATALOG_WAIT
+				)
+			)
+		end
+	end
+
+	print("[AWAKENING V3] Carregando configurações de Despertar salvas...")
 	local index = loadIndex()
 	local loaded = 0
 
 	for _, name in ipairs(index) do
 		local def = loadDefinition(name)
 		if def then
-			local warnings = buildAwakenedAssets(def)
-			awakenDefs[name] = def
-			loaded += 1
-			if #warnings > 0 then
-				warn("[AWAKENING V2] Avisos ao carregar '" .. name .. "': " .. table.concat(warnings, " | "))
+			-- (V3) Órfão NÃO é reconstruído. Antes o buildAwakenedAssets
+			-- recriava a pasta do personagem inexistente a cada boot,
+			-- ressuscitando o fantasma para sempre.
+			local warnings, err = buildAwakenedAssets(def)
+			if err then
+				orphanDefs[name] = def
+				table.insert(orphanNames, name)
+				warn(string.format("[AWAKENING V3] ⚠️ Despertar ÓRFÃO ignorado: '%s' — %s", name, err))
+			else
+				awakenDefs[name] = def
+				loaded += 1
+				if #warnings > 0 then
+					warn("[AWAKENING V3] Avisos ao carregar '" .. name .. "': " .. table.concat(warnings, " | "))
+				end
 			end
 		end
 	end
 
-	print(string.format("[AWAKENING V2] ✓ %d Despertar(es) carregado(s)", loaded))
+	print(string.format("[AWAKENING V3] ✓ %d Despertar(es) carregado(s)", loaded))
+
+	if #orphanNames > 0 then
+		warn(
+			string.format(
+				"[AWAKENING V3] ⚠️ %d Despertar(es) ÓRFÃO(S) encontrado(s): %s\n"
+					.. "  Foram criados sem personagem original (bug do V2) e NUNCA poderiam ser\n"
+					.. "  desbloqueados, porque ninguém pode possuir um personagem que não existe.\n"
+					.. "  Para resolver, escolha um caminho por nome:\n"
+					.. "    (a) criar o personagem original na aba CATÁLOGO com esse nome exato, ou\n"
+					.. "    (b) remover o Despertar pelo botão 🗑️ do painel admin.\n"
+					.. "  Veja a lista a qualquer momento com _G.DebugAwakening()",
+				#orphanNames,
+				table.concat(orphanNames, ", ")
+			)
+		)
+	end
 end
 
 task.spawn(bootLoadAwakenings)
@@ -588,11 +765,14 @@ task.spawn(bootLoadAwakenings)
 -- =====================================
 
 _G.DebugAwakening = function()
-	print("\n========== DEBUG AWAKENING V2 ==========")
+	print("\n========== DEBUG AWAKENING V3 ==========")
+
+	local algum = false
 	for name, def in pairs(awakenDefs) do
+		algum = true
 		print(
 			string.format(
-				"  %s → %s | Badge: %d | Tools: %d",
+				"  ✓ %s → %s | Badge: %d | Tools: %d",
 				name,
 				def.displayName,
 				def.badgeId,
@@ -600,16 +780,45 @@ _G.DebugAwakening = function()
 			)
 		)
 	end
+	if not algum then
+		print("  (nenhum Despertar ativo)")
+	end
+
+	-- (V3) Órfãos: existem no DataStore, mas o personagem original não
+	-- existe. Nunca foram desbloqueáveis, porque ninguém pode possuir
+	-- um personagem que não existe.
+	local qtdOrfaos = 0
+	for _ in pairs(orphanDefs) do
+		qtdOrfaos += 1
+	end
+
+	if qtdOrfaos > 0 then
+		print(string.format("\n  ⚠️ %d ÓRFÃO(S) — sem personagem original:", qtdOrfaos))
+		for name, def in pairs(orphanDefs) do
+			print(string.format("     %s (Badge: %s)", name, tostring(def.badgeId)))
+		end
+		print("\n  Como resolver, por nome:")
+		print("    (a) criar o personagem original na aba CATÁLOGO com o nome EXATO, ou")
+		print("    (b) remover o Despertar pelo botão 🗑️ do painel admin")
+		print("        (os órfãos aparecem na lista marcados com ⚠️ ÓRFÃO)")
+	end
+
 	print("=========================================\n")
 end
 
 print([[
 ╔════════════════════════════════════════════════════╗
-║  ⚡ AWAKENING SYSTEM SERVER V2 CARREGADO           ║
+║  ⚡ AWAKENING SYSTEM SERVER V3 CARREGADO           ║
 ╠════════════════════════════════════════════════════╣
-║  SUBSTITUI: AwakeningSystemServer V1               ║
-║  REMOVER:   AwakeningSystemServer V1               ║
-║  DEPENDE DE: AdminRegistryServer_V1 + GameManager_V9║
+║  SUBSTITUI: AwakeningSystemServer V2               ║
+║  REMOVER:   AwakeningSystemServer V2               ║
+║  DEPENDE DE: AdminRegistryServer_V1, GameManager_V9║
+║              CharacterCatalogServer_V6 (NOVO)      ║
+╠════════════════════════════════════════════════════╣
+║  (V3) NÃO dá mais para criar Despertar solto:      ║
+║       exige personagem original no catálogo        ║
+║  (V3) Nunca cria pasta de personagem fantasma      ║
+║  (V3) Despertar órfão é acusado, não reconstruído  ║
 ╠════════════════════════════════════════════════════╣
 ║  (V2) ADMIN_IDS removida → _G.AdminRegistry        ║
 ║  (V2) Guarda de JobId (sem anúncio duplicado)      ║
