@@ -1,0 +1,27 @@
+# Arquivos de PLACE do Roblox Studio (grandes, salvos pelo Studio)
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+
+# Modelos (.rbxm / .rbxmx) NÃO são ignorados de propósito:
+# as Diretrizes do Chefão usam "bOSS FIGHT RETRO.rbxmx" como modelo
+# de referência, então ele pode ser versionado aqui.
+
+# Ferramentas de build Roblox
+/sourcemap.json
+/Packages/
+/ServerPackages/
+/DevPackages/
+/roblox.toml
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*~
