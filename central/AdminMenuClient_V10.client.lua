@@ -1014,7 +1014,16 @@ local function createAdminInterface()
 
 	-- ---------- VIEW: PASSO 3 — LORE + RARIDADE + PUBLICAR ----------
 
-	local RARITY_OPTIONS = { "ROBLOXIANOS", "HEROXIANOS", "NULLXIANOS", "BTUDIOS", "BOSSXIANOS", "SUPREMO", "AWAKENED" }
+	-- (V10) "AWAKENED" SAIU DAQUI.
+	-- Despertar não é uma raridade que se escolhe ao criar personagem
+	-- normal: ele tem formulário próprio (botão ⚡ CONFIGURAR DESPERTAR)
+	-- e depende SEMPRE de um personagem original já existente. Ter a
+	-- opção aqui deixava criar um "personagem de raridade AWAKENED" solto,
+	-- que é um personagem comum pintado de despertado — a mesma confusão
+	-- que o AwakeningSystemServer_V3 fechou do lado do servidor.
+	-- A largura dos botões é 1/#RARITY_OPTIONS, então a linha se reajusta
+	-- sozinha para 6 opções.
+	local RARITY_OPTIONS = { "ROBLOXIANOS", "HEROXIANOS", "NULLXIANOS", "BTUDIOS", "BOSSXIANOS", "SUPREMO" }
 
 	local function renderStep3()
 		label(
