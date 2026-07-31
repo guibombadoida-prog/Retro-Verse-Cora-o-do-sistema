@@ -1,8 +1,24 @@
 -- ============================================
--- SISTEMA DE BOSS RAID V2 (SERVIDOR)
+-- SISTEMA DE BOSS RAID V3 (SERVIDOR)
 -- Coloque em ServerScriptService
 -- Nome: "BossRaidServer"
--- SUBSTITUI: BossRaidServer_V1  ⚠️ REMOVER V1
+-- SUBSTITUI: BossRaidServer_V2  ⚠️ REMOVER V2
+-- ============================================
+-- (V3) MANDA O PERSONAGEM EQUIPADO NO TELEPORT DATA
+--
+-- A place do chefe precisa saber qual personagem cada jogador trouxe,
+-- para a REGRA 2 das Diretrizes (personagem FIXO até morrer). O V2
+-- mandava só raidId/bossId/bossName/leaderUserId, então a place do chefe
+-- tinha que descobrir isso lendo o DataStore.
+--
+-- Ler do DataStore funciona — o savePlayerData logo antes do teleporte
+-- garante que `equippedCharacter` está persistido — mas depende de uma
+-- leitura extra e da ordem de carga do DataManager na outra place.
+-- Mandar explícito é mais barato e não depende de nada lá.
+--
+-- O Boss_TeleportDataReceiver_V1 usa este campo como primeira fonte e
+-- mantém a leitura do DataStore como fallback, então as duas places
+-- podem ser atualizadas em qualquer ordem.
 -- ============================================
 -- (V2) ALTERAÇÕES:
 -- • Catálogo de Bosses DINÂMICO via DataStore
@@ -30,7 +46,7 @@ task.wait(1)
 
 print([[
 ╔════════════════════════════════════════════╗
-║   SISTEMA DE BOSS RAID V2 - INICIANDO     ║
+║   SISTEMA DE BOSS RAID V3 - INICIANDO     ║
 ╚════════════════════════════════════════════╝
 ]])
 
@@ -83,10 +99,10 @@ local function loadCatalog()
 		for _ in pairs(bossCatalog) do
 			count = count + 1
 		end
-		print("[RAID V2] Catálogo carregado: " .. count .. " bosses")
+		print("[RAID V3] Catálogo carregado: " .. count .. " bosses")
 	else
 		bossCatalog = {}
-		print("[RAID V2] Catálogo vazio — registre bosses pelo Editor Admin")
+		print("[RAID V3] Catálogo vazio — registre bosses pelo Editor Admin")
 	end
 end
 
@@ -96,7 +112,7 @@ local function saveCatalog()
 	end)
 
 	if not success then
-		warn("[RAID V2] Falha ao salvar catálogo: " .. tostring(err))
+		warn("[RAID V3] Falha ao salvar catálogo: " .. tostring(err))
 		return false
 	end
 
@@ -112,7 +128,7 @@ end
 pcall(function()
 	MessagingService:SubscribeAsync(CONFIG.MESSAGING_TOPIC, function(message)
 		if message.Data and message.Data.serverId ~= game.JobId then
-			print("[RAID V2] Catálogo atualizado por outro servidor — recarregando")
+			print("[RAID V3] Catálogo atualizado por outro servidor — recarregando")
 			loadCatalog()
 		end
 	end)
@@ -330,7 +346,7 @@ local function createRaid(leader, bossId)
 		end
 	end
 
-	print(string.format("[RAID V2] %s criou raid %s (%s)", leader.Name, raidId, boss.name))
+	print(string.format("[RAID V3] %s criou raid %s (%s)", leader.Name, raidId, boss.name))
 	broadcastRaid(raid)
 	return true, raidId
 end
@@ -405,11 +421,33 @@ local function teleportRaid(raid)
 	end
 	task.wait(1)
 
+	-- (V3) O personagem equipado de cada membro vai no pacote.
+	--
+	-- A place do chefe precisa disso para a regra 2 das Diretrizes
+	-- (personagem FIXO até morrer), e o V2 não mandava — o
+	-- Boss_TeleportDataReceiver_V1 tinha que descobrir lendo o DataStore.
+	-- Ler do DataStore funciona (o savePlayerData acima garante), mas
+	-- depende de uma leitura extra e da ordem de carga do DataManager na
+	-- outra place. Mandar explícito é mais barato e mais direto.
+	--
+	-- A chave é o UserId como STRING de propósito: tabela de TeleportData
+	-- passa por serialização, e chave numérica em tabela mista não
+	-- sobrevive de forma confiável.
+	local personagens = {}
+	for _, m in ipairs(validMembers) do
+		local dados = _G.PlayerDataManager.getPlayerData(m)
+		local equipado = dados and dados.equippedCharacter
+		if type(equipado) == "string" and #equipado > 0 then
+			personagens[tostring(m.UserId)] = equipado
+		end
+	end
+
 	local teleportData = {
 		raidId = raid.id,
 		bossId = raid.bossId,
 		bossName = boss.name,
 		leaderUserId = raid.leader and raid.leader.UserId or 0,
+		personagens = personagens, -- (V3) regra 2: personagem fixo
 	}
 
 	local success, err = pcall(function()
@@ -422,7 +460,7 @@ local function teleportRaid(raid)
 	end)
 
 	if not success then
-		warn("[RAID V2] Falha no teleporte: " .. tostring(err))
+		warn("[RAID V3] Falha no teleporte: " .. tostring(err))
 		for _, m in ipairs(validMembers) do
 			notify(m, "⚠️ Falha no teleporte! Verifique se a place está no mesmo universo. (Não funciona no Studio)", false)
 		end
@@ -771,7 +809,7 @@ adminSaveBossRemote.OnServerInvoke = function(player, bossInfo)
 		return false, "Falha ao salvar no DataStore!"
 	end
 
-	print(string.format("[RAID V2] Admin %s salvou boss: %s (place %d)", player.Name, name, placeId))
+	print(string.format("[RAID V3] Admin %s salvou boss: %s (place %d)", player.Name, name, placeId))
 	return true, bossId
 end
 
@@ -800,7 +838,7 @@ adminRemoveBossRemote.OnServerInvoke = function(player, bossId)
 		return false, "Falha ao salvar no DataStore!"
 	end
 
-	print(string.format("[RAID V2] Admin %s removeu boss: %s", player.Name, name))
+	print(string.format("[RAID V3] Admin %s removeu boss: %s", player.Name, name))
 	return true, "Removido"
 end
 
@@ -838,7 +876,7 @@ _G.BossRaid = {
 
 print([[
 ╔════════════════════════════════════════════╗
-║   ✅ BOSS RAID V2 CARREGADO               ║
+║   ✅ BOSS RAID V3 CARREGADO               ║
 ║   • Catálogo dinâmico via DataStore       ║
 ║   • Editor Admin habilitado               ║
 ║   • Requisito: personagem equipado        ║

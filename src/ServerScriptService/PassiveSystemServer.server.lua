@@ -1,12 +1,36 @@
 -- ============================================
--- PASSIVE SYSTEM SERVER V8 — EDIÇÃO SÓ COM PERSONAGEM DESEQUIPADO
+-- PASSIVE SYSTEM SERVER V9 — EDITA DESEQUIPADO OU NA ZONA SEGURA
 -- Coloque em ServerScriptService
 -- Nome: "PassiveSystemServer"
 -- DEPENDE DE: DataManager V8, StatService V3,
---             PassiveCatalog (ModuleScript), CharacterLevelServer V1
+--             PassiveCatalog (ModuleScript), CharacterLevelServer V1,
+--             SpawnSystem V8 (tag InSafeZone)
 -- OPCIONAL:   NucleoCombate V2, EnergySystemServer V1, PassiveVFX
--- SUBSTITUI: PassiveSystemServer V7
--- REMOVER:   PassiveSystemServer V7
+-- SUBSTITUI: PassiveSystemServer V8
+-- REMOVER:   PassiveSystemServer V8
+-- ============================================
+-- (V9) A REGRA DE QUANDO DÁ PARA MEXER NAS PASSIVAS
+--
+-- O que a regra precisa impedir é a troca NO MEIO DA LUTA: trocar
+-- passiva, reequipar e empilhar efeito. O V8 resolvia isso proibindo
+-- qualquer edição com personagem equipado — correto no espírito, mas
+-- restritivo demais: no lobby, com personagem equipado, não existe como
+-- brigar, então trocar passiva ali não abre brecha nenhuma.
+--
+-- (V9) LIBERA em dois casos:
+--   • sem personagem equipado  (como no V8)
+--   • equipado, mas DENTRO DA ZONA SEGURA (lobby)
+-- BLOQUEIA equipado fora da zona segura, que é o caso do abuso.
+--
+-- A zona segura vem da tag `InSafeZone` no Character, que o
+-- SpawnSystem_V8 mantém colada na POSIÇÃO REAL do jogador. Cinco outros
+-- sistemas já leem essa tag (DuelSystemServer, NPC_Server_V2,
+-- NpcPassiveBridge, GlobalSync) — reaproveitar evita duas definições de
+-- "zona segura" divergindo com o tempo.
+--
+-- `podeEditar` continua sendo a ÚNICA porta: os dois remotes de mutação
+-- (SetCharacterPassives e UpgradePassive) passam por ela, então cliente
+-- adulterado não escapa da regra.
 -- ============================================
 -- (V8) NOVA REGRA: SÓ EDITA COM O PERSONAGEM DESEQUIPADO
 --
@@ -76,7 +100,7 @@ until _G.PlayerDataManager and _G.CharacterLevel and _G.StatService
 
 local moduloCatalogo = ServerScriptService:WaitForChild("PassiveCatalog", 30)
 if not moduloCatalogo then
-	warn("[PASSIVE V8] PassiveCatalog não encontrado em ServerScriptService — sistema NÃO vai funcionar")
+	warn("[PASSIVE V9] PassiveCatalog não encontrado em ServerScriptService — sistema NÃO vai funcionar")
 	return
 end
 
@@ -137,7 +161,7 @@ local function consultarGamepass(player)
 	if not ok then
 		-- Falha de rede não pode virar "não tem" definitivo:
 		-- deixa nil para tentar de novo depois
-		warn("[PASSIVE V8] Falha ao consultar gamepass de " .. player.Name)
+		warn("[PASSIVE V9] Falha ao consultar gamepass de " .. player.Name)
 		return false
 	end
 
@@ -171,13 +195,35 @@ local function slotsDisponiveis(player)
 	return slotsDoPersonagem(player, nil)
 end
 
--- (V8) Porta única da regra nova: com personagem equipado, não edita
+-- (V9) A tag InSafeZone é a fonte de verdade da zona segura no projeto:
+-- o SpawnSystem_V8 a mantém colada na POSIÇÃO REAL do jogador, e outros
+-- cinco sistemas já a usam (DuelSystemServer, NPC_Server_V2,
+-- NpcPassiveBridge, GlobalSync). Reaproveitar em vez de recalcular
+-- geometria aqui evita duas definições de "zona segura" divergindo.
+local function estaNaZonaSegura(player)
+	local personagem = player and player.Character
+	return personagem ~= nil and personagem:FindFirstChild("InSafeZone") ~= nil
+end
+
+-- (V9) Porta única da regra: edita DESEQUIPADO ou DENTRO DA ZONA SEGURA.
+--
+-- O V8 só liberava desequipado, o que era restritivo demais: no lobby,
+-- com personagem equipado, não há como brigar, então trocar passiva ali
+-- não abre brecha nenhuma. O que a regra precisa impedir é a troca no
+-- MEIO DA LUTA — trocar, reequipar e empilhar efeito.
+--
+-- Esta função é a única porta: os dois remotes de mutação
+-- (SetCharacterPassives e UpgradePassive) passam por ela, então não
+-- existe caminho que escape da regra, mesmo se o cliente for adulterado.
 local function podeEditar(player)
 	local dados = _G.PlayerDataManager.getPlayerData(player)
-	if dados and dados.equippedCharacter then
-		return false, "Desequipe seu personagem para mexer nas passivas."
+	if not (dados and dados.equippedCharacter) then
+		return true -- sem personagem equipado: livre
 	end
-	return true
+	if estaNaZonaSegura(player) then
+		return true -- equipado, mas no lobby: livre
+	end
+	return false, "Volte para o lobby (zona segura) ou desequipe o personagem para mexer nas passivas."
 end
 
 -- =====================================
@@ -431,7 +477,7 @@ local function ativarTemporaria(player, entrada, passiva)
 		pcall(_G.PassiveVFX.disparar, player, passiva.vfx, passiva.duracao)
 	end
 
-	print(string.format("[PASSIVE V8] %s ativou %s (%ds)", player.Name, passiva.nome, passiva.duracao))
+	print(string.format("[PASSIVE V9] %s ativou %s (%ds)", player.Name, passiva.nome, passiva.duracao))
 	return true
 end
 
@@ -512,7 +558,7 @@ local function monitorar(player, personagem)
 				pcall(_G.PassiveVFX.disparar, player, "NEGACAO_BRANCA", 0.6)
 			end
 
-			print(string.format("[PASSIVE V8] %s NEGOU %.0f de dano", player.Name, dano))
+			print(string.format("[PASSIVE V9] %s NEGOU %.0f de dano", player.Name, dano))
 			return -- negou: não dispara mais nada
 		end
 
@@ -539,7 +585,7 @@ local function monitorar(player, personagem)
 
 					print(
 						string.format(
-							"[PASSIVE V8] %s REVERTEU %.0f em %s",
+							"[PASSIVE V9] %s REVERTEU %.0f em %s",
 							player.Name,
 							devolvido,
 							agressor.Name
@@ -704,7 +750,7 @@ local function registrarNoNucleo(Nucleo)
 		end
 	end)
 
-	print("[PASSIVE V8] Frenesi, Duelista, Executor e Vampírico registrados no Núcleo")
+	print("[PASSIVE V9] Frenesi, Duelista, Executor e Vampírico registrados no Núcleo")
 end
 
 task.spawn(function()
@@ -718,7 +764,7 @@ task.spawn(function()
 
 	local modulo = pasta and pasta:FindFirstChild("NucleoCombate_V2")
 	if not modulo then
-		warn("[PASSIVE V8] NucleoCombate_V2 ausente — Frenesi, Duelista, Executor e Vampírico ficam INERTES")
+		warn("[PASSIVE V9] NucleoCombate_V2 ausente — Frenesi, Duelista, Executor e Vampírico ficam INERTES")
 		return
 	end
 
@@ -1180,7 +1226,7 @@ end
 
 print(string.format([[
 ╔══════════════════════════════════════════════════════╗
-║  PASSIVE SYSTEM SERVER V8 — CARREGADO               ║
+║  PASSIVE SYSTEM SERVER V9 — CARREGADO               ║
 ╠══════════════════════════════════════════════════════╣
 ║  SUBSTITUI: PassiveSystemServer V7                   ║
 ║  REMOVER:   PassiveSystemServer V7                   ║

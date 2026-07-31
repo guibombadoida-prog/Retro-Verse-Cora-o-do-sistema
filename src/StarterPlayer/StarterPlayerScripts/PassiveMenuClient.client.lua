@@ -1,10 +1,37 @@
 -- ============================================
--- PASSIVE MENU CLIENT V3 — EDIÇÃO COM PERSONAGEM DESEQUIPADO
+-- PASSIVE MENU CLIENT V4 — EDITA DESEQUIPADO OU NO LOBBY
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "PassiveMenuClient"
--- DEPENDE DE: PassiveSystemServer V8, UnifiedMenuClient V3
--- SUBSTITUI: PassiveMenuClient V2
--- REMOVER:   PassiveMenuClient V2
+-- DEPENDE DE: PassiveSystemServer V9, UnifiedMenuClient V3
+-- SUBSTITUI: PassiveMenuClient V3
+-- REMOVER:   PassiveMenuClient V3
+-- ============================================
+-- (V4) O QUE ESTAVA "BUGADO" NA TELA
+--
+-- `dados` é uma FOTO tirada quando o menu abre, e o V3 confiava nela até
+-- fechar. Bastava equipar um personagem (ou sair do lobby) com o menu
+-- aberto para a foto envelhecer: a tela continuava desenhando botões
+-- liberados, o clique ia ao servidor, e o servidor recusava. Parecia
+-- menu quebrado — na verdade era a tela mentindo sobre o estado.
+--
+-- ✅ DUAS DEFESAS, em camadas:
+--   1. VIGIA a cada 2s enquanto o menu está aberto: reconsulta e
+--      redesenha SÓ quando o estado virou, avisando na barra de status.
+--      Assim a trava aparece na hora em que o jogador sai da zona
+--      segura, em vez de virar surpresa no clique.
+--   2. REVALIDAÇÃO no instante do clique, nas duas ações que realmente
+--      mudam algo (SALVAR BUILD e MELHORAR). O toggle de equipar/remover
+--      NÃO revalida de propósito: ele só mexe no rascunho local, e um
+--      round-trip por clique deixaria o planejamento travado.
+--
+-- O servidor segue sendo a autoridade (`podeEditar` nos dois remotes de
+-- mutação, PassiveSystemServer_V9). Isto aqui é para a tela não mentir.
+--
+-- (V4) REGRA ATUALIZADA junto com o servidor V9: agora também dá para
+-- editar COM personagem equipado, desde que dentro da ZONA SEGURA
+-- (lobby). Antes só desequipado. O que segue proibido é editar no mapa,
+-- que era o caso do abuso (trocar, reequipar e empilhar efeito).
+-- Textos travados agora falam de lobby, não só de desequipar.
 -- ============================================
 -- (V3) NOVA REGRA: SÓ EDITA DESEQUIPADO
 --
@@ -114,7 +141,7 @@ local remoteEquipar = remotes:WaitForChild("SetCharacterPassives", 20)
 local remoteUpgrade = remotes:WaitForChild("UpgradePassive", 20)
 
 if not remoteCatalogo then
-	warn("[PASSIVE MENU V3] GetPassiveCatalog não encontrado — PassiveSystemServer V7 instalado?")
+	warn("[PASSIVE MENU V4] GetPassiveCatalog não encontrado — PassiveSystemServer V7 instalado?")
 	return
 end
 
@@ -214,7 +241,7 @@ local function buscar()
 		return true
 	end
 
-	warn("[PASSIVE MENU V3] Falha ao buscar catálogo")
+	warn("[PASSIVE MENU V4] Falha ao buscar catálogo")
 	return false
 end
 
@@ -223,6 +250,34 @@ end
 -- =====================================
 
 local renderizar
+
+-- (V4) REVALIDA ANTES DE MUTAR — a correção do "cliente bugado".
+--
+-- `dados` é uma FOTO tirada quando o menu abriu. Se o jogador equipou um
+-- personagem, ou saiu do lobby, com o menu já aberto, essa foto envelhece
+-- e `bloqueado()` continua respondendo o que valia antes. O V3 então
+-- desenhava botões liberados, o clique ia pro servidor, e o servidor
+-- recusava — parecia que o menu estava quebrado.
+--
+-- Aqui a foto é refeita no instante do clique, então a tela decide com o
+-- estado de AGORA. O servidor continua sendo a autoridade (podeEditar nos
+-- dois remotes); isto é para a tela não mentir.
+local function revalidarAntesDeMutar()
+	buscar()
+	if bloqueado() then
+		tocar(SONS.erro)
+		status(
+			(dados and dados.motivoBloqueio)
+				or "Volte para o lobby (zona segura) ou desequipe o personagem.",
+			COR.ruim
+		)
+		if renderizar then
+			renderizar()
+		end
+		return false
+	end
+	return true
+end
 
 local function montarCard(passiva, ordem)
 	local noRasc = noRascunho(passiva.id)
@@ -339,14 +394,18 @@ local function montarCard(passiva, ordem)
 
 	if bloqueado() then
 		botaoEquipar.BackgroundColor3 = COR.desativado
-		botaoEquipar.Text = "🔒 DESEQUIPE"
+		botaoEquipar.Text = "🔒 SÓ NO LOBBY"
 		botaoEquipar.TextColor3 = COR.textoFraco
 	end
 
 	botaoEquipar.MouseButton1Click:Connect(function()
 		if bloqueado() then
 			tocar(SONS.erro)
-			status(dados.motivoBloqueio or "Desequipe seu personagem.", COR.ruim)
+			status(
+				(dados and dados.motivoBloqueio)
+					or "Volte para o lobby (zona segura) ou desequipe o personagem.",
+				COR.ruim
+			)
 			return
 		end
 		if not personagemAtual then
@@ -419,7 +478,7 @@ local function montarCard(passiva, ordem)
 
 	if bloqueado() then
 		botaoMelhorar.BackgroundColor3 = COR.desativado
-		botaoMelhorar.Text = "🔒 desequipe para melhorar"
+		botaoMelhorar.Text = "🔒 só no lobby"
 		botaoMelhorar.TextColor3 = COR.textoFraco
 	elseif nivel >= maxNivel and equipada then
 		botaoMelhorar.BackgroundColor3 = COR.ouro
@@ -441,9 +500,9 @@ local function montarCard(passiva, ordem)
 	end
 
 	botaoMelhorar.MouseButton1Click:Connect(function()
-		if bloqueado() then
-			tocar(SONS.erro)
-			status(dados.motivoBloqueio or "Desequipe seu personagem.", COR.ruim)
+		-- (V4) revalida com o servidor: o estado pode ter mudado com o
+		-- menu aberto (equipou, ou saiu da zona segura)
+		if not revalidarAntesDeMutar() then
 			return
 		end
 		if not podeMelhorar then
@@ -479,7 +538,7 @@ renderizar = function()
 	-- ---------- AVISO DE BLOQUEIO ----------
 	if bloqueado() then
 		avisoBloqueio.Visible = true
-		avisoBloqueio.Text = "🔒 " .. (dados.motivoBloqueio or "Desequipe seu personagem para editar.")
+		avisoBloqueio.Text = "🔒 " .. (dados.motivoBloqueio or "Volte ao lobby (zona segura) ou desequipe para editar.")
 	else
 		avisoBloqueio.Visible = false
 	end
@@ -600,7 +659,7 @@ renderizar = function()
 	if botaoSalvar then
 		if bloqueado() then
 			botaoSalvar.BackgroundColor3 = COR.desativado
-			botaoSalvar.Text = "🔒 DESEQUIPE PARA SALVAR"
+			botaoSalvar.Text = "🔒 VOLTE AO LOBBY PARA SALVAR"
 		else
 			botaoSalvar.BackgroundColor3 = COR.bom
 			botaoSalvar.Text = "💾 SALVAR BUILD"
@@ -788,7 +847,14 @@ local function criarInterface()
 		end
 		if bloqueado() then
 			tocar(SONS.erro)
-			status(dados.motivoBloqueio or "Desequipe seu personagem.", COR.ruim)
+			status(
+				(dados and dados.motivoBloqueio)
+					or "Volte para o lobby (zona segura) ou desequipe o personagem.",
+				COR.ruim
+			)
+			return
+		end
+		if not revalidarAntesDeMutar() then
 			return
 		end
 		if not personagemAtual then
@@ -874,6 +940,33 @@ _G.ClosePassiveMenu = function()
 end
 
 -- =====================================
+-- (V4) VIGIA DO ESTADO ENQUANTO O MENU ESTÁ ABERTO
+-- =====================================
+-- Sem isto, o jogador abre o menu no lobby (liberado), sai andando para
+-- o mapa, e a tela continua mostrando tudo destravado — até o clique
+-- falhar. O vigia reconsulta e redesenha SÓ quando o estado virou, então
+-- na maior parte do tempo é uma chamada barata sem redesenho.
+--
+-- Mesmo princípio do vigia do PassiveSystemServer: em vez de acertar "a
+-- janela certa", conferir de tempo em tempo. Não existe janela.
+task.spawn(function()
+	while true do
+		task.wait(2)
+		if aberto and dados then
+			local antes = dados.podeEditar
+			if buscar() and dados.podeEditar ~= antes then
+				renderizar()
+				if bloqueado() then
+					status("🔒 Você saiu da zona segura — edição travada.", COR.aviso)
+				else
+					status("✅ Edição liberada.", COR.bom)
+				end
+			end
+		end
+	end
+end)
+
+-- =====================================
 -- COMPRA DO GAMEPASS
 -- =====================================
 -- O servidor só relê o gamepass quando o jogador entra. Depois de
@@ -922,19 +1015,23 @@ task.spawn(function()
 			end
 		end, 9)
 
-		print("[PASSIVE MENU V3] Registrado no Menu Unificado")
+		print("[PASSIVE MENU V4] Registrado no Menu Unificado")
 	else
-		warn("[PASSIVE MENU V3] UnifiedMenuClient não encontrado")
+		warn("[PASSIVE MENU V4] UnifiedMenuClient não encontrado")
 	end
 end)
 
 print([[
 ╔══════════════════════════════════════════════════════╗
-║  PASSIVE MENU CLIENT V3 — CARREGADO                 ║
+║  PASSIVE MENU CLIENT V4 — CARREGADO                 ║
 ╠══════════════════════════════════════════════════════╣
-║  SUBSTITUI: PassiveMenuClient V2                     ║
-║  REMOVER:   PassiveMenuClient V2                     ║
-║  * Seletor de personagem (edição é DESEQUIPADO)      ║
+║  SUBSTITUI: PassiveMenuClient V3                     ║
+║  REMOVER:   PassiveMenuClient V3                     ║
+║  * Edita DESEQUIPADO ou no LOBBY (zona segura)       ║
+║  * Vigia de 2s: a trava aparece na hora que você     ║
+║    sai da zona segura, sem surpresa no clique        ║
+║  * SALVAR e MELHORAR revalidam no servidor           ║
+║  * Seletor de personagem                             ║
 ╠══════════════════════════════════════════════════════╣
 ║  * 5 categorias em abas                              ║
 ║  * Nível 1-10 com barra e custo em moedas            ║

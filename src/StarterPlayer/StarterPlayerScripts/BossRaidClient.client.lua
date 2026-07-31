@@ -1,8 +1,45 @@
 -- ============================================
--- MENU DE BOSS RAID V2 (CLIENTE)
+-- MENU DE BOSS RAID V3 (CLIENTE)
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "BossRaidClient"
--- SUBSTITUI: BossRaidClient_V1  ⚠️ REMOVER V1
+-- SUBSTITUI: BossRaidClient_V2  ⚠️ REMOVER V2
+-- DEPENDE DE: BossRaidServer V3, UnifiedMenuClient V3
+-- ============================================
+-- (V3) TRÊS DEFEITOS CORRIGIDOS
+--
+-- 🐛 1. TRAVA MUDA SE O SERVIDOR NÃO ESTIVER INSTALADO.
+--    Os 14 `remotes:WaitForChild("...")` do V2 não tinham timeout. Sem o
+--    BossRaidServer no ServerScriptService, o script pendurava na linha
+--    22 PARA SEMPRE — sem erro no Output, sem botão no menu, sem pista
+--    nenhuma do motivo. É a mesma classe de falha das barreiras
+--    `repeat task.wait() until _G.X` do lado do servidor.
+--    ✅ Agora todo WaitForChild tem timeout, e a falta do servidor vira
+--       um painel explicando o que instalar — em vez de sumiço silencioso.
+--
+-- 🐛 2. TEMPESTADE DE REFRESH — a causa do menu "travado/piscando".
+--    O servidor faz broadcast de CADA mudança de CADA raid para TODOS os
+--    jogadores (`broadcastRaid` percorre Players:GetPlayers()). O V2
+--    respondia a cada um desses eventos com `refreshMenu()`, que faz
+--    `getBossListRemote:InvokeServer()` — uma ida BLOQUEANTE ao servidor
+--    — e reconstrói a tela inteira do zero.
+--    Com várias raids ativas isso vira dezenas de round-trips por
+--    segundo, cada um limpando e redesenhando toda a GUI. O resultado é
+--    exatamente o que se vê: menu piscando, botão que não responde ao
+--    clique porque a tela foi refeita no meio.
+--    ✅ Agora os eventos só MARCAM que precisa atualizar. Um laço único
+--       redesenha no máximo a cada INTERVALO_REFRESH. Vinte eventos no
+--       mesmo instante viram um redesenho, não vinte.
+--
+-- 🐛 3. DADO VELHO PASSANDO POR ATUAL.
+--    O `fetchData` do V2 fazia `if success and data then currentData =
+--    data end; return currentData`. Falhou a chamada? Devolvia a foto
+--    anterior calado, e a tela mostrava estado obsoleto como se fosse o
+--    de agora.
+--    ✅ Agora a falha é distinguida do sucesso e aparece na tela.
+--
+-- (V3) Também: guarda contra payload sem `members` no evento de estado, e
+-- trava de reentrância nos botões que chamam o servidor — clicar duas
+-- vezes rápido em CRIAR/INICIAR mandava duas requisições.
 -- ============================================
 -- (V2) ALTERAÇÕES:
 -- • MODO EDITOR ADMIN: registrar Place IDs e configurar
@@ -18,21 +55,57 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local getBossListRemote = remotes:WaitForChild("GetBossList")
-local createRaidRemote = remotes:WaitForChild("CreateRaid")
-local startRaidRemote = remotes:WaitForChild("StartRaidCountdown")
-local cancelRaidRemote = remotes:WaitForChild("CancelRaid")
-local leaveRaidRemote = remotes:WaitForChild("LeaveRaid")
-local inviteToRaidRemote = remotes:WaitForChild("InviteToRaid")
-local respondRaidInviteRemote = remotes:WaitForChild("RespondRaidInvite")
-local requestJoinRaidRemote = remotes:WaitForChild("RequestJoinRaid")
-local respondJoinRequestRemote = remotes:WaitForChild("RespondJoinRequest")
-local raidStateUpdateRemote = remotes:WaitForChild("RaidStateUpdate")
-local raidNotifyRemote = remotes:WaitForChild("RaidNotify")
-local adminSaveBossRemote = remotes:WaitForChild("AdminSaveBoss")
-local adminRemoveBossRemote = remotes:WaitForChild("AdminRemoveBoss")
-local adminGetBossCatalogRemote = remotes:WaitForChild("AdminGetBossCatalog")
+-- (V3) Quanto tempo, no mínimo, entre dois redesenhos da tela. É o que
+-- transforma a rajada de eventos do servidor em um redesenho só.
+local INTERVALO_REFRESH = 0.35
+
+-- (V3) Timeout de cada remote. 20s cobre boot lento de servidor cheio;
+-- passou disso, o servidor realmente não está lá.
+local ESPERA_REMOTE = 20
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes", ESPERA_REMOTE)
+
+-- (V3) Falta de remote não pode mais ser um pendura silencioso.
+local faltando = {}
+
+local function pegarRemote(nome)
+	if not remotes then
+		table.insert(faltando, nome)
+		return nil
+	end
+	local r = remotes:WaitForChild(nome, ESPERA_REMOTE)
+	if not r then
+		table.insert(faltando, nome)
+	end
+	return r
+end
+
+local getBossListRemote = pegarRemote("GetBossList")
+local createRaidRemote = pegarRemote("CreateRaid")
+local startRaidRemote = pegarRemote("StartRaidCountdown")
+local cancelRaidRemote = pegarRemote("CancelRaid")
+local leaveRaidRemote = pegarRemote("LeaveRaid")
+local inviteToRaidRemote = pegarRemote("InviteToRaid")
+local respondRaidInviteRemote = pegarRemote("RespondRaidInvite")
+local requestJoinRaidRemote = pegarRemote("RequestJoinRaid")
+local respondJoinRequestRemote = pegarRemote("RespondJoinRequest")
+local raidStateUpdateRemote = pegarRemote("RaidStateUpdate")
+local raidNotifyRemote = pegarRemote("RaidNotify")
+local adminSaveBossRemote = pegarRemote("AdminSaveBoss")
+local adminRemoveBossRemote = pegarRemote("AdminRemoveBoss")
+local adminGetBossCatalogRemote = pegarRemote("AdminGetBossCatalog")
+
+local SERVIDOR_AUSENTE = #faltando > 0
+
+if SERVIDOR_AUSENTE then
+	warn(string.format(
+		"[RAID CLIENT V3] BossRaidServer não respondeu — %d remote(s) faltando: %s\n"
+			.. "  O menu vai abrir mostrando o aviso, em vez de sumir sem explicação.\n"
+			.. "  Instale o BossRaidServer V3 em ServerScriptService.",
+		#faltando,
+		table.concat(faltando, ", ")
+	))
+end
 
 -- =====================================
 -- ESTADO LOCAL
@@ -214,7 +287,39 @@ local function showNotification(message, success)
 	end)
 end
 
-raidNotifyRemote.OnClientEvent:Connect(showNotification)
+-- (V3) O remote pode ser nil se o BossRaidServer não estiver instalado.
+-- O V2 conectava direto e derrubava o script inteiro com "attempt to
+-- index nil" — antes mesmo de chegar no registro do menu.
+if raidNotifyRemote then
+	raidNotifyRemote.OnClientEvent:Connect(showNotification)
+end
+
+-- (V3) TRAVA DE REENTRÂNCIA PARA AÇÕES QUE VÃO AO SERVIDOR.
+--
+-- Os botões do V2 chamavam InvokeServer direto no clique. Como
+-- InvokeServer é bloqueante, um duplo-clique (ou um clique enquanto a
+-- tela redesenhava) mandava a mesma requisição duas vezes — duas raids
+-- criadas, dois saves do mesmo boss.
+--
+-- Uma trava só, global, é suficiente e é o comportamento certo: o menu
+-- inteiro está esperando o servidor, então nenhuma outra ação deveria
+-- partir nesse meio tempo.
+local ocupado = false
+
+local function acaoServidor(fn)
+	if ocupado then
+		return
+	end
+	ocupado = true
+	task.spawn(function()
+		local ok, err = pcall(fn)
+		if not ok then
+			warn("[RAID CLIENT V3] Ação falhou: " .. tostring(err))
+			showNotification("Erro de comunicação com o servidor.", false)
+		end
+		ocupado = false
+	end)
+end
 
 -- =====================================
 -- HELPERS DE UI
@@ -301,14 +406,26 @@ end
 
 local refreshMenu -- forward declaration
 
+-- (V3) Devolve: dados, veioDoServidorAgora
+--
+-- O V2 devolvia `currentData` sem dizer se a busca tinha funcionado: uma
+-- falha de rede virava "tela com dado velho fingindo ser atual". Agora
+-- quem chama sabe a diferença e pode avisar.
 local function fetchData()
+	if not getBossListRemote then
+		return currentData, false
+	end
+
 	local success, data = pcall(function()
 		return getBossListRemote:InvokeServer()
 	end)
-	if success and data then
+
+	if success and type(data) == "table" then
 		currentData = data
+		return currentData, true
 	end
-	return currentData
+
+	return currentData, false
 end
 
 -- =====================================
@@ -354,7 +471,9 @@ local function renderMyRaid(raid, order)
 
 		local startBtn = makeButton(panel, "▶ INICIAR RAID (15s)", COLORS.GREEN, UDim2.new(0.55, 0, 0.15, 0), UDim2.new(0.05, 0, 0.82, 0))
 		startBtn.MouseButton1Click:Connect(function()
-			pcall(function()
+			-- (V3) com trava: sem ela, dois cliques rápidos disparavam
+			-- duas contagens regressivas
+			acaoServidor(function()
 				startRaidRemote:InvokeServer()
 			end)
 		end)
@@ -438,11 +557,13 @@ local function renderBoss(boss, canCreate, order)
 	if canCreate then
 		local createBtn = makeButton(panel, "CRIAR RAID", COLORS.ACCENT, UDim2.new(0.28, 0, 0.4, 0), UDim2.new(0.68, 0, 0.3, 0))
 		createBtn.MouseButton1Click:Connect(function()
-			pcall(function()
+			-- (V3) O V2 fazia InvokeServer + task.wait(0.4) + refreshMenu()
+			-- dentro do próprio handler, sem trava: duplo-clique criava
+			-- duas raids, e o wait pendurava a thread do evento.
+			acaoServidor(function()
 				createRaidRemote:InvokeServer(boss.id)
+				refreshMenu()
 			end)
-			task.wait(0.4)
-			refreshMenu()
 		end)
 	end
 end
@@ -557,11 +678,11 @@ local function renderEditorList()
 					end
 				end)
 			else
-				pcall(function()
+				-- (V3) com trava e sem task.wait pendurando o handler
+				acaoServidor(function()
 					adminRemoveBossRemote:InvokeServer(boss.id)
+					refreshMenu()
 				end)
-				task.wait(0.3)
-				refreshMenu()
 			end
 		end)
 	end
@@ -609,6 +730,11 @@ local function renderEditorForm()
 	-- Salvar / Voltar
 	local saveBtn = makeButton(panel, "💾 SALVAR", COLORS.GREEN, UDim2.new(0.42, 0, 0.08, 0), UDim2.new(0.05, 0, 0.86, 0))
 	saveBtn.MouseButton1Click:Connect(function()
+		if nameBox.Text == "" then
+			showNotification("Dê um nome ao boss antes de salvar.", false)
+			return
+		end
+
 		local bossInfo = {
 			id = boss and boss.id or nil,
 			name = nameBox.Text,
@@ -618,21 +744,24 @@ local function renderEditorForm()
 			enabled = enabled,
 			minCoins = tonumber(coinsBox.Text) or 0,
 			minBounty = tonumber(bountyBox.Text) or 0,
-			requiredCharacter = charBox.Text,
+			-- (V3) Campo vazio precisa virar nil, não "".
+			-- String vazia é TRUTHY em Lua, então o `if
+			-- boss.requiredCharacter then` do buildReqText passava e a
+			-- lista mostrava "Requisitos: 🎭 " com nada depois do ícone.
+			requiredCharacter = charBox.Text ~= "" and charBox.Text or nil,
 		}
 
-		local success, ok, result = pcall(function()
-			return adminSaveBossRemote:InvokeServer(bossInfo)
+		acaoServidor(function()
+			local ok, result = adminSaveBossRemote:InvokeServer(bossInfo)
+			if ok then
+				showNotification("Boss salvo com sucesso!", true)
+				viewMode = "editor"
+				editingBoss = nil
+				refreshMenu()
+			else
+				showNotification(tostring(result or "Erro ao salvar!"), false)
+			end
 		end)
-
-		if success and ok then
-			showNotification("Boss salvo com sucesso!", true)
-			viewMode = "editor"
-			editingBoss = nil
-			refreshMenu()
-		else
-			showNotification(tostring(result or "Erro ao salvar!"), false)
-		end
 	end)
 
 	local backBtn = makeButton(panel, "← VOLTAR", COLORS.PANEL, UDim2.new(0.42, 0, 0.08, 0), UDim2.new(0.53, 0, 0.86, 0))
@@ -662,9 +791,49 @@ refreshMenu = function()
 		return
 	end
 
-	local data = fetchData()
-	if not data then
+	-- (V3) Sem servidor, o menu explica em vez de abrir vazio
+	if SERVIDOR_AUSENTE then
+		title.Text = "👹 BOSS RAID"
+		editorToggleBtn.Visible = false
+		local painel = makePanel(0.45, 1)
+		makeLabel(
+			painel,
+			"⚠️ SISTEMA DE RAID INDISPONÍVEL",
+			UDim2.new(0.9, 0, 0.25, 0),
+			UDim2.new(0.05, 0, 0.06, 0),
+			COLORS.RED,
+			Enum.Font.Arcade
+		)
+		makeLabel(
+			painel,
+			"O BossRaidServer não respondeu. Instale-o em ServerScriptService "
+				.. "e entre no jogo de novo.\n\nRemote(s) faltando: "
+				.. table.concat(faltando, ", "),
+			UDim2.new(0.9, 0, 0.6, 0),
+			UDim2.new(0.05, 0, 0.33, 0),
+			COLORS.TEXT_DIM
+		)
 		return
+	end
+
+	local data, veioAgora = fetchData()
+	if not data then
+		title.Text = "👹 BOSS RAID"
+		editorToggleBtn.Visible = false
+		local painel = makePanel(0.3, 1)
+		makeLabel(
+			painel,
+			"Não consegui falar com o servidor. Tente abrir o menu de novo.",
+			UDim2.new(0.9, 0, 0.7, 0),
+			UDim2.new(0.05, 0, 0.15, 0),
+			COLORS.YELLOW
+		)
+		return
+	end
+
+	-- (V3) Mostrando dado velho? Diz isso, em vez de fingir que é atual.
+	if not veioAgora then
+		showNotification("⚠️ Mostrando a última lista carregada — o servidor não respondeu agora.", false)
 	end
 
 	editorToggleBtn.Visible = data.isAdmin and true or false
@@ -695,33 +864,71 @@ end)
 -- ATUALIZAÇÕES EM TEMPO REAL
 -- =====================================
 
-raidStateUpdateRemote.OnClientEvent:Connect(function(raidData)
-	if raidData.removed then
-		stopCountdownDisplay()
-		if menuOpen and viewMode == "player" then
+-- (V3) COALESCÊNCIA — a correção do menu que piscava e não respondia.
+--
+-- O servidor faz broadcast de cada mudança de cada raid para TODOS os
+-- jogadores. O V2 chamava refreshMenu() em cada evento, e refreshMenu()
+-- faz InvokeServer (bloqueante) + reconstrói a GUI inteira. Numa sala
+-- movimentada isso é uma rajada de round-trips e rebuilds por segundo:
+-- a tela some e volta debaixo do dedo do jogador, e o clique se perde
+-- porque o botão foi recriado no meio.
+--
+-- Agora o evento só levanta a bandeira. Um laço único redesenha no
+-- máximo a cada INTERVALO_REFRESH, então vinte eventos no mesmo instante
+-- viram UM redesenho.
+local precisaAtualizar = false
+
+task.spawn(function()
+	while true do
+		task.wait(INTERVALO_REFRESH)
+		if precisaAtualizar and menuOpen and viewMode == "player" then
+			precisaAtualizar = false
 			refreshMenu()
+		elseif precisaAtualizar and not menuOpen then
+			-- Menu fechado: descarta a bandeira. Ao reabrir, o openMenu
+			-- já busca tudo de novo — não faz sentido guardar trabalho
+			-- para uma tela que ninguém está vendo.
+			precisaAtualizar = false
 		end
-		return
-	end
-
-	local isMember = false
-	for _, name in ipairs(raidData.members) do
-		if name == player.Name then
-			isMember = true
-			break
-		end
-	end
-
-	if isMember and raidData.state == "countdown" and raidData.countdownEndsAt then
-		runCountdownDisplay(raidData.countdownEndsAt, raidData.bossIcon .. " " .. raidData.bossName)
-	elseif raidData.state == "lobby" then
-		stopCountdownDisplay()
-	end
-
-	if menuOpen and viewMode == "player" then
-		refreshMenu()
 	end
 end)
+
+if raidStateUpdateRemote then
+	raidStateUpdateRemote.OnClientEvent:Connect(function(raidData)
+		-- (V3) Payload é dado de rede: nada de confiar na forma dele
+		if type(raidData) ~= "table" then
+			return
+		end
+
+		if raidData.removed then
+			stopCountdownDisplay()
+			precisaAtualizar = true
+			return
+		end
+
+		-- (V3) O V2 fazia ipairs(raidData.members) direto. Qualquer
+		-- payload sem `members` derrubava o handler com erro de tipo, e
+		-- daí em diante a tela parava de receber atualização.
+		local isMember = false
+		for _, name in ipairs(raidData.members or {}) do
+			if name == player.Name then
+				isMember = true
+				break
+			end
+		end
+
+		if isMember and raidData.state == "countdown" and raidData.countdownEndsAt then
+			runCountdownDisplay(
+				raidData.countdownEndsAt,
+				string.format("%s %s", raidData.bossIcon or "👹", raidData.bossName or "Boss")
+			)
+		elseif raidData.state == "lobby" then
+			stopCountdownDisplay()
+		end
+
+		precisaAtualizar = true
+	end)
+end
 
 -- =====================================
 -- REGISTRO NO UNIFIED MENU
@@ -749,9 +956,9 @@ task.spawn(function()
 
 	if _G.RegisterMenuCategory then
 		_G.RegisterMenuCategory("BOSS RAID", "👹", openMenu, closeMenu, 8)
-		print("[RAID CLIENT V2] Registrado no UnifiedMenu")
+		print("[RAID CLIENT V3] Registrado no UnifiedMenu")
 	else
-		warn("[RAID CLIENT V2] UnifiedMenu não encontrado — criando botão próprio")
+		warn("[RAID CLIENT V3] UnifiedMenu não encontrado — criando botão próprio")
 
 		local fallbackBtn = Instance.new("TextButton")
 		fallbackBtn.Size = UDim2.new(0.08, 0, 0.05, 0)
@@ -777,4 +984,4 @@ task.spawn(function()
 	end
 end)
 
-print("[RAID CLIENT V2] ✅ Carregado")
+print("[RAID CLIENT V3] ✅ Carregado")

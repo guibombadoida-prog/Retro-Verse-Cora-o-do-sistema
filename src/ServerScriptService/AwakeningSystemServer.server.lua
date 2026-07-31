@@ -1,11 +1,37 @@
 -- ============================================
--- AWAKENING SYSTEM SERVER V3 — DESPERTAR (SEM STUDIO)
+-- AWAKENING SYSTEM SERVER V4 — DESPERTAR (SEM STUDIO)
 -- Coloque em ServerScriptService
 -- Nome: "AwakeningSystemServer"
--- SUBSTITUI: AwakeningSystemServer V2
--- REMOVER:   AwakeningSystemServer V2
+-- SUBSTITUI: AwakeningSystemServer V3
+-- REMOVER:   AwakeningSystemServer V3
 -- DEPENDE DE: AdminRegistryServer_V1, GameManager_V9 (usa AwakenedForm),
---             CharacterCatalogServer_V6 (_G.CharacterCatalog — NOVO no V3)
+--             CharacterCatalogServer_V6 (_G.CharacterCatalog — desde o V3)
+-- ============================================
+-- (V4) UM ID DE MODEL PODE TRAZER AS 7 TOOLS
+--
+-- Antes cada Tool exigia um asset e um ID próprios: 7 Tools = 7 uploads
+-- e 7 campos preenchidos no painel. Agora dá para juntar as Tools todas
+-- dentro de UM Model, subir esse Model uma vez, e usar só o ID dele.
+--
+-- O que o V4 aceita em cada campo de ID:
+--   • Tool sozinha ................. 1 Tool  (igual ao V3, nada muda)
+--   • Model com N Tools dentro ..... N Tools (o caso novo)
+--   • Model > Folder > Tools ....... funciona, a busca é recursiva
+--   • Várias Tools na raiz do asset  todas elas
+--
+-- Ordem: profundidade na ordem dos filhos. A ordem que você vê no
+-- Explorer do Studio é a ordem que vai para a hotbar.
+--
+-- 🐛 DE QUEBRA, UM BUG DE PERDA SILENCIOSA:
+--    O V3 fazia `container:GetChildren()[1]` ao carregar o asset, ou
+--    seja, ficava só com o PRIMEIRO objeto. Um asset com 7 Tools na
+--    raiz perdia 6 sem avisar nada. Agora o container inteiro é varrido.
+--
+-- ⚠️ O TETO DE 7 AGORA É SOBRE O TOTAL, não sobre a quantidade de IDs.
+--    O V3 contava IDs (`if i > MAX then break`), o que deixaria de
+--    proteger o limite: 7 IDs de Model com 7 Tools cada dariam 49.
+--    Quando o teto é atingido as extras são ignoradas COM aviso no
+--    painel, nunca em silêncio.
 -- ============================================
 -- (V3) BUG GRAVE CORRIGIDO — DESPERTAR SOLTO, SEM ORIGINAL
 --
@@ -214,14 +240,11 @@ _G.AwakeningSystem = {
 -- HELPERS: InsertService (carregar Tools por ID)
 -- =====================================
 
-local function extractLoadedContent(container)
-	if not container then
-		return nil
-	end
-	local first = container:GetChildren()[1]
-	return first or container
-end
-
+-- (V4) Devolve o CONTAINER cru do LoadAsset, sem escolher filho.
+-- O V3 fazia `container:GetChildren()[1]`, o que jogava fora tudo que
+-- não fosse o primeiro objeto — se o asset tivesse 7 Tools na raiz,
+-- 6 desapareciam em silêncio. Quem decide o que aproveitar agora é o
+-- collectTools, que varre o container inteiro.
 local function loadAssetSafe(assetId)
 	assetId = tonumber(assetId)
 	if not assetId or assetId <= 0 then
@@ -234,13 +257,43 @@ local function loadAssetSafe(assetId)
 			return InsertService:LoadAsset(assetId)
 		end)
 		if ok and result then
-			return extractLoadedContent(result), nil
+			return result, nil
 		end
 		lastErr = result
 		task.wait(0.5)
 	end
 
 	return nil, "Falha ao carregar asset " .. tostring(assetId) .. ": " .. tostring(lastErr)
+end
+
+-- (V4) UM ID PODE TRAZER VÁRIAS TOOLS
+-- =====================================
+-- Aceita qualquer formato de asset e devolve a lista de Tools que
+-- existirem dentro dele:
+--   • Tool sozinha ................ 1 Tool   (como era no V3)
+--   • Model com 7 Tools dentro .... 7 Tools  (1 ID só)
+--   • Model > Folder > Tools ...... funciona, a busca é recursiva
+--   • 7 Tools na raiz do asset .... 7 Tools
+--
+-- A ordem é a de profundidade (depth-first) na ordem dos filhos, ou
+-- seja: a ordem que você vê no Explorer do Studio é a ordem que vai
+-- para a hotbar. Sem sort, de propósito — reordenar aqui faria a
+-- hotbar não bater com o modelo.
+local function collectTools(container)
+	if not container then
+		return {}
+	end
+	if container:IsA("Tool") then
+		return { container }
+	end
+
+	local encontradas = {}
+	for _, descendente in ipairs(container:GetDescendants()) do
+		if descendente:IsA("Tool") then
+			table.insert(encontradas, descendente)
+		end
+	end
+	return encontradas
 end
 
 local function enforceToolRules(tool)
@@ -252,7 +305,7 @@ local function enforceToolRules(tool)
 	if not tool:FindFirstChild("Handle") then
 		warn(
 			string.format(
-				"[AWAKENING V3] ⚠️ Tool '%s' carregada SEM Handle — não vai funcionar até corrigir o modelo de origem.",
+				"[AWAKENING V4] ⚠️ Tool '%s' carregada SEM Handle — não vai funcionar até corrigir o modelo de origem.",
 				tool.Name
 			)
 		)
@@ -291,22 +344,87 @@ local function buildAwakenedAssets(def)
 
 	local warnings = {}
 
-	for i, toolId in ipairs(def.toolIds or {}) do
-		if i > CONFIG.MAX_TOOLS_PER_CHARACTER then
-			break
-		end
-		local loaded, err = loadAssetSafe(toolId)
-		if loaded and loaded:IsA("Tool") then
-			enforceToolRules(loaded)
-			loaded.Parent = awakenedFolder
-		elseif loaded then
+	-- (V4) O teto agora é sobre o TOTAL de Tools instaladas, não sobre a
+	-- quantidade de IDs. Um único ID de Model pode trazer as 7 de uma vez,
+	-- então contar IDs (como o V3 fazia) deixaria de proteger o limite.
+	local totalTools = 0
+
+	for _, toolId in ipairs(def.toolIds or {}) do
+		if totalTools >= CONFIG.MAX_TOOLS_PER_CHARACTER then
 			table.insert(
 				warnings,
-				string.format("Tool ID %s não é um Tool válido (era %s)", tostring(toolId), loaded.ClassName)
+				string.format(
+					"Teto de %d Tools atingido — ID %s e os seguintes foram ignorados",
+					CONFIG.MAX_TOOLS_PER_CHARACTER,
+					tostring(toolId)
+				)
 			)
-		else
-			table.insert(warnings, "Tool " .. tostring(toolId) .. ": " .. tostring(err))
+			break
 		end
+
+		local loaded, err = loadAssetSafe(toolId)
+		if not loaded then
+			table.insert(warnings, "Tool " .. tostring(toolId) .. ": " .. tostring(err))
+			continue
+		end
+
+		local tools = collectTools(loaded)
+
+		if #tools == 0 then
+			table.insert(
+				warnings,
+				string.format(
+					"ID %s não tem nenhuma Tool dentro (era %s) — suba uma Tool, ou um Model com Tools dentro",
+					tostring(toolId),
+					loaded.ClassName
+				)
+			)
+			continue
+		end
+
+		local espaco = CONFIG.MAX_TOOLS_PER_CHARACTER - totalTools
+		if #tools > espaco then
+			table.insert(
+				warnings,
+				string.format(
+					"ID %s traz %d Tools, mas só cabiam %d (teto de %d no total) — as extras foram ignoradas",
+					tostring(toolId),
+					#tools,
+					espaco,
+					CONFIG.MAX_TOOLS_PER_CHARACTER
+				)
+			)
+		end
+
+		for i = 1, math.min(#tools, espaco) do
+			local tool = tools[i]
+			enforceToolRules(tool)
+			-- Reparentar tira a Tool de dentro do Model; o GameManager_V9
+			-- só olha os filhos DIRETOS de AwakenedForm, então elas têm
+			-- que subir um nível aqui.
+			tool.Parent = awakenedFolder
+			totalTools += 1
+		end
+
+		if #tools > 1 then
+			print(
+				string.format(
+					"[AWAKENING V4] ID %s rendeu %d Tools para '%s' (Model com várias)",
+					tostring(toolId),
+					math.min(#tools, espaco),
+					def.characterName
+				)
+			)
+		end
+	end
+
+	-- O container do LoadAsset e o Model vazio sobram na memória sem pai;
+	-- o coletor do Roblox cuida deles. Nada de :Destroy() aqui (regra do
+	-- projeto), e nada de .Parent = nil porque eles nunca tiveram pai no
+	-- DataModel.
+
+	if totalTools == 0 and #(def.toolIds or {}) > 0 then
+		table.insert(warnings, "Nenhuma Tool foi instalada — confira os IDs")
 	end
 
 	local oldImg = imagesFolder:FindFirstChild(def.characterName .. "_Awakened")
@@ -466,13 +584,13 @@ local function applyRemoteChange(action, name, adminName, isUpdate)
 			-- espalhando o problema para toda a frota de servidores.
 			local warnings, err = buildAwakenedAssets(def)
 			if err then
-				warn("[AWAKENING V3] Sync de '" .. name .. "' ignorado: " .. err)
+				warn("[AWAKENING V4] Sync de '" .. name .. "' ignorado: " .. err)
 				return
 			end
 			awakenDefs[name] = def
 			broadcastAnnouncementLocally(setAnnouncementText(adminName, name, isUpdate), true)
 			if #warnings > 0 then
-				warn("[AWAKENING V3] Avisos ao sincronizar '" .. name .. "': " .. table.concat(warnings, " | "))
+				warn("[AWAKENING V4] Avisos ao sincronizar '" .. name .. "': " .. table.concat(warnings, " | "))
 			end
 		end
 	elseif action == "remove" then
@@ -543,7 +661,7 @@ adminSetAwakening.OnServerInvoke = function(player, payload)
 
 	print(
 		string.format(
-			"[AWAKENING V3] %s %s Despertar de '%s'",
+			"[AWAKENING V4] %s %s Despertar de '%s'",
 			player.Name,
 			isUpdate and "atualizou" or "configurou",
 			def.characterName
@@ -579,7 +697,7 @@ adminRemoveAwakening.OnServerInvoke = function(player, characterName)
 		false
 	)
 
-	print(string.format("[AWAKENING V3] %s removeu Despertar de '%s'", player.Name, characterName))
+	print(string.format("[AWAKENING V4] %s removeu Despertar de '%s'", player.Name, characterName))
 	return true, "Despertar removido em todos os servidores!"
 end
 
@@ -687,7 +805,7 @@ equipAwakeningRemote.OnServerEvent:Connect(function(player, characterName)
 		end
 	end
 
-	print(string.format("[AWAKENING V3] %s desbloqueou o Despertar de '%s'", player.Name, characterName))
+	print(string.format("[AWAKENING V4] %s desbloqueou o Despertar de '%s'", player.Name, characterName))
 end)
 
 -- =====================================
@@ -707,14 +825,14 @@ local function bootLoadAwakenings()
 		if not _G.CharacterCatalog.isReady() then
 			warn(
 				string.format(
-					"[AWAKENING V3] Catálogo não ficou pronto em %ds — seguindo com a pasta Characters como referência",
+					"[AWAKENING V4] Catálogo não ficou pronto em %ds — seguindo com a pasta Characters como referência",
 					CONFIG.CATALOG_WAIT
 				)
 			)
 		end
 	end
 
-	print("[AWAKENING V3] Carregando configurações de Despertar salvas...")
+	print("[AWAKENING V4] Carregando configurações de Despertar salvas...")
 	local index = loadIndex()
 	local loaded = 0
 
@@ -728,23 +846,23 @@ local function bootLoadAwakenings()
 			if err then
 				orphanDefs[name] = def
 				table.insert(orphanNames, name)
-				warn(string.format("[AWAKENING V3] ⚠️ Despertar ÓRFÃO ignorado: '%s' — %s", name, err))
+				warn(string.format("[AWAKENING V4] ⚠️ Despertar ÓRFÃO ignorado: '%s' — %s", name, err))
 			else
 				awakenDefs[name] = def
 				loaded += 1
 				if #warnings > 0 then
-					warn("[AWAKENING V3] Avisos ao carregar '" .. name .. "': " .. table.concat(warnings, " | "))
+					warn("[AWAKENING V4] Avisos ao carregar '" .. name .. "': " .. table.concat(warnings, " | "))
 				end
 			end
 		end
 	end
 
-	print(string.format("[AWAKENING V3] ✓ %d Despertar(es) carregado(s)", loaded))
+	print(string.format("[AWAKENING V4] ✓ %d Despertar(es) carregado(s)", loaded))
 
 	if #orphanNames > 0 then
 		warn(
 			string.format(
-				"[AWAKENING V3] ⚠️ %d Despertar(es) ÓRFÃO(S) encontrado(s): %s\n"
+				"[AWAKENING V4] ⚠️ %d Despertar(es) ÓRFÃO(S) encontrado(s): %s\n"
 					.. "  Foram criados sem personagem original (bug do V2) e NUNCA poderiam ser\n"
 					.. "  desbloqueados, porque ninguém pode possuir um personagem que não existe.\n"
 					.. "  Para resolver, escolha um caminho por nome:\n"
@@ -765,7 +883,7 @@ task.spawn(bootLoadAwakenings)
 -- =====================================
 
 _G.DebugAwakening = function()
-	print("\n========== DEBUG AWAKENING V3 ==========")
+	print("\n========== DEBUG AWAKENING V4 ==========")
 
 	local algum = false
 	for name, def in pairs(awakenDefs) do
@@ -808,12 +926,15 @@ end
 
 print([[
 ╔════════════════════════════════════════════════════╗
-║  ⚡ AWAKENING SYSTEM SERVER V3 CARREGADO           ║
+║  ⚡ AWAKENING SYSTEM SERVER V4 CARREGADO           ║
 ╠════════════════════════════════════════════════════╣
-║  SUBSTITUI: AwakeningSystemServer V2               ║
-║  REMOVER:   AwakeningSystemServer V2               ║
+║  SUBSTITUI: AwakeningSystemServer V3               ║
+║  REMOVER:   AwakeningSystemServer V3               ║
 ║  DEPENDE DE: AdminRegistryServer_V1, GameManager_V9║
 ║              CharacterCatalogServer_V6 (NOVO)      ║
+╠════════════════════════════════════════════════════╣
+║  (V4) 1 ID de Model pode trazer as 7 Tools         ║
+║  (V4) Teto de 7 agora é sobre o TOTAL de Tools     ║
 ╠════════════════════════════════════════════════════╣
 ║  (V3) NÃO dá mais para criar Despertar solto:      ║
 ║       exige personagem original no catálogo        ║
@@ -824,7 +945,7 @@ print([[
 ║  (V2) Guarda de JobId (sem anúncio duplicado)      ║
 ║  (V2) Edição reconhecida: "✏️ atualizou"           ║
 ║  • Condição fixa: possuir o original + Badge       ║
-║  • Até 7 Tools na forma despertada, via Model ID   ║
+║  • Até 7 Tools no total na forma despertada        ║
 ╠════════════════════════════════════════════════════╣
 ║  DEBUG: _G.DebugAwakening()                         ║
 ╚════════════════════════════════════════════════════╝
