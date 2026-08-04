@@ -96,6 +96,7 @@ Cada passiva do `PassiveCatalog` já declara seu `vfx` (`BRILHO_METALICO`,
 
 - [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) — inventário completo dos scripts, versões e mapa de dependências `_G`
 - [`docs/Diretrizes_Sistema_Chefao_Boss.md`](docs/Diretrizes_Sistema_Chefao_Boss.md) — regras formais (V5) para criar chefões
+- [`docs/Sugestao_Sistema_Novos_Jogadores.md`](docs/Sugestao_Sistema_Novos_Jogadores.md) — proposta da Jornada do Recruta para atrair e reter novos jogadores
 
 ---
 
