@@ -69,12 +69,12 @@ O sistema deve funcionar como uma trilha opcional, mas muito visível:
 - Retorno no dia seguinte após receber recompensas iniciais.
 - Quantidade de jogadores que chega à primeira atividade social.
 
-## MVP recomendado
+## MVP implementado
 
-Para uma primeira versão, implementar apenas três capítulos:
+A primeira versão implementa os três capítulos abaixo em `RecruitJourneyServer` e `RecruitJourneyClient`:
 
 1. escolher personagem inicial;
 2. derrotar 3 NPCs fracos;
 3. subir 1 nível e receber uma recompensa de formatura parcial.
 
-Depois do MVP, adicionar passiva, missão real e atividade social como capítulos extras.
+Depois desta versão, adicionar passiva, missão real e atividade social como capítulos extras.

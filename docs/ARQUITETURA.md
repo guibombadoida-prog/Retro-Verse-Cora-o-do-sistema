@@ -33,6 +33,7 @@ de cada arquivo e o mapa de dependências entre eles.
 | `LoadingScreenServer.server.lua` | `LoadingScreenServer` | V2 | Lado servidor do *handshake* da tela de carregamento |
 | `MainSystemInitializer.server.lua` | `MainSystemInitializer` | V2 | Cria pastas e Remotes, conecta sistemas, monitora |
 | `MissionSystemServer.server.lua` | `MissionSystemServer` | V2 | Missões |
+| `RecruitJourneyServer.server.lua` | `RecruitJourneyServer` | V1 | Jornada do Recruta para onboarding, capítulos iniciais e recompensas de retenção |
 | `NPC_Server_V2.server.lua` | `NPC_Server_V2` | V2 | NPCs com recompensa proporcional à vida máxima |
 | `NpcPassiveBridge.server.lua` | `NpcPassiveBridge` | V2 | Faz as passivas do jogador valerem contra NPCs |
 | `PassiveSystemServer.server.lua` | `PassiveSystemServer` | V8 | Sistema de passivas |
@@ -78,6 +79,7 @@ todas as Tools que consomem o núcleo.
 | `DuelMenuClient.client.lua` | `DuelMenuClient` | V2 | Menu de duelos |
 | `HealthDisplay.client.lua` | `HealthDisplay` | V4 | Barra de vida + barra de energia (estilo retro) |
 | `MissionsMenuClient.client.lua` | `MissionsMenuClient` | V2 | Menu de missões |
+| `RecruitJourneyClient.client.lua` | `RecruitJourneyClient` | V1 | Menu da Jornada do Recruta no hub unificado |
 | `MusicPlayerClient_V2.client.lua` | `MusicPlayerClient_V2` | V5 | Player de música (abre só pelo menu unificado) |
 | `PassiveMenuClient.client.lua` | `PassiveMenuClient` | V3 | Menu de passivas |
 | `RetroHotbarClient.client.lua` | `RetroHotbarClient` | V2 | Hotbar/backpack retrô, com perfis por dispositivo |
@@ -148,6 +150,7 @@ tabelas e funções publicadas em `_G`. Cada API tem **um dono único**.
 | `StatusEffect` | `StatusEffectServer` | — |
 | `CharacterStats` | `CharacterStatsServer` | `StatService` (chama `.refresh` ao equipar). O `CharacterStatsAdminClient` fala por Remote, não por `_G` |
 | `DailyRewards` | `DailyRewardsServer` | — |
+| `RecruitJourney` | `RecruitJourneyServer` | — |
 | `BossRaid` | `BossRaidServer` | — |
 | `WantedSystem` | `WantedSystemServer` | — |
 | `NpcSystem` | `NPC_Server_V2` | — |

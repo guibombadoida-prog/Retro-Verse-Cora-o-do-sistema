@@ -82,6 +82,8 @@ local function createAllRemotes()
 		{ type = "RemoteFunction", name = "ClaimDailyReward", parent = remotes },
 		{ type = "RemoteFunction", name = "GetDailyRewardStatus", parent = remotes },
 		{ type = "RemoteFunction", name = "CheckBadge", parent = remotes },
+		{ type = "RemoteFunction", name = "GetRecruitJourney", parent = remotes },
+		{ type = "RemoteFunction", name = "ClaimRecruitJourney", parent = remotes },
 
 		-- RemoteEvents (para comunicação unidirecional)
 		{ type = "RemoteEvent", name = "PurchaseCharacter", parent = remotes },
@@ -97,6 +99,7 @@ local function createAllRemotes()
 		{ type = "RemoteEvent", name = "TutorialComplete", parent = remotes },
 		{ type = "RemoteEvent", name = "ForceSpawn", parent = remotes },
 		{ type = "RemoteEvent", name = "RedeemGamepassCharacter", parent = remotes },
+		{ type = "RemoteEvent", name = "RecruitJourneyUpdate", parent = remotes },
 
 		-- Events (para eventos do jogo)
 		{ type = "RemoteEvent", name = "PlayerKilled", parent = events },

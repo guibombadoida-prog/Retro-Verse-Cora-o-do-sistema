@@ -17,9 +17,9 @@ src/ServerScriptService/DataManager.server.lua
 
 | Pasta | Corresponde no Studio a | Conteúdo |
 |---|---|---|
-| `src/ServerScriptService/` | `ServerScriptService` | 31 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
+| `src/ServerScriptService/` | `ServerScriptService` | 32 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
 | `src/ServerScriptService/RetroVerse/` | `ServerScriptService > RetroVerse` | 1 `ModuleScript` (Núcleo de Combate) |
-| `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 18 `LocalScript` de interface/cliente |
+| `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 19 `LocalScript` de interface/cliente |
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
 | `src/ReplicatedFirst/` | `ReplicatedFirst` | 1 `LocalScript` (tela de carregamento) |
 | `docs/` | — | Diretrizes formais e mapa da arquitetura |
@@ -61,7 +61,7 @@ o que importa é **não faltar ninguém na pasta**:
 
 1. **Base** — `DataManager` (dono de `_G.PlayerDataManager`), `AdminRegistryServer`
 2. **Serviços de stats** — `StatService`, `CharacterLevelServer`, `PassiveCatalog`
-3. **Catálogo e jogo** — `CharacterCatalogServer`, `GameManager`, `SpawnSystem`
+3. **Catálogo e jogo** — `CharacterCatalogServer`, `GameManager`, `SpawnSystem`, `RecruitJourneyServer`
 4. **Combate** — `DamageAttribution`, `RetroVerse/NucleoCombate_V2`, `StatusEffectServer`, `EnergySystemServer`, `PassiveSystemServer`, `TeamDamageProtection`
 5. **Demais sistemas de servidor** — o resto de `ServerScriptService`
 6. **Cliente** — `UnifiedMenuClient` é o dono de `_G.RegisterMenuCategory`; os outros
