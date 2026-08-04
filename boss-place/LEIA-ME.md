@@ -22,6 +22,22 @@ Todos em `ServerScriptService` da place do chefe:
 | `Boss_NoPvpProtection.server.lua` | `Boss_NoPvpProtection` | 1 | Anula dano jogador→jogador. **Substitui** o `TeamDamageProtection` aqui |
 | `Boss_ExitTeleport.server.lua` | `Boss_ExitTeleport` | 7, 9, 13 | Recompensa → confirma → teleporta. Nunca o contrário |
 
+### E um que vai DENTRO do Model do chefe
+
+| Arquivo | Nome no Studio | Onde | Função |
+|---|---|---|---|
+| `Boss_ModelController.server.lua` | `Boss_ModelController` | **dentro do Model do chefe** | Cérebro: gate → HP travado → perseguição → dano → morte |
+
+⚠️ Ele **substitui** quatro scripts do modelo baixado: `KillScript` (+ `Delete`),
+`Pathfinding`, `AI` e `AInot`. **Apague os quatro** — rodar qualquer um junto
+significa dois cérebros disputando o mesmo `Humanoid`.
+
+O motivo de substituir em vez de remendar está em
+[`../docs/Auditoria_Modelo_Boss_Angel.md`](../docs/Auditoria_Modelo_Boss_Angel.md):
+o `KillScript` matava com `Humanoid.Health = 0`, que as Diretrizes proíbem e que
+pula o pipeline inteiro (`_G.CanDamagePlayer`, `Boss_NoPvpProtection`,
+`StatService`, passivas de Negação/Reverso, `DamageAttribution`).
+
 ### Ordem de dependência
 
 ```
