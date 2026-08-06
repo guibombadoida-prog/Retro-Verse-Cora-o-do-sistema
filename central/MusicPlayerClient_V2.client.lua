@@ -487,7 +487,40 @@ end
 -- pergunta ao Roblox se aquilo é áudio, preenche nome e autor sozinho e
 -- grava no DataStore. Todos os servidores recebem na hora.
 
+-- ⚠️ ORDEM IMPORTA AQUI.
+-- createMusicInterface() roda na CARGA do script, mas descobrir se o
+-- jogador é admin é assíncrono (WaitForChild + InvokeServer). Se o
+-- painel só fosse criado quando ehAdmin já fosse true, ele nunca
+-- existiria: a interface é montada antes da resposta chegar, e não
+-- havia nova tentativa.
+--
+-- Por isso o painel é SEMPRE construído, porém invisível, e só é
+-- revelado quando a resposta chega. Quem não é admin nunca vê nada — e
+-- mesmo que forjasse a chamada, o MusicCatalogServer recusa e dá Kick.
 local ehAdmin = false
+local PainelAdmin = nil
+local AreaConteudo = nil
+local AlturaPainelAdmin = 0
+
+local painelJaRevelado = false
+
+local function revelarPainelAdmin()
+	if painelJaRevelado or not (ehAdmin and PainelAdmin) then
+		return
+	end
+	-- Guarda: a revelação pode ser disparada por dois caminhos (a
+	-- resposta do IsAdminCheck e a criação do painel). Sem isso a área
+	-- de conteúdo encolheria duas vezes.
+	painelJaRevelado = true
+
+	PainelAdmin.Visible = true
+
+	-- Encolhe a área de conteúdo para o painel não cobrir a playlist
+	if AreaConteudo and AlturaPainelAdmin > 0 then
+		local s = AreaConteudo.Size
+		AreaConteudo.Size = UDim2.new(s.X.Scale, s.X.Offset, s.Y.Scale, s.Y.Offset - AlturaPainelAdmin - 6)
+	end
+end
 
 task.spawn(function()
 	local rem = ReplicatedStorage:WaitForChild("Remotes", 30)
@@ -499,17 +532,19 @@ task.spawn(function()
 		return check:InvokeServer()
 	end)
 	ehAdmin = ok and resultado == true
+
+	if ehAdmin then
+		print("[MUSIC V6] Admin reconhecido — painel de ID liberado")
+		revelarPainelAdmin()
+	end
 end)
 
 local function CriarPainelAdmin(pai)
-	if not ehAdmin then
-		return
-	end
-
 	local adminRemotes = ReplicatedStorage:WaitForChild("Remotes", 10)
-	local addRemote = adminRemotes and adminRemotes:FindFirstChild("AdminMusicAdd")
+	local addRemote = adminRemotes and adminRemotes:WaitForChild("AdminMusicAdd", 10)
 	local removeRemote = adminRemotes and adminRemotes:FindFirstChild("AdminMusicRemove")
 	if not addRemote then
+		warn("[MUSIC V6] ⚠️ AdminMusicAdd não encontrado — o MusicCatalogServer está instalado?")
 		return
 	end
 
@@ -521,7 +556,16 @@ local function CriarPainelAdmin(pai)
 	painel.BorderColor3 = COLORS.warning
 	painel.BorderSizePixel = 2
 	painel.ZIndex = 6
+	painel.Visible = false -- revelado só quando o servidor confirma admin
 	painel.Parent = pai
+
+	PainelAdmin = painel
+	AlturaPainelAdmin = isMobile and 62 or 54
+
+	-- Se a resposta do IsAdminCheck já tiver chegado, revela agora
+	if ehAdmin then
+		task.defer(revelarPainelAdmin)
+	end
 
 	local titulo = Instance.new("TextLabel")
 	titulo.Size = UDim2.new(0.3, 0, 0, 16)
@@ -911,14 +955,6 @@ local function createMusicInterface()
 	CriarVisualizer(nowPanel)
 
 	-- =====================================
-	-- (V6) PAINEL DE ADMIN — ADICIONAR MÚSICA POR ID
-	-- =====================================
-	-- Só aparece para quem o AdminRegistryServer reconhece. O público
-	-- nem vê o painel, e mesmo que forjasse a chamada, o
-	-- MusicCatalogServer recusa e dá Kick.
-	CriarPainelAdmin(mainWindow)
-
-	-- =====================================
 	-- ÁREA DE CONTEÚDO
 	-- =====================================
 
@@ -942,6 +978,18 @@ local function createMusicInterface()
 	contentArea.BackgroundTransparency = 1
 	contentArea.BorderSizePixel = 0
 	contentArea.Parent = mainWindow
+
+	-- =====================================
+	-- (V6) PAINEL DE ADMIN — ADICIONAR MÚSICA POR ID
+	-- =====================================
+	-- Vem DEPOIS da contentArea de propósito: ao ser revelado, o painel
+	-- encolhe a área de conteúdo para não cobrir a playlist, e para isso
+	-- precisa que ela já exista.
+	AreaConteudo = contentArea
+	-- task.spawn: o CriarPainelAdmin espera o remote AdminMusicAdd
+	-- aparecer, e sem isso a montagem inteira da GUI ficaria travada
+	-- por até 10s quando o MusicCatalogServer não estivesse instalado.
+	task.spawn(CriarPainelAdmin, mainWindow)
 
 	-- =====================================
 	-- LAYOUT PC (3 COLUNAS)
