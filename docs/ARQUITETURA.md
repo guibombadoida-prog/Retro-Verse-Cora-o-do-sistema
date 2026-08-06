@@ -23,7 +23,7 @@ de cada arquivo e o mapa de dependências entre eles.
 | `CharacterCatalogServer.server.lua` | `CharacterCatalogServer` | V6 | Catálogo de personagens 100% dinâmico |
 | `CharacterLevelServer.server.lua` | `CharacterLevelServer` | V1 | Nível **por personagem** (1–30): curva de XP, slots de passiva e energia |
 | `CharacterStatsServer.server.lua` | `CharacterStatsServer` | V2 | Atributos por personagem |
-| `DailyRewardsServer.server.lua` | `DailyRewardsServer` | V5 | Recompensas diárias e recuperação de dia perdido |
+| `DailyRewardsServer.server.lua` | `DailyRewardsServer` | V6 | Recompensas diárias e recuperação de dia perdido. O V6 tirou o personagem-fantasma "Daily Champion" do bônus do dia 6 |
 | `DamageAttribution.server.lua` | `DamageAttribution` | V4 | Atribui a autoria de cada dano — base do sistema de kill |
 | `DataManager.server.lua` | `DataManager` | V8 | DataStore, moedas, bounty, inventário. **Dono de `_G.PlayerDataManager`** |
 | `DuelSystemServer.server.lua` | `DuelSystemServer` | V2 | Duelos 1v1 |
@@ -33,6 +33,7 @@ de cada arquivo e o mapa de dependências entre eles.
 | `LoadingScreenServer.server.lua` | `LoadingScreenServer` | V2 | Lado servidor do *handshake* da tela de carregamento |
 | `MainSystemInitializer.server.lua` | `MainSystemInitializer` | V2 | Cria pastas e Remotes, conecta sistemas, monitora |
 | `MissionSystemServer.server.lua` | `MissionSystemServer` | V2 | Missões |
+| `RecruitJourneyServer.server.lua` | `RecruitJourneyServer` | V2 | Jornada do Recruta: capítulos de onboarding, com DataStore próprio (`RVRecruitJourneyV1`) |
 | `NPC_Server_V2.server.lua` | `NPC_Server_V2` | V2 | NPCs com recompensa proporcional à vida máxima |
 | `NpcPassiveBridge.server.lua` | `NpcPassiveBridge` | V2 | Faz as passivas do jogador valerem contra NPCs |
 | `PassiveSystemServer.server.lua` | `PassiveSystemServer` | V8 | Sistema de passivas |
@@ -78,6 +79,7 @@ todas as Tools que consomem o núcleo.
 | `DuelMenuClient.client.lua` | `DuelMenuClient` | V2 | Menu de duelos |
 | `HealthDisplay.client.lua` | `HealthDisplay` | V4 | Barra de vida + barra de energia (estilo retro) |
 | `MissionsMenuClient.client.lua` | `MissionsMenuClient` | V2 | Menu de missões |
+| `RecruitJourneyClient.client.lua` | `RecruitJourneyClient` | V2 | Menu da Jornada do Recruta (categoria `RECRUTA`, ordem 3) |
 | `MusicPlayerClient_V2.client.lua` | `MusicPlayerClient_V2` | V5 | Player de música (abre só pelo menu unificado) |
 | `PassiveMenuClient.client.lua` | `PassiveMenuClient` | V3 | Menu de passivas |
 | `RetroHotbarClient.client.lua` | `RetroHotbarClient` | V2 | Hotbar/backpack retrô, com perfis por dispositivo |
@@ -148,6 +150,7 @@ tabelas e funções publicadas em `_G`. Cada API tem **um dono único**.
 | `StatusEffect` | `StatusEffectServer` | — |
 | `CharacterStats` | `CharacterStatsServer` | `StatService` (chama `.refresh` ao equipar). O `CharacterStatsAdminClient` fala por Remote, não por `_G` |
 | `DailyRewards` | `DailyRewardsServer` | — |
+| `RecruitJourney` | `RecruitJourneyServer` | — |
 | `BossRaid` | `BossRaidServer` | — |
 | `WantedSystem` | `WantedSystemServer` | — |
 | `NpcSystem` | `NPC_Server_V2` | — |
@@ -171,7 +174,8 @@ Cada sistema expõe seu próprio `_G.Debug*` para uso no console do servidor:
 `DebugAwakening`, `DebugCatalog`, `DebugCharacterLevel`, `DebugCharacterStats`,
 `DebugDailyRewards`, `DebugEfeitos`, `DebugEnergy`, `DebugGameManager`,
 `DebugMovement`, `DebugNpcBridge`, `DebugNucleo`, `DebugPassives`,
-`DebugPlayerStatus`, `DebugSpawnState`, `DebugStats`, `DebugTeams`, `DebugTutorial`.
+`DebugPlayerStatus`, `DebugRecruitJourney`, `DebugSpawnState`, `DebugStats`,
+`DebugTeams`, `DebugTutorial`.
 
 O `StatService` traz também `_G.SimulateDamage("Atacante", "Vítima", 50, "Melee")`,
 que roda a fórmula de dano inteira e imprime cada etapa — dá para conferir

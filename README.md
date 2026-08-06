@@ -20,9 +20,9 @@ src/ServerScriptService/DataManager.server.lua
 
 | Pasta | Corresponde no Studio a | Conteúdo |
 |---|---|---|
-| `src/ServerScriptService/` | `ServerScriptService` | 31 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
+| `src/ServerScriptService/` | `ServerScriptService` | 32 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
 | `src/ServerScriptService/RetroVerse/` | `ServerScriptService > RetroVerse` | 1 `ModuleScript` (Núcleo de Combate) |
-| `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 18 `LocalScript` de interface/cliente |
+| `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 19 `LocalScript` de interface/cliente |
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
 | `src/ReplicatedFirst/` | `ReplicatedFirst` | 1 `LocalScript` (tela de carregamento) |
 | `docs/` | — | Diretrizes formais e mapa da arquitetura |
