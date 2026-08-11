@@ -1905,51 +1905,23 @@ createSystem = function()
 			)
 			index = index + 1
 		end
-
-		-- (V8) CARDS DAS FORMAS DESPERTAS
-		-- O Despertar não vive em ownedCharacters: o servidor grava numa
-		-- lista à parte (data.awakenedCharacters, via addAwakenedCharacter).
-		-- Por isso ele nunca aparecia no inventário — o loop acima só lê
-		-- ownedCharacters. Aqui cada desbloqueio ganha o card dele.
+		-- (V9) OS CARDS DE FORMA DESPERTA FORAM REMOVIDOS.
 		--
-		-- O card equipa pelo nome do ORIGINAL de propósito: é assim que o
-		-- servidor funciona. Uma vez desbloqueado, o SelectCharacter do
-		-- original já entrega a forma desperta (GameManager_V9,
-		-- `usingAwakened`) — não existe um "equipar desperto" separado.
-		for _, originalName in ipairs(playerData.awakenedCharacters or {}) do
-			local nomeDesperto = originalName .. " (Despertado)"
-			if checkAwakeningRemote then
-				local ok, info = pcall(function()
-					return checkAwakeningRemote:InvokeServer(originalName)
-				end)
-				if ok and info and info.awakening and info.awakening.displayName then
-					nomeDesperto = info.awakening.displayName
-				end
-			end
-
-			local baseDef = getCatalogDef(originalName)
-			local awakenedInfo = {
-				name = originalName, -- equipar usa o nome do original
-				displayName = nomeDesperto,
-				isAwakenedCard = true,
-				category = "Reward",
-				value = 0,
-				rarity = "AWAKENED",
-				health = baseDef and baseDef.health or nil,
-				description = "Forma desperta de " .. originalName .. ". Equipar o original já usa esta forma.",
-			}
-
-			local col = index % cardConfig.columns
-			local row = math.floor(index / cardConfig.columns)
-			local card = createCharacterCard(awakenedInfo, invScroll, cardConfig, true)
-			card.Position = UDim2.new(
-				0,
-				spacing + col * (cardConfig.width + spacing),
-				0,
-				spacing + row * (cardConfig.height + spacing)
-			)
-			index = index + 1
-		end
+		-- Até o V8 cada Despertar desbloqueado virava um card separado no
+		-- inventário, gerado a partir de data.awakenedCharacters. Isso
+		-- fazia sentido quando o Despertar era uma posse permanente que
+		-- se equipava.
+		--
+		-- Agora o Despertar é uma FORMA TEMPORÁRIA do personagem normal,
+		-- disparada pela barra do AwakeningMeterServer em combate. Não há
+		-- o que equipar, então o card não tem função — ele só confundiria,
+		-- mostrando algo clicável que não faz nada.
+		--
+		-- A informação do Despertar continua visível: aparece no card do
+		-- personagem NORMAL, como faixa de informação.
+		--
+		-- A lista data.awakenedCharacters de quem jogou no sistema antigo
+		-- é limpa no login pelo AwakeningSystemServer V5.
 
 		-- Inventário vazio → aviso
 		if index == 0 then

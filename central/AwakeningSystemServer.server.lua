@@ -978,6 +978,74 @@ _G.DebugAwakening = function()
 	print("=========================================\n")
 end
 
+
+-- =====================================
+-- (V5) LIMPEZA DO SISTEMA ANTIGO
+-- =====================================
+-- Quem jogou antes do V5 tem nomes gravados em data.awakenedCharacters:
+-- era assim que o Despertar ficava desbloqueado para sempre. Essa lista
+-- não manda mais em nada — o GameManager V10 decide a forma pelo
+-- medidor, não por ela.
+--
+-- Deixá-la lá não é inofensivo: o `hasAwakening` do DataManager continua
+-- respondendo true, e qualquer script antigo que ainda consulte isso
+-- passaria a ver o jogador como permanentemente desperto. Some com ela
+-- no login.
+--
+-- Isso NÃO tira nada de valor do jogador: o Despertar agora vem junto
+-- com o personagem normal, então quem tinha desbloqueado continua tendo
+-- acesso — e quem não tinha, ganhou.
+
+local function limparDespertarAntigo(player)
+	if not (_G.PlayerDataManager and _G.PlayerDataManager.getPlayerData) then
+		return
+	end
+
+	local dados = _G.PlayerDataManager.getPlayerData(player)
+	if not dados then
+		return
+	end
+
+	local lista = dados.awakenedCharacters
+	if type(lista) ~= "table" or #lista == 0 then
+		return
+	end
+
+	local quantos = #lista
+	dados.awakenedCharacters = {}
+
+	if _G.PlayerDataManager.savePlayerData then
+		_G.PlayerDataManager.savePlayerData(player)
+	end
+
+	print(
+		string.format(
+			"[AWAKENING V5] 🧹 %s: %d desbloqueio(s) do sistema antigo limpo(s) — o Despertar agora vem junto com o personagem",
+			player.Name,
+			quantos
+		)
+	)
+end
+
+local function aoEntrar(player)
+	task.spawn(function()
+		-- Espera os dados do jogador carregarem
+		local espera = 0
+		while not _G.PlayerDataManager.getPlayerData(player) and espera < 15 do
+			task.wait(0.5)
+			espera = espera + 0.5
+		end
+		limparDespertarAntigo(player)
+	end)
+end
+
+Players.PlayerAdded:Connect(aoEntrar)
+
+-- Quem já estava no servidor quando este script carregou
+for _, player in ipairs(Players:GetPlayers()) do
+	aoEntrar(player)
+end
+
 print([[
 ╔════════════════════════════════════════════════════╗
 ║  ⚡ AWAKENING SYSTEM SERVER V4 CARREGADO           ║
