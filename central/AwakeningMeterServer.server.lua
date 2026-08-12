@@ -113,6 +113,7 @@ local function novoEstado()
 		terminaEm = 0,
 		cooldownAte = 0,
 		personagem = nil,
+		def = nil, -- definição do Despertar em cache (ver resolverDefinicao)
 		sujo = true,
 	}
 end
@@ -128,16 +129,52 @@ end
 -- DEFINIÇÃO DO DESPERTAR DO PERSONAGEM EQUIPADO
 -- =====================================
 
+-- ⚠️ NÃO LEIA `data.equippedCharacter` AQUI.
+--
+-- O savePlayerData do DataManager faz `data.equippedCharacter = nil` no
+-- cache VIVO antes de gravar (de propósito: equipar não persiste entre
+-- sessões), e o autosave roda a cada 30 segundos. Quem lê esse campo vê
+-- o jogador como "sem personagem" a cada meio minuto.
+--
+-- Foi exatamente isso que fazia a barra SUMIR sozinha: o laço de troca
+-- de personagem via `nil ~= nome`, achava que o jogador tinha trocado,
+-- zerava a barra e marcava ativo = false. E o definicaoAtiva também
+-- passava a devolver nil, então a barra parava de encher.
+--
+-- A fonte viva é o GameManager, que guarda o equipado em memória.
 local function personagemEquipado(player)
+	if _G.GameManagerConfig and _G.GameManagerConfig.getEquippedCharacter then
+		local ok, nome = pcall(_G.GameManagerConfig.getEquippedCharacter, player)
+		if ok and type(nome) == "string" and nome ~= "" then
+			return nome
+		end
+		-- GameManager presente e sem personagem equipado: é nil de verdade
+		if ok then
+			return nil
+		end
+	end
+
+	-- Reserva, só se o GameManager não estiver disponível
 	local dados = _G.PlayerDataManager.getPlayerData(player)
 	return dados and dados.equippedCharacter or nil
 end
 
--- Devolve a definição do Despertar SE o personagem equipado tiver uma
--- e o jogador puder usá-la. Senão devolve nil — e sem definição a barra
--- simplesmente não existe para aquele personagem.
-local function definicaoAtiva(player)
-	local nome = personagemEquipado(player)
+-- Declarada aqui porque atualizarPersonagem precisa dela e a definição
+-- real vem mais abaixo, junto com o resto da troca de forma.
+local remontarTools
+
+local function configDe(def, chave, padrao)
+	local v = def and tonumber(def[chave])
+	if v and v > 0 then
+		return v
+	end
+	return padrao
+end
+
+-- ⚠️ ESTA FUNÇÃO FAZ CHAMADA WEB (UserHasBadgeAsync). Nunca chame por
+-- golpe nem no laço de sync — o resultado fica no cache do jogador
+-- (e.def), renovado só quando o personagem equipado muda.
+local function resolverDefinicao(player, nome)
 	if not nome then
 		return nil
 	end
@@ -160,15 +197,64 @@ local function definicaoAtiva(player)
 		end
 	end
 
-	return def, nome
+	return def
 end
 
-local function configDe(def, chave, padrao)
-	local v = def and tonumber(def[chave])
-	if v and v > 0 then
-		return v
+-- Lê do cache. É isto que o resto do script usa.
+local function definicaoAtiva(player)
+	local e = estado[player]
+	if not e then
+		return nil
 	end
-	return padrao
+	return e.def, e.personagem
+end
+
+-- Renova o cache quando o personagem equipado muda. Chamada pelo laço
+-- de 1 em 1 segundo e no spawn.
+local function atualizarPersonagem(player)
+	local e = getEstado(player)
+	local atual = personagemEquipado(player)
+
+	if atual == e.personagem then
+		return
+	end
+
+	-- Trocou de personagem de verdade
+	local estavaDesperto = e.desperto
+
+	if e.desperto then
+		e.desperto = false
+		e.terminaEm = 0
+	end
+
+	e.personagem = atual
+	e.valor = 0
+	e.def = nil
+	e.sujo = true
+
+	-- Trocar de personagem ENQUANTO DESPERTO deixaria o jogador com as
+	-- Tools despertadas do personagem novo: no momento do equipar o
+	-- estaDesperto ainda respondia true, e o GameManager tirou as Tools
+	-- da pasta AwakenedForm. Como a forma acabou de ser encerrada aqui,
+	-- remontar devolve as Tools normais.
+	if estavaDesperto and atual and remontarTools then
+		remontarTools(player)
+	end
+
+	if atual then
+		-- pcall + task.spawn: a checagem de Badge é web e pode demorar
+		task.spawn(function()
+			local def = resolverDefinicao(player, atual)
+			local atualDepois = estado[player]
+			-- Se o jogador trocou de personagem enquanto a checagem
+			-- rodava, este resultado é velho: descarta.
+			if atualDepois and atualDepois.personagem == atual then
+				atualDepois.def = def
+				atualDepois.max = configDe(def, "medidorMax", CONFIG.MEDIDOR_MAX)
+				atualDepois.sujo = true
+			end
+		end)
+	end
 end
 
 -- =====================================
@@ -189,6 +275,15 @@ task.spawn(function()
 
 		for _, player in ipairs(Players:GetPlayers()) do
 			local e = estado[player]
+
+			-- Enquanto desperto ou em recarga a tela mostra um contador em
+			-- segundos, e contador precisa de pacote a cada tique. Sem
+			-- isto o número congelaria: o `sujo` só liga quando algum
+			-- valor muda, e o tempo passando não muda valor nenhum.
+			if e and (e.desperto or e.cooldownAte > agora) then
+				e.sujo = true
+			end
+
 			if e and e.sujo then
 				e.sujo = false
 				meterUpdate:FireClient(player, {
@@ -197,7 +292,10 @@ task.spawn(function()
 					desperto = e.desperto,
 					restante = e.desperto and math.max(0, e.terminaEm - agora) or 0,
 					cooldown = math.max(0, e.cooldownAte - agora),
-					ativo = e.personagem ~= nil,
+					-- ativo = o personagem equipado TEM Despertar que este
+					-- jogador pode usar. Personagem sem forma despertada
+					-- não mostra barra nenhuma.
+					ativo = e.def ~= nil,
 				})
 			end
 		end
@@ -211,7 +309,7 @@ end)
 -- O GameManager é quem monta a backpack. Aqui só avisamos que o estado
 -- mudou e pedimos que ele remonte — assim a lógica de Tools continua
 -- num lugar só.
-local function remontarTools(player)
+function remontarTools(player)
 	if _G.GameManagerConfig and _G.GameManagerConfig.reapplyEquippedTools then
 		local ok = pcall(_G.GameManagerConfig.reapplyEquippedTools, player)
 		if not ok then
@@ -289,14 +387,15 @@ local function encher(player, quantidade)
 		return
 	end
 
-	local def, nome = definicaoAtiva(player)
+	local def = definicaoAtiva(player)
 	if not def then
 		return -- personagem sem Despertar: barra não existe
 	end
 
+	-- personagem e max são mantidos pelo atualizarPersonagem; aqui só se
+	-- enche. Antes esta função também os escrevia, e por isso a barra só
+	-- passava a existir depois do primeiro golpe.
 	local e = getEstado(player)
-	e.personagem = nome
-	e.max = configDe(def, "medidorMax", CONFIG.MEDIDOR_MAX)
 
 	if e.desperto then
 		return -- desperto não enche
@@ -391,6 +490,9 @@ local function entrou(player)
 		e.terminaEm = 0
 		e.valor = 0
 		e.sujo = true
+		-- `def` e `personagem` NÃO são limpos aqui de propósito: renascer
+		-- não é trocar de personagem, e limpar faria a barra piscar para
+		-- fora da tela a cada morte até o laço de 1s reencontrar tudo.
 
 		task.spawn(acompanharPersonagem, player, character)
 	end)
@@ -398,6 +500,17 @@ local function entrou(player)
 	if player.Character then
 		task.spawn(acompanharPersonagem, player, player.Character)
 	end
+
+	-- Resolve o personagem equipado já na entrada, para a barra aparecer
+	-- sem esperar o laço de 1 em 1 segundo.
+	task.spawn(function()
+		local espera = 0
+		while not _G.PlayerDataManager.getPlayerData(player) and espera < 15 do
+			task.wait(0.5)
+			espera = espera + 0.5
+		end
+		atualizarPersonagem(player)
+	end)
 end
 
 Players.PlayerAdded:Connect(entrou)
@@ -409,22 +522,16 @@ Players.PlayerRemoving:Connect(function(player)
 	estado[player] = nil
 end)
 
--- Trocou de personagem: a barra é por personagem, então zera
+-- Vigia a troca de personagem. A barra é por personagem, então trocar
+-- zera. É também aqui que o cache da definição é renovado — e por isso
+-- a barra aparece assim que o jogador equipa, sem esperar o primeiro
+-- golpe.
 task.spawn(function()
 	while true do
 		task.wait(1)
 		for _, player in ipairs(Players:GetPlayers()) do
-			local e = estado[player]
-			if e then
-				local atual = personagemEquipado(player)
-				if atual ~= e.personagem then
-					if e.desperto then
-						encerrarDespertar(player, true)
-					end
-					e.personagem = atual
-					e.valor = 0
-					e.sujo = true
-				end
+			if estado[player] then
+				atualizarPersonagem(player)
 			end
 		end
 	end
