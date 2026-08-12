@@ -1,5 +1,5 @@
 -- ============================================
--- MUSIC CATALOG SERVER V1
+-- MUSIC CATALOG SERVER V2
 -- Coloque em ServerScriptService
 -- Nome: "MusicCatalogServer"
 -- ============================================
@@ -29,6 +29,28 @@
 --   • Remotes de admin protegidos por isAdmin, com Kick em tentativa
 --     não autorizada
 -- ============================================
+-- (V2) O ID NÃO CHEGAVA NOS OUTROS SERVIDORES — três causas somadas:
+--
+-- 1. INSCRIÇÃO FALHANDO EM SILÊNCIO. O SubscribeAsync estava dentro de
+--    um pcall que engolia o erro. Ele é chamada de rede e falha de vez
+--    em quando no boot; quando falhava, o servidor nunca ficava
+--    inscrito e não havia uma linha no log dizendo isso. Agora tenta
+--    seis vezes com espera crescente e grita se desistir.
+--
+-- 2. CACHE DE LEITURA DO DATASTORE. GetAsync guarda cache de 4 segundos
+--    por chave. Como a mensagem de sync chega em menos de um segundo
+--    depois da escrita, a releitura podia devolver a lista de ANTES da
+--    gravação — o servidor "sincronizava" para o catálogo velho. Agora
+--    a leitura usa DataStoreGetOptions com UseCache = false.
+--
+-- 3. MENSAGEM PERDIDA = CATÁLOGO VELHO PARA SEMPRE. O MessagingService
+--    é entrega de melhor esforço, não garante entrega. Não havia nada
+--    para consertar uma mensagem perdida. Agora existe uma releitura
+--    periódica (INTERVALO_RECONCILIA) que conserta sozinha.
+--
+-- Diagnóstico: _G.DebugMusicCatalog() agora diz se este servidor está
+-- inscrito no sync.
+-- ============================================
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -41,6 +63,11 @@ local CONFIG = {
 	STORE_NAME = "RVMusicCatalogV1",
 	SYNC_TOPIC = "RVMusicCatalogSync",
 	CHAVE = "tracks",
+
+	-- De quanto em quanto tempo o servidor relê o catálogo do DataStore,
+	-- por segurança. O MessagingService é entrega de melhor esforço: se
+	-- uma mensagem se perder, é esta releitura que conserta.
+	INTERVALO_RECONCILIA = 60,
 
 	MAX_FAIXAS = 200,
 	MAX_TAMANHO_NOME = 60,
@@ -177,20 +204,39 @@ end
 -- PERSISTÊNCIA
 -- =====================================
 
+-- ⚠️ GetAsync GUARDA CACHE DE 4 SEGUNDOS por chave.
+--
+-- Quando a mensagem de sync chega logo depois da escrita — que é o caso
+-- normal, ela chega em menos de um segundo — um GetAsync comum pode
+-- devolver a lista de ANTES da gravação, e o servidor aplicaria o
+-- catálogo velho achando que sincronizou.
+--
+-- DataStoreGetOptions com UseCache = false força a leitura real.
+local opcoesLeitura = Instance.new("DataStoreGetOptions")
+opcoesLeitura.UseCache = false
+
 local function carregar()
 	local ok, bruto = pcall(function()
-		return musicStore:GetAsync(CONFIG.CHAVE)
+		return musicStore:GetAsync(CONFIG.CHAVE, opcoesLeitura)
 	end)
 
+	-- Roblox antigo não conhece DataStoreGetOptions: cai no GetAsync
+	-- comum em vez de deixar o catálogo sem carregar.
 	if not ok then
-		warn("[MUSIC CATALOG V1] ⚠️ Falha ao carregar — começando vazio")
+		ok, bruto = pcall(function()
+			return musicStore:GetAsync(CONFIG.CHAVE)
+		end)
+	end
+
+	if not ok then
+		warn("[MUSIC CATALOG V2] ⚠️ Falha ao carregar — começando vazio")
 		faixas = {}
 	else
 		faixas = sanear(bruto)
 	end
 
 	pronto = true
-	print(string.format("[MUSIC CATALOG V1] ✓ %d faixa(s) carregada(s)", #faixas))
+	print(string.format("[MUSIC CATALOG V2] ✓ %d faixa(s) carregada(s)", #faixas))
 end
 
 -- UpdateAsync em vez de SetAsync: dois admins em servidores diferentes
@@ -247,25 +293,97 @@ local function publicarSync(acao, nomeAdmin, titulo)
 	end)
 end
 
-pcall(function()
-	MessagingService:SubscribeAsync(CONFIG.SYNC_TOPIC, function(message)
-		local data = message.Data
-		-- Guarda de JobId: quem publicou já aplicou localmente
-		if type(data) ~= "table" or data.jobId == game.JobId then
+-- ⚠️ O SubscribeAsync PODE FALHAR, e falhar aqui é invisível.
+--
+-- Era isto que fazia a música não chegar nos outros servidores: a
+-- inscrição estava dentro de um pcall que engolia o erro em silêncio.
+-- SubscribeAsync é chamada de rede e falha de vez em quando no boot —
+-- quando falhava, o servidor simplesmente nunca ficava inscrito, sem uma
+-- linha no log. O admin adicionava numa partida e as outras nunca
+-- ficavam sabendo.
+--
+-- Agora ele tenta várias vezes, com espera crescente, e grita se
+-- desistir.
+
+local inscrito = false
+
+local function tratarMensagem(data)
+	-- Guarda de JobId: quem publicou já aplicou localmente
+	if type(data) ~= "table" or data.jobId == game.JobId then
+		return
+	end
+
+	carregar()
+	avisarClientesLocais()
+
+	print(
+		string.format(
+			"[MUSIC CATALOG V2] ↻ Sync de outro servidor: %s (%s)",
+			tostring(data.acao),
+			tostring(data.titulo)
+		)
+	)
+end
+
+task.spawn(function()
+	local espera = 2
+
+	for tentativa = 1, 6 do
+		local ok, err = pcall(function()
+			MessagingService:SubscribeAsync(CONFIG.SYNC_TOPIC, function(message)
+				tratarMensagem(message.Data)
+			end)
+		end)
+
+		if ok then
+			inscrito = true
+			print("[MUSIC CATALOG V2] ✓ Inscrito no sync entre servidores")
 			return
 		end
 
-		carregar()
-		avisarClientesLocais()
-
-		print(
+		warn(
 			string.format(
-				"[MUSIC CATALOG V1] ↻ Sync de outro servidor: %s (%s)",
-				tostring(data.acao),
-				tostring(data.titulo)
+				"[MUSIC CATALOG V2] ⚠️ Tentativa %d de inscrever no sync falhou: %s",
+				tentativa,
+				tostring(err)
 			)
 		)
-	end)
+		task.wait(espera)
+		espera = math.min(espera * 2, 30)
+	end
+
+	warn(
+		"[MUSIC CATALOG V2] ❌ NÃO consegui inscrever no MessagingService. "
+			.. "Este servidor só verá músicas novas pela releitura periódica "
+			.. "(até "
+			.. CONFIG.INTERVALO_RECONCILIA
+			.. "s de atraso)."
+	)
+end)
+
+-- REDE DE SEGURANÇA: releitura periódica.
+-- O MessagingService é entrega de melhor esforço — ele NÃO garante que
+-- a mensagem chegue. Uma mensagem perdida deixaria este servidor com o
+-- catálogo velho para sempre. Reler de tempos em tempos conserta isso
+-- sozinho, e também cobre o caso da inscrição ter falhado de vez.
+task.spawn(function()
+	while true do
+		task.wait(CONFIG.INTERVALO_RECONCILIA)
+
+		local antes = #faixas
+		carregar()
+
+		if #faixas ~= antes then
+			avisarClientesLocais()
+			print(
+				string.format(
+					"[MUSIC CATALOG V2] ↻ Releitura periódica: %d → %d faixa(s)",
+					antes,
+					#faixas
+				)
+			)
+		end
+	end
 end)
 
 -- =====================================
@@ -336,7 +454,7 @@ adminMusicAdd.OnServerInvoke = function(player, idBruto, nomeManual, artistaManu
 
 	avisarClientesLocais()
 	publicarSync("add", player.Name, nome)
-	print(string.format("[MUSIC CATALOG V1] ✅ %s adicionou '%s' (%d)", player.Name, nome, id))
+	print(string.format("[MUSIC CATALOG V2] ✅ %s adicionou '%s' (%d)", player.Name, nome, id))
 
 	return true, "Música adicionada: " .. nome, copiar(faixas)
 end
@@ -374,7 +492,7 @@ adminMusicRemove.OnServerInvoke = function(player, idBruto)
 
 	avisarClientesLocais()
 	publicarSync("remove", player.Name, titulo)
-	print(string.format("[MUSIC CATALOG V1] 🗑️ %s removeu '%s' (%d)", player.Name, titulo, id))
+	print(string.format("[MUSIC CATALOG V2] 🗑️ %s removeu '%s' (%d)", player.Name, titulo, id))
 
 	return true, "Música removida: " .. titulo, copiar(faixas)
 end
@@ -410,7 +528,7 @@ adminMusicUpdate.OnServerInvoke = function(player, idBruto, nomeNovo, artistaNov
 
 	avisarClientesLocais()
 	publicarSync("update", player.Name, nomeNovo)
-	print(string.format("[MUSIC CATALOG V1] ✏️ %s editou a faixa %d", player.Name, id))
+	print(string.format("[MUSIC CATALOG V2] ✏️ %s editou a faixa %d", player.Name, id))
 
 	return true, "Faixa atualizada.", copiar(faixas)
 end
@@ -467,6 +585,7 @@ _G.MusicCatalog = {
 _G.DebugMusicCatalog = function()
 	print("\n========== DEBUG MUSIC CATALOG V1 ==========")
 	print("  DataStore:", CONFIG.STORE_NAME, "| pronto:", pronto)
+	print("  sync entre servidores:", inscrito and "INSCRITO ✓" or "NÃO INSCRITO ✗ (só releitura periódica)")
 	print("  faixas:", #faixas, "de", CONFIG.MAX_FAIXAS)
 	for i, f in ipairs(faixas) do
 		print(
@@ -485,4 +604,4 @@ end
 
 carregar()
 
-print("[MUSIC CATALOG V1] Sistema de catálogo de músicas carregado")
+print("[MUSIC CATALOG V2] Sistema de catálogo de músicas carregado")
