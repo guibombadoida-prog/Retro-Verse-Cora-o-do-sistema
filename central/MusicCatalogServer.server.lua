@@ -583,7 +583,7 @@ _G.MusicCatalog = {
 }
 
 _G.DebugMusicCatalog = function()
-	print("\n========== DEBUG MUSIC CATALOG V1 ==========")
+	print("\n========== DEBUG MUSIC CATALOG V2 ==========")
 	print("  DataStore:", CONFIG.STORE_NAME, "| pronto:", pronto)
 	print("  sync entre servidores:", inscrito and "INSCRITO ✓" or "NÃO INSCRITO ✗ (só releitura periódica)")
 	print("  faixas:", #faixas, "de", CONFIG.MAX_FAIXAS)
