@@ -1,5 +1,14 @@
 -- ============================================
 -- HEALTH DISPLAY V4 - RETRO STYLE + BARRA DE ENERGIA
+-- (V6) A BARRA DE DESPERTAR NÃO APARECIA. Duas causas:
+--      1. Ela estava dentro do MainContainer, em Y 0.845 com altura
+--         0.2 — exatamente em cima do EnergyText (0.845 a 0.995) e
+--         passando de 1.0, ou seja, metade fora do container. Virou
+--         faixa própria logo abaixo dele.
+--      2. O cliente só ESCUTAVA o estado. O pacote inicial do servidor
+--         saía enquanto este script ainda esperava o remote aparecer, se
+--         perdia, e depois nada mais mudava — nenhum outro pacote vinha.
+--         Agora ele PUXA o estado (GetAwakeningMeter) assim que conecta.
 -- (V5) BARRA DE DESPERTAR: enche batendo e apanhando; cheia, troca as
 --      Tools para a forma despertada por um tempo. Números vindos do
 --      AwakeningMeterServer.
@@ -220,15 +229,25 @@ EnergyText.Parent = MainContainer
 -- Só aparece quando o personagem equipado TEM Despertar — personagem
 -- sem forma despertada não mostra barra nenhuma.
 
+-- ⚠️ FICA FORA DO MainContainer, DE PROPÓSITO.
+--
+-- O container já está lotado: HealthText em 0.455, StatusIndicator em
+-- 0.26, EnergyBackground em 0.63 e EnergyText de 0.845 a 0.995. A
+-- primeira versão desta barra ficou em 0.845 com altura 0.2, ou seja,
+-- exatamente por cima do texto de energia e passando de 1.0 — metade
+-- dela caía fora do container.
+--
+-- Aqui ela vira uma faixa própria logo abaixo: o MainContainer está em
+-- Y 0.06 com altura 0.12, então termina em 0.18.
 local AwakenBackground = Instance.new("Frame")
 AwakenBackground.Name = "AwakenBackground"
-AwakenBackground.Size = UDim2.new(0.95, 0, 0.2, 0)
-AwakenBackground.Position = UDim2.new(0.025, 0, 0.845, 0)
+AwakenBackground.Size = UDim2.new(0.25, 0, 0.028, 0)
+AwakenBackground.Position = UDim2.new(0.375, 0, 0.187, 0)
 AwakenBackground.BackgroundColor3 = COLORS.barBackground
 AwakenBackground.BorderColor3 = COLORS.border
 AwakenBackground.BorderSizePixel = 2
 AwakenBackground.Visible = false
-AwakenBackground.Parent = MainContainer
+AwakenBackground.Parent = HealthGui
 
 local AwakenBar = Instance.new("Frame")
 AwakenBar.Name = "AwakenBar"
@@ -260,7 +279,7 @@ task.spawn(function()
 	if meterUpdate then
 		local piscando = false
 
-		meterUpdate.OnClientEvent:Connect(function(dados)
+		local function aplicar(dados)
 			if type(dados) ~= "table" then
 				return
 			end
@@ -306,9 +325,27 @@ task.spawn(function()
 					or Color3.fromRGB(180, 90, 255)
 				AwakenText.Text = string.format("DESPERTAR  %d%%", math.floor(fracao * 100))
 			end
-		end)
+		end
+
+		meterUpdate.OnClientEvent:Connect(aplicar)
+
+		-- PUXA o estado agora que já estamos escutando.
+		--
+		-- O servidor só empurrava quando algo mudava, e o pacote inicial
+		-- saía enquanto este script ainda esperava o remote aparecer. O
+		-- pacote se perdia, nada mais mudava, e a barra ficava invisível
+		-- para sempre. Esta chamada fecha essa janela.
+		local pull = remotes:FindFirstChild("GetAwakeningMeter")
+		if pull then
+			local ok, estadoAtual = pcall(function()
+				return pull:InvokeServer()
+			end)
+			if ok and type(estadoAtual) == "table" then
+				aplicar(estadoAtual)
+			end
+		end
 	else
-		warn("[HEALTH V5] AwakeningMeterUpdate não encontrado — barra de Despertar desligada")
+		warn("[HEALTH V6] AwakeningMeterUpdate não encontrado — barra de Despertar desligada")
 	end
 end)
 

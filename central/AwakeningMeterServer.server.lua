@@ -1,5 +1,21 @@
 -- ============================================
--- AWAKENING METER SERVER V1
+-- AWAKENING METER SERVER V2
+-- ============================================
+-- (V2) A BARRA NÃO APARECIA — duas causas somadas:
+--
+-- 1. O PACOTE INICIAL SE PERDIA. O servidor só empurrava o estado
+--    quando algo MUDAVA. O pacote com ativo=true saía assim que a
+--    definição era resolvida, mas nesse instante o cliente ainda estava
+--    no WaitForChild esperando o remote aparecer. O pacote se perdia,
+--    nada mais mudava, nenhum outro saía — e a barra ficava invisível
+--    para sempre. Agora existe o remote GetAwakeningMeter, que o cliente
+--    PUXA ao conectar, mais um batimento de 2 em 2 segundos.
+--
+-- 2. (No HealthDisplay) a barra estava posicionada em cima do texto de
+--    energia e passando do fim do container. Virou faixa própria logo
+--    abaixo do container.
+--
+-- _G.DebugAwakeningMeter() agora diz POR QUE a barra está escondida.
 -- Coloque em ServerScriptService
 -- Nome: "AwakeningMeterServer"
 -- ============================================
@@ -67,6 +83,7 @@ local CONFIG = {
 	GANHO_MAXIMO_POR_GOLPE = 25,
 
 	INTERVALO_SYNC = 0.25, -- com que frequência o cliente é avisado
+	BATIMENTO = 2, -- reenvia o estado a cada N segundos mesmo parado
 }
 
 -- =====================================
@@ -96,6 +113,18 @@ end
 
 local meterUpdate = ensureRemote("AwakeningMeterUpdate", "RemoteEvent")
 
+-- ⚠️ ESTE REMOTE EXISTE POR UM MOTIVO ESPECÍFICO.
+--
+-- O servidor só empurrava o estado quando algo MUDAVA. Só que o cliente
+-- leva um tempo para conectar o OnClientEvent (ele espera a pasta
+-- Remotes e o próprio remote aparecerem), e nesse meio-tempo o pacote
+-- inicial já tinha passado. Depois disso nada mudava, então nenhum outro
+-- pacote saía — e a barra ficava invisível para sempre.
+--
+-- Com isto o cliente PUXA o estado assim que estiver pronto, em vez de
+-- torcer para ter chegado a tempo.
+local getMeterState = ensureRemote("GetAwakeningMeter", "RemoteFunction")
+
 -- =====================================
 -- ESTADO
 -- =====================================
@@ -104,6 +133,7 @@ local meterUpdate = ensureRemote("AwakeningMeterUpdate", "RemoteEvent")
 --   valor, max, desperto, terminaEm, cooldownAte, personagem, sujo
 -- }
 local estado = {}
+local montarPacote -- definida abaixo, usada pelo laço de sync
 
 local function novoEstado()
 	return {
@@ -268,6 +298,32 @@ local function marcarSujo(player)
 	end
 end
 
+-- Monta o que o cliente recebe. Um lugar só, usado pelo empurrão e pela
+-- puxada.
+function montarPacote(e)
+	local agora = os.clock()
+	return {
+		valor = e.valor,
+		max = e.max,
+		desperto = e.desperto,
+		restante = e.desperto and math.max(0, e.terminaEm - agora) or 0,
+		cooldown = math.max(0, e.cooldownAte - agora),
+		-- ativo = o personagem equipado TEM Despertar que este jogador
+		-- pode usar. Personagem sem forma despertada não mostra barra.
+		ativo = e.def ~= nil,
+	}
+end
+
+getMeterState.OnServerInvoke = function(player)
+	local e = estado[player]
+	if not e then
+		return { ativo = false }
+	end
+	return montarPacote(e)
+end
+
+local ultimoEnvio = {}
+
 task.spawn(function()
 	while true do
 		task.wait(CONFIG.INTERVALO_SYNC)
@@ -284,19 +340,17 @@ task.spawn(function()
 				e.sujo = true
 			end
 
+			-- BATIMENTO. Rede de segurança para o cliente que conectou
+			-- tarde e perdeu o pacote inicial: de 2 em 2 segundos o estado
+			-- vai de novo, mesmo sem nada ter mudado.
+			if e and (agora - (ultimoEnvio[player] or 0)) >= CONFIG.BATIMENTO then
+				e.sujo = true
+			end
+
 			if e and e.sujo then
 				e.sujo = false
-				meterUpdate:FireClient(player, {
-					valor = e.valor,
-					max = e.max,
-					desperto = e.desperto,
-					restante = e.desperto and math.max(0, e.terminaEm - agora) or 0,
-					cooldown = math.max(0, e.cooldownAte - agora),
-					-- ativo = o personagem equipado TEM Despertar que este
-					-- jogador pode usar. Personagem sem forma despertada
-					-- não mostra barra nenhuma.
-					ativo = e.def ~= nil,
-				})
+				ultimoEnvio[player] = agora
+				meterUpdate:FireClient(player, montarPacote(e))
 			end
 		end
 	end
@@ -313,10 +367,10 @@ function remontarTools(player)
 	if _G.GameManagerConfig and _G.GameManagerConfig.reapplyEquippedTools then
 		local ok = pcall(_G.GameManagerConfig.reapplyEquippedTools, player)
 		if not ok then
-			warn("[AWAKEN METER V1] ⚠️ Falha ao remontar as Tools de " .. player.Name)
+			warn("[AWAKEN METER V2] ⚠️ Falha ao remontar as Tools de " .. player.Name)
 		end
 	else
-		warn("[AWAKEN METER V1] ⚠️ _G.GameManagerConfig.reapplyEquippedTools ausente")
+		warn("[AWAKEN METER V2] ⚠️ _G.GameManagerConfig.reapplyEquippedTools ausente")
 	end
 end
 
@@ -339,7 +393,7 @@ local function encerrarDespertar(player, zerarBarra)
 	end
 
 	remontarTools(player)
-	print(string.format("[AWAKEN METER V1] ⏹️ %s voltou ao normal", player.Name))
+	print(string.format("[AWAKEN METER V2] ⏹️ %s voltou ao normal", player.Name))
 end
 
 local function dispararDespertar(player, def)
@@ -361,7 +415,7 @@ local function dispararDespertar(player, def)
 
 	print(
 		string.format(
-			"[AWAKEN METER V1] ⚡ %s DESPERTOU (%s) por %ds",
+			"[AWAKEN METER V2] ⚡ %s DESPERTOU (%s) por %ds",
 			player.Name,
 			tostring(def.displayName or "?"),
 			duracao
@@ -469,7 +523,7 @@ local function acompanharPersonagem(player, character)
 			e.terminaEm = 0
 			local def = definicaoAtiva(player)
 			e.cooldownAte = os.clock() + configDe(def, "cooldown", CONFIG.COOLDOWN)
-			print(string.format("[AWAKEN METER V1] 💀 %s morreu desperto — forma perdida", player.Name))
+			print(string.format("[AWAKEN METER V2] 💀 %s morreu desperto — forma perdida", player.Name))
 		end
 
 		e.valor = 0
@@ -520,6 +574,7 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	estado[player] = nil
+	ultimoEnvio[player] = nil
 end)
 
 -- Vigia a troca de personagem. A barra é por personagem, então trocar
@@ -583,23 +638,59 @@ _G.AwakeningMeter = {
 	end,
 }
 
+-- Diz POR QUE a barra não está aparecendo, em vez de só despejar
+-- números. "não aparece" tem quatro causas possíveis e este comando
+-- separa as quatro.
 _G.DebugAwakeningMeter = function()
-	print("\n========== DEBUG AWAKENING METER V1 ==========")
+	print("\n========== DEBUG AWAKENING METER V2 ==========")
+
+	local defs = _G.AwakeningSystem and _G.AwakeningSystem.listAll and _G.AwakeningSystem.listAll() or {}
+	local quantasDefs = 0
+	for _ in pairs(defs) do
+		quantasDefs = quantasDefs + 1
+	end
+	print("  Despertares cadastrados no jogo:", quantasDefs)
+	if quantasDefs == 0 then
+		print("  ⚠️ NENHUM. Sem definição, a barra fica escondida de propósito.")
+		print("     Crie um Despertar no painel admin para o personagem equipado.")
+	end
+
+	print("  GameManagerConfig:", _G.GameManagerConfig and "OK" or "AUSENTE ✗")
+	print("  DamageAttribution:", _G.DamageAttribution and "OK" or "AUSENTE ✗ (barra não enche)")
+
 	for _, player in ipairs(Players:GetPlayers()) do
 		local e = estado[player]
 		if not e then
-			print(string.format("  %s | sem estado", player.Name))
+			print(string.format("  %s | SEM ESTADO ✗", player.Name))
 		else
 			local agora = os.clock()
+			local equipado = personagemEquipado(player)
+
+			local motivo
+			if not equipado then
+				motivo = "nenhum personagem equipado"
+			elseif not (_G.AwakeningSystem.getDefinition(equipado)) then
+				motivo = "'" .. equipado .. "' não tem Despertar cadastrado"
+			elseif not e.def then
+				motivo = "Badge exigido e o jogador não tem (ou o cache ainda não resolveu)"
+			end
+
 			print(
 				string.format(
-					"  %s | %s | barra %.1f/%.0f | %s | cooldown %.1fs",
+					"  %s | equipado: %s | barra %.1f/%.0f | %s | cooldown %.1fs",
 					player.Name,
-					tostring(e.personagem or "sem personagem"),
+					tostring(equipado or "-"),
 					e.valor,
 					e.max,
 					e.desperto and string.format("DESPERTO (%.1fs)", math.max(0, e.terminaEm - agora)) or "normal",
 					math.max(0, e.cooldownAte - agora)
+				)
+			)
+			print(
+				string.format(
+					"      cliente recebe ativo=%s%s",
+					tostring(e.def ~= nil),
+					motivo and ("  ← BARRA ESCONDIDA: " .. motivo) or ""
 				)
 			)
 		end
@@ -607,4 +698,4 @@ _G.DebugAwakeningMeter = function()
 	print("=============================================\n")
 end
 
-print("[AWAKEN METER V1] Barra de Despertar carregada")
+print("[AWAKEN METER V2] Barra de Despertar carregada")
