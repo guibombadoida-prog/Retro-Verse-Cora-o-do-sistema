@@ -1,5 +1,14 @@
 -- ============================================
--- AWAKENING SYSTEM SERVER V6 — INFORMAÇÃO COMPLETA NO CARD
+-- AWAKENING SYSTEM SERVER V7 — NOME DO ORIGINAL ACEITA ESPAÇO E CAIXA
+-- ============================================
+-- (V7) "Personagem não existe no catálogo" com o nome escrito certo.
+-- A checagem só fazia lookup por chave EXATA e desistia quando dava nil,
+-- sem consultar a pasta replicada nem tentar sem diferenciar maiúscula.
+-- Um espaço invisível no fim do nome já reprovava. Agora a busca tem
+-- quatro degraus e o nome é normalizado para a grafia do catálogo antes
+-- de salvar.
+-- ============================================
+-- (V6) INFORMAÇÃO COMPLETA NO CARD
 -- ============================================
 -- (V6) O card do Despertar mostra imagem, nome, história e as Tools.
 -- Para isso a definição ganhou `lore` e `description`, e o CheckAwakening
@@ -246,20 +255,68 @@ local orphanNames = {} -- ordem de descoberta, para a mensagem de boot
 -- não causa. Se o catálogo não estiver instalado, cai para a pasta
 -- como último recurso, mas nunca dá o "sim" de graça.
 
-local function originalExists(name)
-	if type(name) ~= "string" or #name < 2 then
-		return false
+-- (V7) RESOLVE O NOME DO PERSONAGEM ORIGINAL.
+--
+-- O que existia antes era um `originalExists` que só fazia lookup por
+-- CHAVE EXATA no catálogo (`GCC.catalogByName[name]`) e, quando isso
+-- devolvia nil, retornava false SEM tentar mais nada. Resultado: um
+-- espaço invisível no fim do nome, ou uma letra maiúscula diferente,
+-- reprovava um personagem que existe — e o admin via "não existe no
+-- catálogo" com o nome escrito certo na frente dele.
+--
+-- Agora a busca tem quatro degraus e devolve o nome CANÔNICO, para o
+-- Despertar ser gravado com a mesma grafia que o resto do sistema usa.
+local function resolverNomeOriginal(name)
+	if type(name) ~= "string" then
+		return nil
 	end
 
+	-- 1. Tira espaços das pontas — a causa mais comum, e invisível
+	name = name:match("^%s*(.-)%s*$") or ""
+	if #name < 2 then
+		return nil
+	end
+
+	-- 2. Chave exata no catálogo
 	if _G.CharacterCatalog and _G.CharacterCatalog.getDefinition then
 		local ok, def = pcall(_G.CharacterCatalog.getDefinition, name)
-		if ok then
-			return def ~= nil
+		if ok and def ~= nil then
+			return name
 		end
 	end
 
-	-- Sem catálogo disponível: a pasta é o que sobra para consultar
-	return charactersFolder:FindFirstChild(name) ~= nil
+	-- 3. A pasta replicada. NÃO era consultada quando o catálogo
+	--    respondia nil, só quando ele estava ausente.
+	local naPasta = charactersFolder:FindFirstChild(name)
+	if naPasta then
+		return naPasta.Name
+	end
+
+	-- 4. Último recurso: varredura sem diferenciar maiúscula de minúscula
+	local alvo = name:lower()
+
+	if _G.CharacterCatalog and _G.CharacterCatalog.listAll then
+		local ok, todos = pcall(_G.CharacterCatalog.listAll)
+		if ok and type(todos) == "table" then
+			for nomeCatalogo in pairs(todos) do
+				if type(nomeCatalogo) == "string" and nomeCatalogo:lower() == alvo then
+					return nomeCatalogo
+				end
+			end
+		end
+	end
+
+	for _, filho in ipairs(charactersFolder:GetChildren()) do
+		if filho.Name:lower() == alvo then
+			return filho.Name
+		end
+	end
+
+	return nil
+end
+
+local function originalExists(name)
+	return resolverNomeOriginal(name) ~= nil
 end
 
 _G.AwakeningSystem = {
@@ -557,6 +614,14 @@ local function validatePayload(payload)
 	end
 	if type(payload.characterName) ~= "string" or #payload.characterName < 2 then
 		return false, "Nome de personagem inválido!"
+	end
+
+	-- (V7) NORMALIZA para a grafia canônica do catálogo. Sem isto, um
+	-- nome com espaço sobrando entraria assim no DataStore e o Despertar
+	-- nunca casaria com o personagem em lugar nenhum do sistema.
+	local canonico = resolverNomeOriginal(payload.characterName)
+	if canonico then
+		payload.characterName = canonico
 	end
 	-- (V5) BADGE VIROU OPCIONAL.
 	-- Até o V4 o Badge era a condição de desbloqueio, porque o Despertar
@@ -868,7 +933,7 @@ equipAwakeningRemote.OnServerEvent:Connect(function(player, characterName)
 	-- Quando todos os clientes estiverem no V9+, dá para remover.
 	warn(
 		string.format(
-			"[AWAKENING V6] %s disparou EquipAwakening ('%s'), que foi desativado no V5 — cliente desatualizado?",
+			"[AWAKENING V7] %s disparou EquipAwakening ('%s'), que foi desativado no V5 — cliente desatualizado?",
 			player.Name,
 			characterName
 		)
@@ -1033,7 +1098,7 @@ local function limparDespertarAntigo(player)
 
 	print(
 		string.format(
-			"[AWAKENING V6] 🧹 %s: %d desbloqueio(s) do sistema antigo limpo(s) — o Despertar agora vem junto com o personagem",
+			"[AWAKENING V7] 🧹 %s: %d desbloqueio(s) do sistema antigo limpo(s) — o Despertar agora vem junto com o personagem",
 			player.Name,
 			quantos
 		)
