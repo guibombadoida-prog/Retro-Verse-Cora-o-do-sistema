@@ -1,5 +1,24 @@
 -- ============================================
--- AWAKENING SYSTEM SERVER V7 — NOME DO ORIGINAL ACEITA ESPAÇO E CAIXA
+-- AWAKENING SYSTEM SERVER V8 — ÓRFÃO DEIXA DE SER VEREDITO DEFINITIVO
+-- ============================================
+-- (V8) O DESPERTAR CONTINUAVA ÓRFÃO COM O PERSONAGEM EXISTINDO.
+--
+-- Quem decide se é órfão é o buildAwakenedAssets, e ele fazia
+-- FindFirstChild CRU com o nome salvo — nunca passava pelo
+-- resolverNomeOriginal, que no V7 eu liguei só no validatePayload. Um
+-- Despertar gravado ANTES do V7 tem o nome com espaço ou caixa errada
+-- dentro do DataStore, então era marcado como órfão a cada boot, para
+-- sempre, por mais que o personagem existisse.
+--
+-- Agora:
+--   • o build resolve o nome e CORRIGE a definição;
+--   • o boot regrava a grafia certa no DataStore e conserta o índice,
+--     senão o nome errado voltaria no próximo boot;
+--   • a chave do awakenDefs vem da definição, não do índice;
+--   • os órfãos são REAVALIADOS a cada 30s — criar o personagem que
+--     faltava passou a resolver sozinho, sem reiniciar o servidor.
+-- ============================================
+-- (V7) NOME DO ORIGINAL ACEITA ESPAÇO E CAIXA
 -- ============================================
 -- (V7) "Personagem não existe no catálogo" com o nome escrito certo.
 -- A checagem só fazia lookup por chave EXATA e desistia quando dava nil,
@@ -417,7 +436,30 @@ local function buildAwakenedAssets(def)
 	-- transformava um nome inventado num personagem de aparência
 	-- legítima em ReplicatedStorage.Characters. A pasta base é
 	-- responsabilidade exclusiva do CharacterCatalogServer.
-	local baseFolder = charactersFolder:FindFirstChild(def.characterName)
+	-- (V8) RESOLVE O NOME ANTES DE DESISTIR.
+	--
+	-- Era aqui que o "Despertar órfão" nascia mesmo com o personagem
+	-- existindo: esta função fazia FindFirstChild cru com o nome salvo, e
+	-- nunca passava pelo resolverNomeOriginal — que no V7 eu liguei só no
+	-- validatePayload. Um Despertar gravado ANTES do V7 tem o nome com o
+	-- espaço ou a caixa errada dentro do DataStore, então continuava sendo
+	-- marcado como órfão a cada boot, para sempre.
+	--
+	-- Resolver aqui também CORRIGE a definição: def.characterName passa a
+	-- ser a grafia canônica, e o boot regrava com o nome certo.
+	local canonico = resolverNomeOriginal(def.characterName)
+	if canonico and canonico ~= def.characterName then
+		print(
+			string.format(
+				"[AWAKENING V8] ↻ Nome do original corrigido: '%s' → '%s'",
+				tostring(def.characterName),
+				canonico
+			)
+		)
+		def.characterName = canonico
+	end
+
+	local baseFolder = canonico and charactersFolder:FindFirstChild(canonico) or nil
 	if not baseFolder then
 		local msg = string.format(
 			"Personagem '%s' não existe — o Despertar precisa de um personagem original. Crie o personagem no catálogo primeiro.",
@@ -971,6 +1013,7 @@ local function bootLoadAwakenings()
 	print("[AWAKENING V4] Carregando configurações de Despertar salvas...")
 	local index = loadIndex()
 	local loaded = 0
+	local migrados = {}
 
 	for _, name in ipairs(index) do
 		local def = loadDefinition(name)
@@ -984,8 +1027,19 @@ local function bootLoadAwakenings()
 				table.insert(orphanNames, name)
 				warn(string.format("[AWAKENING V4] ⚠️ Despertar ÓRFÃO ignorado: '%s' — %s", name, err))
 			else
-				awakenDefs[name] = def
+				-- (V8) A chave vem da DEFINIÇÃO, não do índice: o
+				-- buildAwakenedAssets pode ter corrigido a grafia, e
+				-- guardar sob o nome velho deixaria o Despertar
+				-- inalcançável para o resto do sistema.
+				awakenDefs[def.characterName] = def
 				loaded += 1
+
+				if def.characterName ~= name then
+					-- Regrava com o nome certo e conserta o índice, senão a
+					-- correção se perderia no próximo boot.
+					table.insert(migrados, { antigo = name, novo = def.characterName, def = def })
+				end
+
 				if #warnings > 0 then
 					warn("[AWAKENING V4] Avisos ao carregar '" .. name .. "': " .. table.concat(warnings, " | "))
 				end
@@ -994,6 +1048,36 @@ local function bootLoadAwakenings()
 	end
 
 	print(string.format("[AWAKENING V4] ✓ %d Despertar(es) carregado(s)", loaded))
+
+	-- (V8) Grava as grafias corrigidas. Sem isto o nome errado voltaria do
+	-- DataStore no próximo boot e o Despertar viraria órfão de novo.
+	if #migrados > 0 then
+		task.spawn(function()
+			for _, m in ipairs(migrados) do
+				saveDefinition(m.def)
+
+				local novoIndex = {}
+				for _, n in ipairs(loadIndex()) do
+					if n ~= m.antigo then
+						table.insert(novoIndex, n)
+					end
+				end
+				if not table.find(novoIndex, m.novo) then
+					table.insert(novoIndex, m.novo)
+				end
+				saveIndex(novoIndex)
+
+				print(
+					string.format(
+						"[AWAKENING V8] ✓ Migrado no DataStore: '%s' → '%s'",
+						m.antigo,
+						m.novo
+					)
+				)
+				task.wait(0.5)
+			end
+		end)
+	end
 
 	if #orphanNames > 0 then
 		warn(
@@ -1013,6 +1097,65 @@ local function bootLoadAwakenings()
 end
 
 task.spawn(bootLoadAwakenings)
+
+-- =====================================
+-- (V8) REAVALIAÇÃO DOS ÓRFÃOS
+-- =====================================
+-- Órfão era um veredito definitivo: uma vez marcado, ficava assim até o
+-- servidor reiniciar. Só que o caminho normal de conserto é justamente
+-- criar o personagem que faltava — e depois de criar, o Despertar
+-- continuava órfão, dando a impressão de que a correção não funcionou.
+--
+-- Agora os órfãos são reexaminados de tempos em tempos. Assim que o
+-- personagem original aparece no catálogo, o Despertar entra sozinho.
+task.spawn(function()
+	while true do
+		task.wait(30)
+
+		if next(orphanDefs) ~= nil then
+			for name, def in pairs(orphanDefs) do
+				local warnings, err = buildAwakenedAssets(def)
+
+				if not err then
+					orphanDefs[name] = nil
+
+					for i, n in ipairs(orphanNames) do
+						if n == name then
+							table.remove(orphanNames, i)
+							break
+						end
+					end
+
+					-- Registrar em awakenDefs é tudo o que este script faz ao
+					-- aceitar uma definição — não existe applyDefinitionToConfig
+					-- aqui, isso é do CharacterCatalogServer.
+					awakenDefs[def.characterName] = def
+
+					print(
+						string.format(
+							"[AWAKENING V8] ✅ '%s' deixou de ser órfão — personagem original encontrado",
+							tostring(def.characterName)
+						)
+					)
+
+					-- A grafia pode ter sido corrigida no build
+					if def.characterName ~= name then
+						task.spawn(saveDefinition, def)
+					end
+
+					if #warnings > 0 then
+						warn(
+							"[AWAKENING V8] Avisos ao recuperar '"
+								.. tostring(def.characterName)
+								.. "': "
+								.. table.concat(warnings, " | ")
+						)
+					end
+				end
+			end
+		end
+	end
+end)
 
 -- =====================================
 -- DEBUG
