@@ -419,10 +419,11 @@ local function buildAwakenedAssets(def)
 	-- responsabilidade exclusiva do CharacterCatalogServer.
 	local baseFolder = charactersFolder:FindFirstChild(def.characterName)
 	if not baseFolder then
-		return {}, string.format(
+		local msg = string.format(
 			"Personagem '%s' não existe — o Despertar precisa de um personagem original. Crie o personagem no catálogo primeiro.",
-			def.characterName
+			tostring(def.characterName)
 		)
+		return {}, msg
 	end
 
 	local oldAwakened = baseFolder:FindFirstChild("AwakenedForm")
@@ -642,11 +643,14 @@ local function validatePayload(payload)
 	-- Despertar. Um Despertar destravado só por Badge, sem original,
 	-- é um personagem de emblema comum criado pela porta errada.
 	if not originalExists(payload.characterName) then
-		return false,
-			string.format(
-				"Personagem '%s' não existe no catálogo! O Despertar é uma FORMA de um personagem que já existe — crie o personagem primeiro na aba CATÁLOGO. (Confira também se o nome está escrito exatamente igual.)",
-				payload.characterName
-			)
+		-- tostring: o analisador do Luau não consegue estreitar o tipo de
+		-- payload.characterName aqui (o payload vem do cliente, sem tipo),
+		-- e reclamava do 2º argumento do string.format.
+		local msg = string.format(
+			"Personagem '%s' não existe no catálogo! O Despertar é uma FORMA de um personagem que já existe — crie o personagem primeiro na aba CATÁLOGO. (Confira também se o nome está escrito exatamente igual.)",
+			tostring(payload.characterName)
+		)
+		return false, msg
 	end
 
 	return true, "OK"
