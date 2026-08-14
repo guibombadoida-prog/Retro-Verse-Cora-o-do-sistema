@@ -1,5 +1,13 @@
 -- ============================================
--- CHARACTER SYSTEM CLIENT V9 — DESPERTAR VIRA SÓ INFORMAÇÃO
+-- CHARACTER SYSTEM CLIENT V10 — CARD DO DESPERTAR COMPLETO
+-- ============================================
+-- (V10) O botão VOLTOU, abrindo informação em vez de equipar.
+-- O V9 tirou o botão inteiro e deixou só um rótulo com o nome — longe
+-- demais: sumiam a imagem, a história e as habilidades da forma. Agora
+-- "VER DESPERTAR" abre um painel com imagem, nome, história, HP e a
+-- lista de Tools despertas (lidas do que está REALMENTE carregado em
+-- ReplicatedStorage, não do que o catálogo diz que deveria estar).
+-- Equipar continua não existindo: a forma é conquistada em combate.
 -- ============================================
 -- (V9) O card do Despertar não tem mais botão.
 --
@@ -1163,6 +1171,242 @@ local function createAbilitiesPopup(characterName)
 	end)
 end
 
+-- =====================================
+-- (V10) POPUP DO DESPERTAR
+-- =====================================
+-- Imagem, nome, história e as Tools da forma desperta — o que o card
+-- do personagem original abre ao clicar em VER DESPERTAR.
+--
+-- Não tem botão de equipar de propósito: o Despertar é conquistado em
+-- combate pela barra, não escolhido no menu. O que este painel faz é
+-- mostrar o que existe e o que falta para liberar.
+local function createAwakeningPopup(characterName, info)
+	playSound(sounds.info)
+
+	local aw = (info and info.awakening) or {}
+	local nomeDesperto = aw.displayName or (characterName .. " (Despertado)")
+	local _, toolsDespertas = collectCharacterTools(characterName)
+
+	local infoGui = Instance.new("ScreenGui")
+	infoGui.Name = "AwakeningPopup"
+	infoGui.DisplayOrder = 100
+	infoGui.ResetOnSpawn = false
+	infoGui.Parent = playerGui
+
+	local background = Instance.new("Frame")
+	background.Size = UDim2.new(1, 0, 1, 0)
+	background.BackgroundColor3 = Color3.new(0, 0, 0)
+	background.BackgroundTransparency = 0.5
+	background.Parent = infoGui
+
+	local popup = Instance.new("Frame")
+	popup.Size = isMobile and UDim2.new(0.92, 0, 0.88, 0) or UDim2.new(0.55, 0, 0.8, 0)
+	popup.Position = UDim2.new(0.5, 0, 0.5, 0)
+	popup.AnchorPoint = Vector2.new(0.5, 0.5)
+	popup.BackgroundColor3 = Color3.fromRGB(18, 12, 26)
+	popup.BorderColor3 = Color3.fromRGB(255, 0, 255)
+	popup.BorderSizePixel = 4
+	popup.Parent = infoGui
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, 0, 0.11, 0)
+	header.BackgroundColor3 = Color3.fromRGB(90, 0, 130)
+	header.BorderSizePixel = 0
+	header.Parent = popup
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(0.85, 0, 1, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = "⚡ " .. nomeDesperto:upper()
+	titleLabel.TextColor3 = Color3.fromRGB(255, 150, 255)
+	titleLabel.TextScaled = true
+	titleLabel.Font = Enum.Font.Arcade
+	titleLabel.Parent = header
+
+	local closeButton = Instance.new("TextButton")
+	closeButton.Size = UDim2.new(0.1, 0, 0.8, 0)
+	closeButton.Position = UDim2.new(0.88, 0, 0.1, 0)
+	closeButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+	closeButton.BorderColor3 = Color3.new(1, 1, 1)
+	closeButton.BorderSizePixel = 2
+	closeButton.Text = "X"
+	closeButton.TextColor3 = Color3.new(1, 1, 1)
+	closeButton.TextScaled = true
+	closeButton.Font = Enum.Font.Arcade
+	closeButton.Parent = header
+
+	-- IMAGEM
+	local imgFrame = Instance.new("Frame")
+	imgFrame.Size = UDim2.new(0.34, 0, 0.3, 0)
+	imgFrame.Position = UDim2.new(0.04, 0, 0.14, 0)
+	imgFrame.BackgroundColor3 = Color3.fromRGB(30, 20, 40)
+	imgFrame.BorderColor3 = Color3.fromRGB(255, 0, 255)
+	imgFrame.BorderSizePixel = 2
+	imgFrame.Parent = popup
+
+	local imageId = tonumber(aw.imageId) or 0
+	if imageId > 0 then
+		local img = Instance.new("ImageLabel")
+		img.Size = UDim2.new(1, 0, 1, 0)
+		img.BackgroundTransparency = 1
+		img.Image = "rbxassetid://" .. tostring(imageId)
+		img.ScaleType = Enum.ScaleType.Fit
+		img.Parent = imgFrame
+	else
+		local semImg = Instance.new("TextLabel")
+		semImg.Size = UDim2.new(1, 0, 1, 0)
+		semImg.BackgroundTransparency = 1
+		semImg.Text = "SEM\nIMAGEM"
+		semImg.TextColor3 = Color3.fromRGB(120, 100, 140)
+		semImg.TextScaled = true
+		semImg.Font = Enum.Font.Arcade
+		semImg.Parent = imgFrame
+	end
+
+	-- ESTADO + HP, ao lado da imagem
+	local estadoLabel = Instance.new("TextLabel")
+	estadoLabel.Size = UDim2.new(0.56, 0, 0.1, 0)
+	estadoLabel.Position = UDim2.new(0.4, 0, 0.15, 0)
+	estadoLabel.BackgroundTransparency = 1
+	estadoLabel.TextScaled = true
+	estadoLabel.TextWrapped = true
+	estadoLabel.Font = Enum.Font.Arcade
+	estadoLabel.TextXAlignment = Enum.TextXAlignment.Left
+	estadoLabel.Parent = popup
+
+	if info and info.liberado then
+		estadoLabel.Text = "✅ LIBERADO"
+		estadoLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+	elseif info and not info.hasOriginal then
+		estadoLabel.Text = "🔒 PRECISA DO ORIGINAL"
+		estadoLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+	else
+		estadoLabel.Text = "🔒 FALTA O EMBLEMA"
+		estadoLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+	end
+
+	local hpLabel = Instance.new("TextLabel")
+	hpLabel.Size = UDim2.new(0.56, 0, 0.07, 0)
+	hpLabel.Position = UDim2.new(0.4, 0, 0.26, 0)
+	hpLabel.BackgroundTransparency = 1
+	hpLabel.Text = "❤️ HP: " .. tostring(aw.health or "—")
+	hpLabel.TextColor3 = Color3.new(1, 1, 1)
+	hpLabel.TextScaled = true
+	hpLabel.Font = Enum.Font.Code
+	hpLabel.TextXAlignment = Enum.TextXAlignment.Left
+	hpLabel.Parent = popup
+
+	local comoLabel = Instance.new("TextLabel")
+	comoLabel.Size = UDim2.new(0.56, 0, 0.1, 0)
+	comoLabel.Position = UDim2.new(0.4, 0, 0.34, 0)
+	comoLabel.BackgroundTransparency = 1
+	comoLabel.Text = aw.duracao
+			and string.format("Enche em combate • dura %ds", aw.duracao)
+		or "Enche em combate"
+	comoLabel.TextColor3 = Color3.fromRGB(180, 150, 220)
+	comoLabel.TextScaled = true
+	comoLabel.TextWrapped = true
+	comoLabel.Font = Enum.Font.Code
+	comoLabel.TextXAlignment = Enum.TextXAlignment.Left
+	comoLabel.Parent = popup
+
+	-- HABILIDADES (TOOLS)
+	local toolsTitulo = Instance.new("TextLabel")
+	toolsTitulo.Size = UDim2.new(0.92, 0, 0.06, 0)
+	toolsTitulo.Position = UDim2.new(0.04, 0, 0.47, 0)
+	toolsTitulo.BackgroundTransparency = 1
+	toolsTitulo.Text = string.format("⚔️ HABILIDADES DESPERTAS (%d)", #toolsDespertas)
+	toolsTitulo.TextColor3 = Color3.fromRGB(255, 210, 70)
+	toolsTitulo.TextScaled = true
+	toolsTitulo.Font = Enum.Font.Arcade
+	toolsTitulo.TextXAlignment = Enum.TextXAlignment.Left
+	toolsTitulo.Parent = popup
+
+	local toolsScroll = Instance.new("ScrollingFrame")
+	toolsScroll.Size = UDim2.new(0.92, 0, 0.2, 0)
+	toolsScroll.Position = UDim2.new(0.04, 0, 0.54, 0)
+	toolsScroll.BackgroundColor3 = Color3.fromRGB(28, 20, 38)
+	toolsScroll.BorderColor3 = Color3.fromRGB(120, 60, 160)
+	toolsScroll.BorderSizePixel = 2
+	toolsScroll.ScrollBarThickness = 6
+	toolsScroll.CanvasSize = UDim2.new(0, 0, 0, #toolsDespertas * 26 + 6)
+	toolsScroll.Parent = popup
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 3)
+	layout.Parent = toolsScroll
+
+	if #toolsDespertas == 0 then
+		local vazio = Instance.new("TextLabel")
+		vazio.Size = UDim2.new(1, -8, 0, 24)
+		vazio.BackgroundTransparency = 1
+		vazio.Text = "Nenhuma Tool carregada nesta forma."
+		vazio.TextColor3 = Color3.fromRGB(150, 130, 170)
+		vazio.TextScaled = true
+		vazio.Font = Enum.Font.Code
+		vazio.Parent = toolsScroll
+	else
+		for i, nome in ipairs(toolsDespertas) do
+			local linha = Instance.new("TextLabel")
+			linha.Size = UDim2.new(1, -8, 0, 23)
+			linha.BackgroundTransparency = 1
+			linha.Text = string.format("  %d. %s", i, nome)
+			linha.TextColor3 = Color3.fromRGB(230, 210, 255)
+			linha.TextScaled = true
+			linha.Font = Enum.Font.Code
+			linha.TextXAlignment = Enum.TextXAlignment.Left
+			linha.Parent = toolsScroll
+		end
+	end
+
+	-- HISTÓRIA
+	local historiaTitulo = Instance.new("TextLabel")
+	historiaTitulo.Size = UDim2.new(0.92, 0, 0.055, 0)
+	historiaTitulo.Position = UDim2.new(0.04, 0, 0.76, 0)
+	historiaTitulo.BackgroundTransparency = 1
+	historiaTitulo.Text = "📖 HISTÓRIA"
+	historiaTitulo.TextColor3 = Color3.fromRGB(0, 220, 255)
+	historiaTitulo.TextScaled = true
+	historiaTitulo.Font = Enum.Font.Arcade
+	historiaTitulo.TextXAlignment = Enum.TextXAlignment.Left
+	historiaTitulo.Parent = popup
+
+	local historiaFrame = Instance.new("Frame")
+	historiaFrame.Size = UDim2.new(0.92, 0, 0.15, 0)
+	historiaFrame.Position = UDim2.new(0.04, 0, 0.82, 0)
+	historiaFrame.BackgroundColor3 = Color3.fromRGB(28, 20, 38)
+	historiaFrame.BorderColor3 = Color3.fromRGB(60, 120, 160)
+	historiaFrame.BorderSizePixel = 2
+	historiaFrame.Parent = popup
+
+	local historiaLabel = Instance.new("TextLabel")
+	historiaLabel.Size = UDim2.new(0.96, 0, 0.9, 0)
+	historiaLabel.Position = UDim2.new(0.02, 0, 0.05, 0)
+	historiaLabel.BackgroundTransparency = 1
+	historiaLabel.Text = (aw.lore ~= nil and aw.lore ~= "" and aw.lore)
+		or (aw.description ~= nil and aw.description ~= "" and aw.description)
+		or "Sem história cadastrada para esta forma."
+	historiaLabel.TextColor3 = Color3.new(1, 1, 1)
+	historiaLabel.TextScaled = true
+	historiaLabel.TextWrapped = true
+	historiaLabel.Font = Enum.Font.Code
+	historiaLabel.TextYAlignment = Enum.TextYAlignment.Top
+	historiaLabel.Parent = historiaFrame
+
+	closeButton.MouseButton1Click:Connect(function()
+		playSound(sounds.close)
+		infoGui.Parent = nil
+	end)
+	background.InputBegan:Connect(function(input)
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			infoGui.Parent = nil
+		end
+	end)
+end
+
 local function createLorePopup(characterName)
 	playSound(sounds.info)
 	local def = getCatalogDef(characterName)
@@ -1279,64 +1523,70 @@ local function createAwakeningButton(charData, card)
 		return
 	end
 
-	-- (V9) O DESPERTAR NÃO SE EQUIPA MAIS.
+	-- (V10) O BOTÃO VOLTOU — mas ele ABRE INFORMAÇÃO, não equipa.
 	--
-	-- Até o V8 este botão DESBLOQUEAVA o Despertar: o servidor gravava
-	-- addAwakenedCharacter e o personagem passava a nascer desperto para
-	-- sempre, como um card separado no inventário.
+	-- No V8 este botão desbloqueava o Despertar e o personagem passava a
+	-- nascer desperto para sempre. No V9 eu tirei o botão inteiro e
+	-- deixei só um rótulo com o nome, o que foi longe demais: some a
+	-- imagem, a história e as habilidades da forma.
 	--
-	-- Agora o Despertar é uma FORMA TEMPORÁRIA do personagem normal. Ele
-	-- já vem junto — quem dispara é a barra do AwakeningMeterServer, que
-	-- enche batendo e apanhando durante o combate. Por isso o card aqui
-	-- é SÓ INFORMAÇÃO: imagem, nome e o que falta para liberar. Sem
-	-- botão de equipar, porque não há o que equipar.
+	-- Agora ele é um botão de VER: abre o painel com imagem, nome,
+	-- história e as Tools despertas. Equipar continua não existindo,
+	-- porque o Despertar é conquistado em combate pela barra.
 	local nomeDesperto = (awakeningInfo.awakening and awakeningInfo.awakening.displayName)
 		or (charData.name .. " (Despertado)")
 
-	local duracao = awakeningInfo.awakening and awakeningInfo.awakening.duracao
-
-	local faixa = Instance.new("TextLabel")
-	faixa.Name = "AwakeningInfo"
-	faixa.Size = UDim2.new(0.96, 0, 0.09, 0)
-	faixa.Position = UDim2.new(0.02, 0, 0.865, 0)
-	faixa.BorderColor3 = Color3.fromRGB(255, 0, 255)
-	faixa.BorderSizePixel = 2
-	faixa.TextScaled = true
-	faixa.Font = Enum.Font.Arcade
-	faixa.ZIndex = 10
-	faixa.Parent = card
+	local awakeningButton = Instance.new("TextButton")
+	awakeningButton.Name = "AwakeningButton"
+	awakeningButton.Size = UDim2.new(0.96, 0, 0.09, 0)
+	awakeningButton.Position = UDim2.new(0.02, 0, 0.865, 0)
+	awakeningButton.BorderColor3 = Color3.fromRGB(255, 0, 255)
+	awakeningButton.BorderSizePixel = 2
+	awakeningButton.TextScaled = true
+	awakeningButton.Font = Enum.Font.Arcade
+	awakeningButton.ZIndex = 10
+	awakeningButton.AutoButtonColor = true
+	awakeningButton.Parent = card
 
 	if awakeningInfo.liberado then
-		faixa.Text = "⚡ " .. nomeDesperto
-		faixa.BackgroundColor3 = Color3.fromRGB(80, 0, 120)
-		faixa.TextColor3 = Color3.fromRGB(255, 100, 255)
+		awakeningButton.Text = "⚡ VER DESPERTAR"
+		awakeningButton.BackgroundColor3 = Color3.fromRGB(120, 0, 160)
+		awakeningButton.TextColor3 = Color3.fromRGB(255, 255, 0)
 	elseif not awakeningInfo.hasOriginal then
-		faixa.Text = "🔒 PRECISA DO ORIGINAL"
-		faixa.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
-		faixa.TextColor3 = Color3.fromRGB(170, 170, 170)
+		awakeningButton.Text = "🔒 VER DESPERTAR"
+		awakeningButton.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
+		awakeningButton.TextColor3 = Color3.fromRGB(190, 190, 190)
 	else
-		faixa.Text = "🔒 FALTA O EMBLEMA"
-		faixa.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
-		faixa.TextColor3 = Color3.fromRGB(170, 170, 170)
+		awakeningButton.Text = "🔒 VER DESPERTAR"
+		awakeningButton.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
+		awakeningButton.TextColor3 = Color3.fromRGB(190, 190, 190)
 	end
 
-	-- Explica COMO se desperta, já que não há mais botão
-	local dica = Instance.new("TextLabel")
-	dica.Name = "AwakeningDica"
-	dica.Size = UDim2.new(0.96, 0, 0.05, 0)
-	dica.Position = UDim2.new(0.02, 0, 0.958, 0)
-	dica.BackgroundTransparency = 1
-	dica.TextScaled = true
-	dica.Font = Enum.Font.Arcade
-	dica.TextColor3 = Color3.fromRGB(170, 170, 190)
-	dica.ZIndex = 10
-	dica.Parent = card
+	-- Clicar SEMPRE abre o painel, mesmo bloqueado: é assim que o jogador
+	-- descobre o que existe e o que precisa fazer para liberar.
+	awakeningButton.MouseButton1Click:Connect(function()
+		playSound(sounds.awakening)
+		createAwakeningPopup(charData.name, awakeningInfo)
+	end)
 
+	-- Pulsa quando está liberado, para o jogador notar que tem forma
 	if awakeningInfo.liberado then
-		dica.Text = duracao and string.format("Enche em combate • dura %ds", duracao)
-			or "Enche em combate"
-	else
-		dica.Text = "Forma temporária em combate"
+		task.spawn(function()
+			while awakeningButton.Parent do
+				TweenService:Create(
+					awakeningButton,
+					TweenInfo.new(1, Enum.EasingStyle.Sine),
+					{ BackgroundColor3 = Color3.fromRGB(190, 0, 240) }
+				):Play()
+				task.wait(1)
+				TweenService:Create(
+					awakeningButton,
+					TweenInfo.new(1, Enum.EasingStyle.Sine),
+					{ BackgroundColor3 = Color3.fromRGB(120, 0, 160) }
+				):Play()
+				task.wait(1)
+			end
+		end)
 	end
 end
 

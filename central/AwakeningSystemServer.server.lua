@@ -1,5 +1,9 @@
 -- ============================================
--- AWAKENING SYSTEM SERVER V5 — DESPERTAR VIRA FORMA TEMPORÁRIA
+-- AWAKENING SYSTEM SERVER V6 — INFORMAÇÃO COMPLETA NO CARD
+-- ============================================
+-- (V6) O card do Despertar mostra imagem, nome, história e as Tools.
+-- Para isso a definição ganhou `lore` e `description`, e o CheckAwakening
+-- passou a devolver imageId, lore, description e health junto.
 -- Coloque em ServerScriptService
 -- Nome: "AwakeningSystemServer"
 -- SUBSTITUI: AwakeningSystemServer V4
@@ -678,6 +682,12 @@ adminSetAwakening.OnServerInvoke = function(player, payload)
 		health = tonumber(payload.health) or nil,
 		displayName = tostring(payload.displayName or (payload.characterName .. " (Despertado)")),
 
+		-- (V6) Texto do card de informação do Despertar. O card mostra
+		-- imagem, nome, história e as Tools — e a história precisava de
+		-- um lugar para morar.
+		lore = type(payload.lore) == "string" and payload.lore or nil,
+		description = type(payload.description) == "string" and payload.description or nil,
+
 		-- (V5) AJUSTE DA BARRA, por personagem.
 		-- Em branco, o AwakeningMeterServer usa o padrão dele. Servem
 		-- para um Despertar forte ser mais caro de carregar que um fraco.
@@ -826,6 +836,9 @@ checkAwakeningRemote.OnServerInvoke = function(player, characterName)
 		awakening = {
 			displayName = def.displayName,
 			imageId = def.imageId,
+			lore = def.lore,
+			description = def.description,
+			health = def.health,
 			duracao = def.duracao,
 			cooldown = def.cooldown,
 		},
@@ -855,7 +868,7 @@ equipAwakeningRemote.OnServerEvent:Connect(function(player, characterName)
 	-- Quando todos os clientes estiverem no V9+, dá para remover.
 	warn(
 		string.format(
-			"[AWAKENING V5] %s disparou EquipAwakening ('%s'), que foi desativado no V5 — cliente desatualizado?",
+			"[AWAKENING V6] %s disparou EquipAwakening ('%s'), que foi desativado no V5 — cliente desatualizado?",
 			player.Name,
 			characterName
 		)
@@ -1020,7 +1033,7 @@ local function limparDespertarAntigo(player)
 
 	print(
 		string.format(
-			"[AWAKENING V5] 🧹 %s: %d desbloqueio(s) do sistema antigo limpo(s) — o Despertar agora vem junto com o personagem",
+			"[AWAKENING V6] 🧹 %s: %d desbloqueio(s) do sistema antigo limpo(s) — o Despertar agora vem junto com o personagem",
 			player.Name,
 			quantos
 		)
