@@ -1,35 +1,47 @@
 -- ============================================
--- AWAKENING METER SERVER V2
--- ============================================
--- (V2) A BARRA NÃO APARECIA — duas causas somadas:
---
--- 1. O PACOTE INICIAL SE PERDIA. O servidor só empurrava o estado
---    quando algo MUDAVA. O pacote com ativo=true saía assim que a
---    definição era resolvida, mas nesse instante o cliente ainda estava
---    no WaitForChild esperando o remote aparecer. O pacote se perdia,
---    nada mais mudava, nenhum outro saía — e a barra ficava invisível
---    para sempre. Agora existe o remote GetAwakeningMeter, que o cliente
---    PUXA ao conectar, mais um batimento de 2 em 2 segundos.
---
--- 2. (No HealthDisplay) a barra estava posicionada em cima do texto de
---    energia e passando do fim do container. Virou faixa própria logo
---    abaixo do container.
---
--- _G.DebugAwakeningMeter() agora diz POR QUE a barra está escondida.
+-- AWAKENING METER SERVER V3
 -- Coloque em ServerScriptService
 -- Nome: "AwakeningMeterServer"
+-- SUBSTITUI: AwakeningMeterServer V2
 -- ============================================
 -- A BARRA DE DESPERTAR — o Despertar deixa de ser um personagem
 -- separado e vira uma FORMA TEMPORÁRIA do personagem normal.
 --
 -- COMO FUNCIONA
 --   1. O jogador equipa o personagem normal, com as Tools normais.
---   2. Batendo e apanhando, a barra sobe.
+--   2. Batendo, apanhando e usando habilidade, a barra sobe.
 --   3. Barra cheia -> as Tools normais SAEM e as do Despertar ENTRAM.
 --   4. Passado o tempo da forma, as Tools voltam a ser as normais.
 --   5. Começa o cooldown: durante ele a barra não sobe.
 --
 --   Morrer desperto encerra a forma e ZERA a barra.
+-- ============================================
+-- (V3) A BARRA NÃO DETECTAVA NADA — o erro era arquitetural.
+--
+-- O HealthChanged estava conectado APENAS nos personagens dos
+-- jogadores. Mas quem muda de vida ao levar um golpe é o Humanoid da
+-- VÍTIMA: bater num NPC, num dummy ou em qualquer criatura não
+-- disparava handler nenhum, e o atacante não ganhava barra alguma.
+-- Na prática só dano jogador-contra-jogador contava — e como se testa
+-- batendo em NPC, parecia que a barra estava morta.
+--
+-- Agora QUALQUER Humanoid da Workspace é vigiado, com varredura inicial
+-- e DescendantAdded para os que nascerem depois.
+--
+-- Junto veio o ganho por USAR habilidade (Tool.Activated), que é como
+-- você descreveu a barra desde o começo: "quanto mais você usa e dá
+-- dano". Assim ela reage também a habilidade de suporte ou que erre o
+-- alvo. É pequeno de propósito — quem carrega a barra é o dano.
+-- Ponha GANHO_POR_ATIVACAO = 0 para desligar.
+-- ============================================
+-- (V2) A barra não APARECIA, por duas causas:
+--   1. O pacote inicial se perdia: o servidor só empurrava o estado
+--      quando algo mudava, e o cliente ainda estava no WaitForChild.
+--      Agora existe GetAwakeningMeter, que o cliente puxa ao conectar,
+--      mais um batimento de 2 em 2 segundos.
+--   2. (No HealthDisplay) a barra ficava em cima do texto de energia e
+--      passando do fim do container.
+-- ============================================
 --
 -- POR QUE O HOOK É NO HealthChanged
 -- O dano no projeto sai de vários lugares: NucleoCombate_V2,
@@ -46,7 +58,7 @@
 --
 -- PUBLICA:
 --   • _G.AwakeningMeter       (estaDesperto / getEstado / forcar)
---   • _G.DebugAwakeningMeter
+--   • _G.DebugAwakeningMeter  (diz POR QUE a barra está escondida)
 --
 -- ⚠️ O GameManager precisa consultar _G.AwakeningMeter.estaDesperto()
 --    para decidir de qual pasta tirar as Tools. Sem essa linha lá, a
@@ -84,6 +96,10 @@ local CONFIG = {
 
 	INTERVALO_SYNC = 0.25, -- com que frequência o cliente é avisado
 	BATIMENTO = 2, -- reenvia o estado a cada N segundos mesmo parado
+
+	-- Ganho por USAR uma habilidade, independente de acertar. Pequeno de
+	-- propósito: quem carrega a barra é o dano. 0 desliga.
+	GANHO_POR_ATIVACAO = 1.5,
 }
 
 -- =====================================
@@ -367,10 +383,10 @@ function remontarTools(player)
 	if _G.GameManagerConfig and _G.GameManagerConfig.reapplyEquippedTools then
 		local ok = pcall(_G.GameManagerConfig.reapplyEquippedTools, player)
 		if not ok then
-			warn("[AWAKEN METER V2] ⚠️ Falha ao remontar as Tools de " .. player.Name)
+			warn("[AWAKEN METER V3] ⚠️ Falha ao remontar as Tools de " .. player.Name)
 		end
 	else
-		warn("[AWAKEN METER V2] ⚠️ _G.GameManagerConfig.reapplyEquippedTools ausente")
+		warn("[AWAKEN METER V3] ⚠️ _G.GameManagerConfig.reapplyEquippedTools ausente")
 	end
 end
 
@@ -393,7 +409,7 @@ local function encerrarDespertar(player, zerarBarra)
 	end
 
 	remontarTools(player)
-	print(string.format("[AWAKEN METER V2] ⏹️ %s voltou ao normal", player.Name))
+	print(string.format("[AWAKEN METER V3] ⏹️ %s voltou ao normal", player.Name))
 end
 
 local function dispararDespertar(player, def)
@@ -415,7 +431,7 @@ local function dispararDespertar(player, def)
 
 	print(
 		string.format(
-			"[AWAKEN METER V2] ⚡ %s DESPERTOU (%s) por %ds",
+			"[AWAKEN METER V3] ⚡ %s DESPERTOU (%s) por %ds",
 			player.Name,
 			tostring(def.displayName or "?"),
 			duracao
@@ -475,11 +491,32 @@ end
 
 -- Um HealthChanged por personagem. A queda de vida vira ganho de barra
 -- para quem apanhou e para quem bateu.
-local function acompanharPersonagem(player, character)
-	local humanoid = character:WaitForChild("Humanoid", 10)
-	if not humanoid then
+-- ⚠️ O DANO PRECISA SER VIGIADO EM TODO HUMANOID, NÃO SÓ NOS JOGADORES.
+--
+-- A primeira versão conectava HealthChanged apenas nos personagens dos
+-- jogadores. Só que quem muda de vida ao levar um golpe é o Humanoid da
+-- VÍTIMA — então bater num NPC, num dummy ou em qualquer criatura não
+-- disparava handler nenhum, e o atacante não ganhava barra alguma. Na
+-- prática só dano jogador-contra-jogador contava, e é por isso que a
+-- barra parecia não detectar nada.
+--
+-- Agora qualquer Humanoid que apareça na Workspace é vigiado.
+
+local humanoidsVigiados = {}
+
+local function jogadorDoHumanoid(humanoid)
+	local modelo = humanoid.Parent
+	if not modelo then
+		return nil
+	end
+	return Players:GetPlayerFromCharacter(modelo)
+end
+
+local function vigiarHumanoid(humanoid)
+	if humanoidsVigiados[humanoid] then
 		return
 	end
+	humanoidsVigiados[humanoid] = true
 
 	local vidaAnterior = humanoid.Health
 
@@ -487,21 +524,30 @@ local function acompanharPersonagem(player, character)
 		local perda = vidaAnterior - vidaAtual
 		vidaAnterior = vidaAtual
 
-		-- Cura ou reset de respawn não enchem nada
+		-- Cura, respawn e mudança de MaxHealth não enchem nada
 		if perda <= 0 then
 			return
 		end
 
-		-- Quem apanhou
-		local def = definicaoAtiva(player)
-		if def then
-			encher(player, perda * configDe(def, "ganhoRecebido", CONFIG.GANHO_POR_DANO_RECEBIDO))
+		local modelo = humanoid.Parent
+		if not modelo then
+			return
 		end
 
-		-- Quem bateu
+		local vitima = jogadorDoHumanoid(humanoid)
+
+		-- QUEM APANHOU (só vale se for jogador)
+		if vitima then
+			local def = definicaoAtiva(vitima)
+			if def then
+				encher(vitima, perda * configDe(def, "ganhoRecebido", CONFIG.GANHO_POR_DANO_RECEBIDO))
+			end
+		end
+
+		-- QUEM BATEU — é este ramo que faz o dano em NPC contar
 		if _G.DamageAttribution and _G.DamageAttribution.getAttacker then
-			local ok, atacante = pcall(_G.DamageAttribution.getAttacker, character)
-			if ok and atacante and atacante ~= player and atacante.Parent then
+			local ok, atacante = pcall(_G.DamageAttribution.getAttacker, modelo)
+			if ok and atacante and atacante ~= vitima and atacante.Parent then
 				local defA = definicaoAtiva(atacante)
 				if defA then
 					encher(atacante, perda * configDe(defA, "ganhoDano", CONFIG.GANHO_POR_DANO_CAUSADO))
@@ -511,6 +557,13 @@ local function acompanharPersonagem(player, character)
 	end)
 
 	humanoid.Died:Connect(function()
+		humanoidsVigiados[humanoid] = nil
+
+		local player = jogadorDoHumanoid(humanoid)
+		if not player then
+			return
+		end
+
 		local e = estado[player]
 		if not e then
 			return
@@ -523,12 +576,66 @@ local function acompanharPersonagem(player, character)
 			e.terminaEm = 0
 			local def = definicaoAtiva(player)
 			e.cooldownAte = os.clock() + configDe(def, "cooldown", CONFIG.COOLDOWN)
-			print(string.format("[AWAKEN METER V2] 💀 %s morreu desperto — forma perdida", player.Name))
+			print(string.format("[AWAKEN METER V3] 💀 %s morreu desperto — forma perdida", player.Name))
 		end
 
 		e.valor = 0
 		e.sujo = true
 	end)
+end
+
+-- Varredura inicial + tudo que nascer depois
+for _, d in ipairs(workspace:GetDescendants()) do
+	if d:IsA("Humanoid") then
+		vigiarHumanoid(d)
+	end
+end
+
+workspace.DescendantAdded:Connect(function(d)
+	if d:IsA("Humanoid") then
+		vigiarHumanoid(d)
+	end
+end)
+
+-- =====================================
+-- GANHO POR USAR HABILIDADE
+-- =====================================
+-- Você descreveu a barra como "quanto mais você USA e dá dano as
+-- habilidades". O dano já está coberto acima; aqui entra o uso em si,
+-- para a barra reagir mesmo a habilidade de suporte ou que erre o alvo.
+--
+-- É um ganho pequeno de propósito: quem carrega a barra é o dano.
+-- Ponha GANHO_POR_ATIVACAO = 0 no CONFIG para desligar.
+
+local function vigiarTool(player, tool)
+	if not tool:IsA("Tool") then
+		return
+	end
+
+	tool.Activated:Connect(function()
+		if CONFIG.GANHO_POR_ATIVACAO > 0 then
+			encher(player, CONFIG.GANHO_POR_ATIVACAO)
+		end
+	end)
+end
+
+local function vigiarMochila(player)
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		for _, t in ipairs(backpack:GetChildren()) do
+			vigiarTool(player, t)
+		end
+		backpack.ChildAdded:Connect(function(t)
+			vigiarTool(player, t)
+		end)
+	end
+
+	-- Tool equipada sai da Backpack e vai para o personagem
+	if player.Character then
+		for _, t in ipairs(player.Character:GetChildren()) do
+			vigiarTool(player, t)
+		end
+	end
 end
 
 -- =====================================
@@ -548,12 +655,15 @@ local function entrou(player)
 		-- não é trocar de personagem, e limpar faria a barra piscar para
 		-- fora da tela a cada morte até o laço de 1s reencontrar tudo.
 
-		task.spawn(acompanharPersonagem, player, character)
+		-- Os Humanoid são vigiados globalmente (ver vigiarHumanoid), então
+		-- aqui só faltam as Tools do personagem novo.
+		task.spawn(function()
+			task.wait(0.5)
+			vigiarMochila(player)
+		end)
 	end)
 
-	if player.Character then
-		task.spawn(acompanharPersonagem, player, player.Character)
-	end
+	vigiarMochila(player)
 
 	-- Resolve o personagem equipado já na entrada, para a barra aparecer
 	-- sem esperar o laço de 1 em 1 segundo.
@@ -642,7 +752,7 @@ _G.AwakeningMeter = {
 -- números. "não aparece" tem quatro causas possíveis e este comando
 -- separa as quatro.
 _G.DebugAwakeningMeter = function()
-	print("\n========== DEBUG AWAKENING METER V2 ==========")
+	print("\n========== DEBUG AWAKENING METER V3 ==========")
 
 	local defs = _G.AwakeningSystem and _G.AwakeningSystem.listAll and _G.AwakeningSystem.listAll() or {}
 	local quantasDefs = 0
@@ -698,4 +808,4 @@ _G.DebugAwakeningMeter = function()
 	print("=============================================\n")
 end
 
-print("[AWAKEN METER V2] Barra de Despertar carregada")
+print("[AWAKEN METER V3] Barra de Despertar carregada")
