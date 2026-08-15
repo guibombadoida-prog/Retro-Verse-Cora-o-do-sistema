@@ -73,6 +73,31 @@ que o fluxo de versão única existe para impedir.
 | `src/StarterPlayer/StarterPlayerScripts/MusicPlayerClient_V2.client.lua` | `StarterPlayerScripts` | Troca de faixa por evento (regra 6) |
 | `src/StarterPlayer/StarterPlayerScripts/TutorialMenuClient_V2.client.lua` | `StarterPlayerScripts` | Só o componente visual da caixa de diálogo (regra 4) |
 
+### ⚡ E o Despertar? Sem estes, ele NÃO funciona na luta
+
+O Despertar é a mecânica de destaque do combate, e a luta contra o chefe é
+exatamente onde ela deveria brilhar. Só que ela vive em scripts da place
+principal: sem copiá-los, `_G.AwakeningMeter` não existe aqui, a barra nunca
+aparece e a forma nunca dispara. E falha em **silêncio** — o `GameManager` e o
+`StatService` consultam o medidor protegidos por `if`, então nada dá erro, o
+Despertar simplesmente não acontece.
+
+| Copie de | Para | Por quê |
+|---|---|---|
+| `src/ServerScriptService/GameManager.server.lua` | `ServerScriptService` | É quem troca as Tools entre a forma normal e a desperta |
+| `src/ServerScriptService/AwakeningSystemServer.server.lua` | `ServerScriptService` | As DEFINIÇÕES de Despertar. **Mesmo nome de DataStore** da principal |
+| `src/ServerScriptService/AwakeningMeterServer.server.lua` | `ServerScriptService` | A barra: enche com dano e uso de habilidade, dispara a forma |
+| `src/ServerScriptService/DamageAttribution.server.lua` | `ServerScriptService` | Sem ele o medidor não sabe QUEM bateu, e só a parte de "apanhar" enche |
+| `src/ServerScriptService/StatService.server.lua` | `ServerScriptService` | Atributos e a vida da forma desperta |
+| `src/ServerScriptService/CharacterLevelServer.server.lua` | `ServerScriptService` | O `StatService` depende dele para energia e atributos por nível |
+| `src/ServerScriptService/EnergySystemServer.server.lua` | `ServerScriptService` | Custo de energia das habilidades |
+| `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | `StarterPlayerScripts` | Vida, energia e a barra de Despertar na tela |
+| `src/StarterPlayer/StarterPlayerScripts/RetroHotbarClient.client.lua` | `StarterPlayerScripts` | A hotbar, que precisa refletir a troca de Tools |
+
+⚠️ O `AwakeningMeterServer` chama `_G.GameManagerConfig.reapplyEquippedTools`
+para trocar as Tools. Sem o `GameManager` aqui, a barra enche, dispara e **nada
+acontece** — ele avisa no log, mas o jogador só vê a barra encher em vão.
+
 ### ⛔ NÃO instale aqui
 
 **`TeamDamageProtection`** — o `Boss_NoPvpProtection` faz o papel dele nesta place.
