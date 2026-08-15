@@ -1,8 +1,24 @@
 -- ============================================
--- AWAKENING METER SERVER V3
+-- AWAKENING METER SERVER V4
 -- Coloque em ServerScriptService
 -- Nome: "AwakeningMeterServer"
--- SUBSTITUI: AwakeningMeterServer V2
+-- SUBSTITUI: AwakeningMeterServer V3
+-- ============================================
+-- (V4) DURAÇÃO E JANELA DE TRANSFORMAÇÃO
+--   • A forma desperta passou de 20s para 210s (3 min e meio).
+--   • Trocar de forma agora tem uma janela de 3 segundos, NOS DOIS
+--     SENTIDOS: o jogador é desarmado, espera, e só então recebe o novo
+--     conjunto de Tools. É o tempo da animação, e de quebra fecha o
+--     truque de atacar no instante da troca com a Tool antiga na mão.
+--   • Desarmar é UnequipTools MAIS esvaziar a Backpack. Só UnequipTools
+--     tira da mão e deixa reequipar na hora, o que não seguraria nada
+--     durante os 3 segundos. Não custa nada porque o remontarTools
+--     reconstrói a Backpack inteira no fim.
+--   • O relógio da forma só começa quando a transformação TERMINA —
+--     senão os 3 segundos sairiam do tempo desperto.
+--   • A barra não enche durante a transformação.
+--   • Transformação abortada no meio (morte, troca de personagem)
+--     devolve as Tools: ninguém fica desarmado por causa disso.
 -- ============================================
 -- A BARRA DE DESPERTAR — o Despertar deixa de ser um personagem
 -- separado e vira uma FORMA TEMPORÁRIA do personagem normal.
@@ -86,8 +102,14 @@ local CONFIG = {
 	GANHO_POR_DANO_CAUSADO = 0.35,
 	GANHO_POR_DANO_RECEBIDO = 0.20,
 
-	DURACAO = 20, -- segundos desperto
+	DURACAO = 210, -- segundos desperto (3 min e meio)
 	COOLDOWN = 45, -- segundos sem poder encher
+
+	-- Janela de transformação: o jogador fica SEM Tool nenhuma enquanto
+	-- a forma troca, nos dois sentidos. É o tempo da animação, e também
+	-- impede o truque de sair batendo no instante exato da troca com a
+	-- Tool antiga ainda na mão.
+	DELAY_TRANSFORMACAO = 3,
 
 	-- Trava anti-abuso: dano de um golpe só não pode encher a barra
 	-- inteira. Sem isso, uma Tool com dano altíssimo desperta de
@@ -160,6 +182,8 @@ local function novoEstado()
 		cooldownAte = 0,
 		personagem = nil,
 		def = nil, -- definição do Despertar em cache (ver resolverDefinicao)
+		transformando = false,
+		transformandoAte = 0,
 		sujo = true,
 	}
 end
@@ -327,6 +351,8 @@ function montarPacote(e)
 		-- ativo = o personagem equipado TEM Despertar que este jogador
 		-- pode usar. Personagem sem forma despertada não mostra barra.
 		ativo = e.def ~= nil,
+		transformando = e.transformando == true,
+		transformandoRestante = e.transformando and math.max(0, e.transformandoAte - agora) or 0,
 	}
 end
 
@@ -352,7 +378,7 @@ task.spawn(function()
 			-- segundos, e contador precisa de pacote a cada tique. Sem
 			-- isto o número congelaria: o `sujo` só liga quando algum
 			-- valor muda, e o tempo passando não muda valor nenhum.
-			if e and (e.desperto or e.cooldownAte > agora) then
+			if e and (e.desperto or e.transformando or e.cooldownAte > agora) then
 				e.sujo = true
 			end
 
@@ -383,11 +409,84 @@ function remontarTools(player)
 	if _G.GameManagerConfig and _G.GameManagerConfig.reapplyEquippedTools then
 		local ok = pcall(_G.GameManagerConfig.reapplyEquippedTools, player)
 		if not ok then
-			warn("[AWAKEN METER V3] ⚠️ Falha ao remontar as Tools de " .. player.Name)
+			warn("[AWAKEN METER V4] ⚠️ Falha ao remontar as Tools de " .. player.Name)
 		end
 	else
-		warn("[AWAKEN METER V3] ⚠️ _G.GameManagerConfig.reapplyEquippedTools ausente")
+		warn("[AWAKEN METER V4] ⚠️ _G.GameManagerConfig.reapplyEquippedTools ausente")
 	end
+end
+
+-- (V4) DESARMA O JOGADOR.
+--
+-- UnequipTools tira o que está na MÃO, mas as Tools continuam na
+-- Backpack e dá para reequipar na hora. Como a troca demora
+-- DELAY_TRANSFORMACAO segundos, esvaziar a Backpack também é o que
+-- garante que ninguém ataque durante a transformação — e não custa
+-- nada, porque o remontarTools reconstrói a Backpack inteira no fim.
+local function desarmar(player)
+	local personagem = player.Character
+	if not personagem then
+		return
+	end
+
+	local humanoid = personagem:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		pcall(function()
+			humanoid:UnequipTools()
+		end)
+	end
+
+	for _, item in ipairs(personagem:GetChildren()) do
+		if item:IsA("Tool") then
+			item.Parent = nil
+		end
+	end
+
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		for _, item in ipairs(backpack:GetChildren()) do
+			if item:IsA("Tool") then
+				item.Parent = nil
+			end
+		end
+	end
+end
+
+-- Troca de forma com a janela de transformação: desarma, espera, remonta.
+-- `aoConcluir` roda depois da troca, e só se o jogador ainda estiver no
+-- estado esperado — morrer ou trocar de personagem no meio cancela.
+local function transformar(player, aindaVale, aoConcluir)
+	desarmar(player)
+
+	local e = getEstado(player)
+	e.transformando = true
+	e.transformandoAte = os.clock() + CONFIG.DELAY_TRANSFORMACAO
+	e.sujo = true
+
+	task.delay(CONFIG.DELAY_TRANSFORMACAO, function()
+		local atual = estado[player]
+		if not atual then
+			return
+		end
+
+		atual.transformando = false
+		atual.transformandoAte = 0
+		atual.sujo = true
+
+		-- A situação pode ter mudado durante os 3 segundos
+        if aindaVale and not aindaVale() then
+			-- Mesmo cancelando, devolve as Tools: o jogador não pode
+			-- ficar desarmado por causa de uma transformação abortada.
+			remontarTools(player)
+			return
+		end
+
+		remontarTools(player)
+
+		if aoConcluir then
+			aoConcluir()
+		end
+	end)
 end
 
 local function encerrarDespertar(player, zerarBarra)
@@ -408,8 +507,14 @@ local function encerrarDespertar(player, zerarBarra)
 		e.valor = 0
 	end
 
-	remontarTools(player)
-	print(string.format("[AWAKEN METER V3] ⏹️ %s voltou ao normal", player.Name))
+	-- (V4) Voltar ao normal também passa pela janela de transformação:
+	-- desarma, espera, devolve as Tools normais.
+	transformar(player, function()
+		local atual = estado[player]
+		return atual ~= nil and atual.desperto == false
+	end, function()
+		print(string.format("[AWAKEN METER V4] ⏹️ %s voltou ao normal", player.Name))
+	end)
 end
 
 local function dispararDespertar(player, def)
@@ -422,23 +527,30 @@ local function dispararDespertar(player, def)
 
 	e.desperto = true
 	e.valor = e.max
-	e.terminaEm = os.clock() + duracao
+	-- (V4) O relógio da forma só começa quando a transformação TERMINA.
+	-- Se contasse desde já, os 3 segundos de troca sairiam do tempo
+	-- desperto e o jogador receberia menos do que o configurado.
+	e.terminaEm = os.clock() + CONFIG.DELAY_TRANSFORMACAO + duracao
 	e.sujo = true
 
-	-- A troca de Tools acontece aqui: o GameManager vê estaDesperto()
-	-- verdadeiro e passa a tirar as Tools de characterFolder.AwakenedForm
-	remontarTools(player)
-
-	print(
-		string.format(
-			"[AWAKEN METER V3] ⚡ %s DESPERTOU (%s) por %ds",
-			player.Name,
-			tostring(def.displayName or "?"),
-			duracao
+	-- A troca de Tools acontece dentro do transformar: o GameManager vê
+	-- estaDesperto() verdadeiro e passa a tirar as Tools de
+	-- characterFolder.AwakenedForm.
+	transformar(player, function()
+		local atual = estado[player]
+		return atual ~= nil and atual.desperto == true
+	end, function()
+		print(
+			string.format(
+				"[AWAKEN METER V4] ⚡ %s DESPERTOU (%s) por %ds",
+				player.Name,
+				tostring(def.displayName or "?"),
+				duracao
+			)
 		)
-	)
+	end)
 
-	task.delay(duracao, function()
+	task.delay(CONFIG.DELAY_TRANSFORMACAO + duracao, function()
 		local atual = estado[player]
 		-- Só encerra se for ESTE despertar: se o jogador morreu e
 		-- despertou de novo no meio, este timer não pode cortar o novo.
@@ -469,6 +581,10 @@ local function encher(player, quantidade)
 
 	if e.desperto then
 		return -- desperto não enche
+	end
+
+	if e.transformando then
+		return -- durante a troca de forma também não
 	end
 
 	local agora = os.clock()
@@ -576,7 +692,7 @@ local function vigiarHumanoid(humanoid)
 			e.terminaEm = 0
 			local def = definicaoAtiva(player)
 			e.cooldownAte = os.clock() + configDe(def, "cooldown", CONFIG.COOLDOWN)
-			print(string.format("[AWAKEN METER V3] 💀 %s morreu desperto — forma perdida", player.Name))
+			print(string.format("[AWAKEN METER V4] 💀 %s morreu desperto — forma perdida", player.Name))
 		end
 
 		e.valor = 0
@@ -752,7 +868,7 @@ _G.AwakeningMeter = {
 -- números. "não aparece" tem quatro causas possíveis e este comando
 -- separa as quatro.
 _G.DebugAwakeningMeter = function()
-	print("\n========== DEBUG AWAKENING METER V3 ==========")
+	print("\n========== DEBUG AWAKENING METER V4 ==========")
 
 	local defs = _G.AwakeningSystem and _G.AwakeningSystem.listAll and _G.AwakeningSystem.listAll() or {}
 	local quantasDefs = 0
@@ -808,4 +924,4 @@ _G.DebugAwakeningMeter = function()
 	print("=============================================\n")
 end
 
-print("[AWAKEN METER V3] Barra de Despertar carregada")
+print("[AWAKEN METER V4] Barra de Despertar carregada")

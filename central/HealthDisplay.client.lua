@@ -1,5 +1,8 @@
 -- ============================================
 -- HEALTH DISPLAY V4 - RETRO STYLE + BARRA DE ENERGIA
+-- (V7) Mostra a janela de TRANSFORMANDO: o jogador fica desarmado por
+--      alguns segundos enquanto a forma troca, nos dois sentidos. Sem
+--      indicação na tela isso parece travamento.
 -- (V6) A BARRA DE DESPERTAR NÃO APARECIA. Duas causas:
 --      1. Ela estava dentro do MainContainer, em Y 0.845 com altura
 --         0.2 — exatamente em cima do EnergyText (0.845 a 0.995) e
@@ -295,7 +298,19 @@ task.spawn(function()
 			local max = math.max(1, dados.max or 100)
 			local fracao = math.clamp((dados.valor or 0) / max, 0, 1)
 
-			if dados.desperto then
+			-- (V7) Janela de transformação: o jogador fica desarmado por
+			-- alguns segundos enquanto a forma troca, nos dois sentidos.
+			-- Precisa aparecer, senão parece que o jogo travou.
+			if dados.transformando then
+				piscando = false
+				AwakenBar.Size = UDim2.new(1, 0, 1, 0)
+				AwakenBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+				AwakenBackground.BorderColor3 = Color3.fromRGB(255, 255, 255)
+				AwakenText.Text = string.format(
+					"TRANSFORMANDO  %.1fs",
+					dados.transformandoRestante or 0
+				)
+			elseif dados.desperto then
 				-- Desperto: a barra vira contagem regressiva da forma
 				AwakenBar.Size = UDim2.new(1, 0, 1, 0)
 				AwakenBar.BackgroundColor3 = Color3.fromRGB(255, 210, 70)
@@ -345,7 +360,7 @@ task.spawn(function()
 			end
 		end
 	else
-		warn("[HEALTH V6] AwakeningMeterUpdate não encontrado — barra de Despertar desligada")
+		warn("[HEALTH V7] AwakeningMeterUpdate não encontrado — barra de Despertar desligada")
 	end
 end)
 
