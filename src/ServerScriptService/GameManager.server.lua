@@ -1,9 +1,23 @@
 -- ============================================
--- GAME MANAGER V9 — ZERO PERSONAGENS NO CÓDIGO + FIX DE EQUIPAR
+-- GAME MANAGER V10 — DESPERTAR VIRA FORMA TEMPORÁRIA
 -- Coloque em ServerScriptService
 -- Nome: "GameManager"
--- SUBSTITUI: GAME_MANAGER_V8
--- REMOVER:   GAME_MANAGER_V8
+-- SUBSTITUI: GameManager V9
+-- ============================================
+-- (V10) ALTERAÇÕES:
+-- • O DESPERTAR NÃO É MAIS PERMANENTE. Até o V9 a forma despertada era
+--   decidida por `_G.PlayerDataManager.hasAwakening`, ou seja, quem
+--   tinha o Despertar desbloqueado nascia desperto e ficava assim o
+--   tempo todo. Agora quem decide é o AwakeningMeterServer: a barra
+--   enche batendo e apanhando, dispara a forma, ela dura um tempo e
+--   volta ao normal. Esta função é chamada de novo a cada troca de
+--   forma, via _G.GameManagerConfig.reapplyEquippedTools.
+-- • 🐞 CURA DE GRAÇA EVITADA: equipCharacter faz `humanoid.Health =
+--   health`. Como o medidor chama esta função no meio da luta, despertar
+--   curaria o jogador por completo — bastava despertar para apagar todo
+--   o dano recebido. Agora, quando é REMONTAGEM (mesmo personagem já
+--   equipado), a proporção de vida é mantida: muda o teto, não o quanto
+--   o jogador está ferido.
 -- ============================================
 -- (V9) ALTERAÇÕES:
 -- • 🐞 BUG CRÍTICO CORRIGIDO (o motivo do "não dá para equipar de
@@ -285,20 +299,46 @@ local function equipCharacter(player, characterName)
 		return false
 	end
 
-	-- Checar Despertar desbloqueado (V8)
+	-- =====================================
+	-- (V10) DESPERTAR: FORMA TEMPORÁRIA, NÃO POSSE PERMANENTE
+	-- =====================================
+	-- Até o V9 o Despertar era decidido por `hasAwakening`, ou seja,
+	-- quem tinha o Despertar desbloqueado ficava desperto O TEMPO TODO,
+	-- desde o spawn. Agora o Despertar é uma forma temporária: a barra
+	-- do AwakeningMeterServer enche batendo e apanhando, dispara, dura
+	-- um tempo e volta ao normal.
+	--
+	-- Esta função é chamada de novo pelo medidor (via
+	-- _G.GameManagerConfig.reapplyEquippedTools) toda vez que a forma
+	-- muda, e é o `estaDesperto` abaixo que decide de qual pasta as
+	-- Tools saem: `characterFolder` ou `characterFolder.AwakenedForm`.
 	local usingAwakened = false
 	local health = getCharacterHealth(characterName)
 
-	if _G.PlayerDataManager.hasAwakening and _G.PlayerDataManager.hasAwakening(player, characterName) then
-		local awakenedDef = _G.AwakeningSystem and _G.AwakeningSystem.getDefinition(characterName)
-		if awakenedDef then
-			usingAwakened = true
-			health = awakenedDef.health or health
-		end
+	local awakenedDef = _G.AwakeningSystem and _G.AwakeningSystem.getDefinition(characterName)
+
+	if awakenedDef and _G.AwakeningMeter and _G.AwakeningMeter.estaDesperto then
+		usingAwakened = _G.AwakeningMeter.estaDesperto(player) == true
+	end
+
+	if usingAwakened and awakenedDef then
+		health = awakenedDef.health or health
+	end
+
+	-- (V10) A vida só é ENCHIDA num equipar de verdade.
+	-- Quando o medidor remonta as Tools no meio da luta (despertou ou
+	-- voltou ao normal), encher aqui daria cura total de graça: bastava
+	-- despertar para zerar o dano recebido. Nesse caso a PROPORÇÃO de
+	-- vida é mantida — muda o teto, não o quanto o jogador está ferido.
+	local remontagem = equippedCharacters[player] == characterName
+	local proporcao = 1
+
+	if remontagem and humanoid.MaxHealth > 0 then
+		proporcao = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
 	end
 
 	humanoid.MaxHealth = health
-	humanoid.Health = health
+	humanoid.Health = remontagem and math.max(1, health * proporcao) or health
 
 	-- Limpar ferramentas
 	local backpack = player:FindFirstChild("Backpack")

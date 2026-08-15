@@ -1,9 +1,30 @@
 -- ============================================
--- MUSIC PLAYER CLIENT V5 — SEM BOTÃO + INTERFACE MELHORADA
--- (V5) ALTERAÇÕES: :Destroy() -> .Parent = nil; shuffle aleatório -> sequencial (Randomize proibido); fontes retro
+-- MUSIC PLAYER CLIENT V6 — CATÁLOGO EM DATASTORE + VISUALIZER DE GRAVE
 -- Coloque em: StarterPlayer > StarterPlayerScripts
 -- Nome: "MusicPlayerClient_V2"
--- SUBSTITUI: MusicPlayerClient (V3)  →  REMOVER o antigo
+-- SUBSTITUI: MusicPlayerClient_V2 (V5)
+-- ============================================
+-- (V6) MUDANÇAS:
+-- • AS FAIXAS SAÍRAM DO STUDIO. Até o V5 cada música era um objeto
+--   Sound criado à mão dentro de workspace.MusicHolder — trocar a
+--   trilha exigia abrir o Studio e publicar o jogo inteiro. Agora quem
+--   manda é o MusicCatalogServer: os IDs ficam num DataStore
+--   (RVMusicCatalogV1) e este cliente monta os Sound em tempo de
+--   execução, do mesmo jeito que o CharacterCatalogServer faz com os
+--   personagens.
+-- • PAINEL DE ADMIN embutido: cola o ID, o servidor pergunta ao Roblox
+--   se aquilo é áudio (MarketplaceService), preenche nome e autor
+--   sozinho e grava. Aparece só para quem o AdminRegistryServer
+--   reconhece.
+-- • SYNC ENTRE SERVIDORES: adicionou numa partida, entra em todas —
+--   MessagingService com guarda de JobId, igual ao catálogo.
+-- • VISUALIZER DE GRAVE no painel NOW PLAYING (ver a nota sobre o
+--   limite da plataforma na seção do visualizer).
+--
+-- DEPENDE DE: MusicCatalogServer (novo) e AdminRegistryServer
+-- ============================================
+-- (V5) :Destroy() -> .Parent = nil; shuffle aleatório -> sequencial
+--   (Randomize proibido); fontes retro
 -- ============================================
 -- NOVIDADES V4:
 -- • BOTÃO FLUTUANTE PRÓPRIO REMOVIDO (só abre pelo menu unificado ☰)
@@ -202,6 +223,13 @@ local COLORS = {
 -- MUSIC HOLDER
 -- =====================================
 
+-- (V6) O Holder deixou de ser preenchido no Studio.
+-- Antes as faixas eram objetos Sound criados à mão dentro de
+-- workspace.MusicHolder, então trocar a trilha exigia abrir o Studio e
+-- publicar o jogo. Agora o MusicCatalogServer guarda os IDs num
+-- DataStore e este cliente monta os Sound em tempo de execução.
+-- O Holder continua existindo porque o resto deste script trabalha em
+-- cima dele — o que mudou é QUEM o preenche.
 local Holder = workspace:FindFirstChild("MusicHolder")
 if not Holder then
 	Holder = Instance.new("Folder")
@@ -212,9 +240,109 @@ end
 for _, obj in pairs(Holder:GetChildren()) do
 	if not obj:IsA("Sound") then
 		obj.Parent = nil
-		warn("[MUSIC V5] Objeto inválido removido: " .. obj.Name)
+		warn("[MUSIC V6] Objeto inválido removido: " .. obj.Name)
 	end
 end
+
+-- =====================================
+-- (V6) CATÁLOGO DE MÚSICAS VINDO DO SERVIDOR
+-- =====================================
+
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes", 20)
+local getMusicCatalog = remotesFolder and remotesFolder:WaitForChild("GetMusicCatalog", 20)
+local musicCatalogSync = remotesFolder and remotesFolder:FindFirstChild("MusicCatalogSync")
+
+local catalogoAtual = {}
+
+-- Guarda de quem está tocando para não derrubar a faixa atual quando um
+-- admin mexe no catálogo durante a reprodução.
+local function faixaEmUso(sound)
+	return sound ~= nil and sound.IsPlaying
+end
+
+local function popularHolder(lista)
+	if type(lista) ~= "table" then
+		return
+	end
+	catalogoAtual = lista
+
+	local querido = {}
+	for _, faixa in ipairs(lista) do
+		if tonumber(faixa.id) then
+			querido["rbxassetid://" .. tostring(faixa.id)] = faixa
+		end
+	end
+
+	-- Tira o que saiu do catálogo (menos o que está tocando agora)
+	for _, som in ipairs(Holder:GetChildren()) do
+		if som:IsA("Sound") and not querido[som.SoundId] and not faixaEmUso(som) then
+			som.Parent = nil
+		end
+	end
+
+	-- Põe o que entrou e atualiza nome de quem já estava
+	local existentes = {}
+	for _, som in ipairs(Holder:GetChildren()) do
+		if som:IsA("Sound") then
+			existentes[som.SoundId] = som
+		end
+	end
+
+	for _, faixa in ipairs(lista) do
+		local assetId = "rbxassetid://" .. tostring(faixa.id)
+		local som = existentes[assetId]
+
+		if not som then
+			som = Instance.new("Sound")
+			som.SoundId = assetId
+			som.Volume = 0.5
+			som.Looped = false
+			som.Parent = Holder
+		end
+
+		som.Name = faixa.nome or ("Faixa " .. tostring(faixa.id))
+
+		if not som:FindFirstChild("Artista") then
+			local a = Instance.new("StringValue")
+			a.Name = "Artista"
+			a.Parent = som
+		end
+		som.Artista.Value = faixa.artista or ""
+	end
+
+	-- Renumera na ordem do catálogo (o player usa Number para o "próxima")
+	for indice, faixa in ipairs(lista) do
+		local som = Holder:FindFirstChild(faixa.nome or "")
+		if som and som:IsA("Sound") then
+			local n = som:FindFirstChild("Number")
+			if not n then
+				n = Instance.new("IntValue")
+				n.Name = "Number"
+				n.Parent = som
+			end
+			n.Value = indice
+		end
+	end
+
+	print(string.format("[MUSIC V6] ♪ Catálogo carregado: %d faixa(s)", #lista))
+end
+
+if musicCatalogSync then
+	musicCatalogSync.OnClientEvent:Connect(popularHolder)
+end
+
+task.spawn(function()
+	if not getMusicCatalog then
+		warn("[MUSIC V6] ⚠️ GetMusicCatalog não encontrado — o MusicCatalogServer está instalado?")
+		return
+	end
+	local ok, lista = pcall(function()
+		return getMusicCatalog:InvokeServer()
+	end)
+	if ok and type(lista) == "table" then
+		popularHolder(lista)
+	end
+end)
 
 -- =====================================
 -- VARIÁVEIS DO PLAYER
@@ -233,6 +361,332 @@ local ReverbEffect = nil
 local ReverbEnabled = false
 local BassEffect = nil
 local Debounce = false
+
+-- =====================================
+-- (V6) VISUALIZER DE GRAVE
+-- =====================================
+-- ⚠️ LIMITE DA PLATAFORMA: o Roblox NÃO expõe FFT/espectro. A única
+-- leitura de áudio disponível é Sound.PlaybackLoudness (0 a 1000), que
+-- é o nível geral da faixa, não por frequência.
+--
+-- Para isolar o grave, o truque é uma SONDA: um segundo Sound tocando a
+-- mesma faixa, inaudível, com um EqualizerSoundEffect que derruba médio
+-- e agudo no mínimo (-80 dB) e deixa o grave passar. O PlaybackLoudness
+-- dessa sonda responde basicamente ao baixo e ao bumbo.
+--
+-- Se a sonda não responder (o comportamento do PlaybackLoudness com
+-- volume zerado varia entre versões do motor), o visualizer cai para o
+-- nível geral da faixa com ataque/queda lentos, que visualmente ainda lê
+-- como pulso de grave. Ou seja: degrada, não quebra.
+
+local VisualizerBarras = {}
+local VisualizerSonda = nil
+local VisualizerGrupo = nil
+local VisualizerConn = nil
+local VisualizerNiveis = {}
+
+local VIS_BARRAS = 24
+local VIS_SUAVIZA_SUBIDA = 0.55 -- quanto maior, mais rápido sobe
+local VIS_SUAVIZA_DESCIDA = 0.12 -- quanto menor, mais devagar cai
+
+local function CriarVisualizer(pai)
+	VisualizerBarras = {}
+	VisualizerNiveis = {}
+
+	local faixa = Instance.new("Frame")
+	faixa.Name = "Visualizer"
+	faixa.Size = UDim2.new(1, -16, 0, isMobile and 30 or 36)
+	faixa.Position = UDim2.new(0, 8, 1, isMobile and -42 or -50)
+	faixa.BackgroundTransparency = 1
+	faixa.BorderSizePixel = 0
+	faixa.ZIndex = 1
+	faixa.Parent = pai
+
+	local largura = 1 / VIS_BARRAS
+
+	for i = 1, VIS_BARRAS do
+		local barra = Instance.new("Frame")
+		barra.Name = "Bar" .. i
+		barra.AnchorPoint = Vector2.new(0, 1)
+		barra.Position = UDim2.new((i - 1) * largura, 0, 1, 0)
+		barra.Size = UDim2.new(largura * 0.7, 0, 0, 2)
+		barra.BackgroundColor3 = COLORS.music
+		barra.BorderSizePixel = 0
+		barra.ZIndex = 1
+		barra.Parent = faixa
+
+		VisualizerBarras[i] = barra
+		VisualizerNiveis[i] = 0
+	end
+
+	return faixa
+end
+
+-- Monta a sonda de grave em cima da faixa que está tocando
+local function PrepararSonda(sound)
+	if VisualizerSonda then
+		VisualizerSonda.Parent = nil
+		VisualizerSonda = nil
+	end
+
+	if not sound then
+		return
+	end
+
+	if not VisualizerGrupo then
+		VisualizerGrupo = Instance.new("SoundGroup")
+		VisualizerGrupo.Name = "VisualizerMudo"
+		VisualizerGrupo.Volume = 0
+		VisualizerGrupo.Parent = SoundService
+	end
+
+	local sonda = Instance.new("Sound")
+	sonda.Name = "BassProbe"
+	sonda.SoundId = sound.SoundId
+	sonda.Volume = 1 -- o silêncio vem do SoundGroup, não daqui
+	sonda.SoundGroup = VisualizerGrupo
+	sonda.Looped = false
+
+	local eq = Instance.new("EqualizerSoundEffect")
+	eq.LowGain = 0
+	eq.MidGain = -80
+	eq.HighGain = -80
+	eq.Parent = sonda
+
+	sonda.Parent = SoundService
+	VisualizerSonda = sonda
+
+	task.spawn(function()
+		local ok = pcall(function()
+			sonda.TimePosition = sound.TimePosition
+			sonda:Play()
+		end)
+		if not ok then
+			sonda.Parent = nil
+			if VisualizerSonda == sonda then
+				VisualizerSonda = nil
+			end
+		end
+	end)
+end
+
+local function PararSonda()
+	if VisualizerSonda then
+		pcall(function()
+			VisualizerSonda:Stop()
+		end)
+		VisualizerSonda.Parent = nil
+		VisualizerSonda = nil
+	end
+end
+
+-- =====================================
+-- (V6) PAINEL DE ADMIN DO CATÁLOGO
+-- =====================================
+-- É por aqui que o ID entra no jogo, sem Studio: cola o ID, o servidor
+-- pergunta ao Roblox se aquilo é áudio, preenche nome e autor sozinho e
+-- grava no DataStore. Todos os servidores recebem na hora.
+
+-- ⚠️ ORDEM IMPORTA AQUI.
+-- createMusicInterface() roda na CARGA do script, mas descobrir se o
+-- jogador é admin é assíncrono (WaitForChild + InvokeServer). Se o
+-- painel só fosse criado quando ehAdmin já fosse true, ele nunca
+-- existiria: a interface é montada antes da resposta chegar, e não
+-- havia nova tentativa.
+--
+-- Por isso o painel é SEMPRE construído, porém invisível, e só é
+-- revelado quando a resposta chega. Quem não é admin nunca vê nada — e
+-- mesmo que forjasse a chamada, o MusicCatalogServer recusa e dá Kick.
+local ehAdmin = false
+local PainelAdmin = nil
+local AreaConteudo = nil
+local AlturaPainelAdmin = 0
+
+local painelJaRevelado = false
+
+local function revelarPainelAdmin()
+	if painelJaRevelado or not (ehAdmin and PainelAdmin) then
+		return
+	end
+	-- Guarda: a revelação pode ser disparada por dois caminhos (a
+	-- resposta do IsAdminCheck e a criação do painel). Sem isso a área
+	-- de conteúdo encolheria duas vezes.
+	painelJaRevelado = true
+
+	PainelAdmin.Visible = true
+
+	-- Encolhe a área de conteúdo para o painel não cobrir a playlist
+	if AreaConteudo and AlturaPainelAdmin > 0 then
+		local s = AreaConteudo.Size
+		AreaConteudo.Size = UDim2.new(s.X.Scale, s.X.Offset, s.Y.Scale, s.Y.Offset - AlturaPainelAdmin - 6)
+	end
+end
+
+task.spawn(function()
+	local rem = ReplicatedStorage:WaitForChild("Remotes", 30)
+	local check = rem and rem:WaitForChild("IsAdminCheck", 30)
+	if not check then
+		return
+	end
+	local ok, resultado = pcall(function()
+		return check:InvokeServer()
+	end)
+	ehAdmin = ok and resultado == true
+
+	if ehAdmin then
+		print("[MUSIC V6] Admin reconhecido — painel de ID liberado")
+		revelarPainelAdmin()
+	end
+end)
+
+local function CriarPainelAdmin(pai)
+	local adminRemotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+	local addRemote = adminRemotes and adminRemotes:WaitForChild("AdminMusicAdd", 10)
+	local removeRemote = adminRemotes and adminRemotes:FindFirstChild("AdminMusicRemove")
+	if not addRemote then
+		warn("[MUSIC V6] ⚠️ AdminMusicAdd não encontrado — o MusicCatalogServer está instalado?")
+		return
+	end
+
+	local painel = Instance.new("Frame")
+	painel.Name = "AdminMusica"
+	painel.Size = UDim2.new(1, -16, 0, isMobile and 62 or 54)
+	painel.Position = UDim2.new(0, 8, 1, isMobile and -70 or -62)
+	painel.BackgroundColor3 = COLORS.panel
+	painel.BorderColor3 = COLORS.warning
+	painel.BorderSizePixel = 2
+	painel.ZIndex = 6
+	painel.Visible = false -- revelado só quando o servidor confirma admin
+	painel.Parent = pai
+
+	PainelAdmin = painel
+	AlturaPainelAdmin = isMobile and 62 or 54
+
+	-- Se a resposta do IsAdminCheck já tiver chegado, revela agora
+	if ehAdmin then
+		task.defer(revelarPainelAdmin)
+	end
+
+	local titulo = Instance.new("TextLabel")
+	titulo.Size = UDim2.new(0.3, 0, 0, 16)
+	titulo.Position = UDim2.new(0, 6, 0, 3)
+	titulo.BackgroundTransparency = 1
+	titulo.Text = "ADMIN — ADICIONAR ID"
+	titulo.TextColor3 = COLORS.warning
+	titulo.Font = Enum.Font.Arcade
+	titulo.TextSize = isMobile and 10 or 12
+	titulo.TextXAlignment = Enum.TextXAlignment.Left
+	titulo.ZIndex = 7
+	titulo.Parent = painel
+
+	local caixaId = Instance.new("TextBox")
+	caixaId.Size = UDim2.new(0.34, 0, 0, isMobile and 24 or 22)
+	caixaId.Position = UDim2.new(0, 6, 0, isMobile and 24 or 22)
+	caixaId.BackgroundColor3 = COLORS.background
+	caixaId.BorderColor3 = COLORS.border
+	caixaId.BorderSizePixel = 1
+	caixaId.PlaceholderText = "ID da música"
+	caixaId.Text = ""
+	caixaId.ClearTextOnFocus = false
+	caixaId.TextColor3 = COLORS.text
+	caixaId.Font = Enum.Font.Code
+	caixaId.TextSize = isMobile and 11 or 12
+	caixaId.ZIndex = 7
+	caixaId.Parent = painel
+
+	local caixaNome = Instance.new("TextBox")
+	caixaNome.Size = UDim2.new(0.32, 0, 0, isMobile and 24 or 22)
+	caixaNome.Position = UDim2.new(0.36, 4, 0, isMobile and 24 or 22)
+	caixaNome.BackgroundColor3 = COLORS.background
+	caixaNome.BorderColor3 = COLORS.border
+	caixaNome.BorderSizePixel = 1
+	caixaNome.PlaceholderText = "Nome (opcional)"
+	caixaNome.Text = ""
+	caixaNome.ClearTextOnFocus = false
+	caixaNome.TextColor3 = COLORS.text
+	caixaNome.Font = Enum.Font.Code
+	caixaNome.TextSize = isMobile and 11 or 12
+	caixaNome.ZIndex = 7
+	caixaNome.Parent = painel
+
+	local function botao(texto, posX, largura, cor)
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.new(largura, 0, 0, isMobile and 24 or 22)
+		b.Position = UDim2.new(posX, 4, 0, isMobile and 24 or 22)
+		b.BackgroundColor3 = cor
+		b.BorderColor3 = COLORS.border
+		b.BorderSizePixel = 1
+		b.Text = texto
+		b.TextColor3 = COLORS.text
+		b.Font = Enum.Font.Arcade
+		b.TextSize = isMobile and 10 or 12
+		b.ZIndex = 7
+		b.Parent = painel
+		return b
+	end
+
+	local btnAdd = botao("+ ADD", 0.69, 0.14, COLORS.header)
+	local btnDel = botao("REMOVER", 0.84, 0.15, COLORS.danger)
+
+	local ocupado = false
+
+	btnAdd.Activated:Connect(function()
+		if ocupado then
+			return
+		end
+		local id = tonumber(caixaId.Text)
+		if not id then
+			notify("ID inválido", false)
+			return
+		end
+
+		ocupado = true
+		btnAdd.Text = "..."
+
+		local ok, sucesso, mensagem = pcall(function()
+			return addRemote:InvokeServer(id, caixaNome.Text, "")
+		end)
+
+		ocupado = false
+		btnAdd.Text = "+ ADD"
+
+		if ok then
+			notify(mensagem or "Pronto", sucesso == true)
+			if sucesso then
+				caixaId.Text = ""
+				caixaNome.Text = ""
+			end
+		else
+			notify("Erro ao adicionar", false)
+		end
+	end)
+
+	btnDel.Activated:Connect(function()
+		if ocupado or not removeRemote then
+			return
+		end
+		local id = tonumber(caixaId.Text)
+		if not id then
+			notify("Cole o ID que quer remover", false)
+			return
+		end
+
+		ocupado = true
+		local ok, sucesso, mensagem = pcall(function()
+			return removeRemote:InvokeServer(id)
+		end)
+		ocupado = false
+
+		if ok then
+			notify(mensagem or "Pronto", sucesso == true)
+			if sucesso then
+				caixaId.Text = ""
+			end
+		else
+			notify("Erro ao remover", false)
+		end
+	end)
+end
 
 -- Refs para UI (preenchidas ao criar interface)
 local MusicName, SoundID, TimerLabel
@@ -494,6 +948,13 @@ local function createMusicInterface()
 	ProgressFill.Parent = progressBG
 
 	-- =====================================
+	-- (V6) VISUALIZER DE GRAVE
+	-- =====================================
+	-- Barras atrás do texto, subindo do fundo do painel. ZIndex baixo
+	-- para não cobrir nome, ID e tempo.
+	CriarVisualizer(nowPanel)
+
+	-- =====================================
 	-- ÁREA DE CONTEÚDO
 	-- =====================================
 
@@ -517,6 +978,18 @@ local function createMusicInterface()
 	contentArea.BackgroundTransparency = 1
 	contentArea.BorderSizePixel = 0
 	contentArea.Parent = mainWindow
+
+	-- =====================================
+	-- (V6) PAINEL DE ADMIN — ADICIONAR MÚSICA POR ID
+	-- =====================================
+	-- Vem DEPOIS da contentArea de propósito: ao ser revelado, o painel
+	-- encolhe a área de conteúdo para não cobrir a playlist, e para isso
+	-- precisa que ela já exista.
+	AreaConteudo = contentArea
+	-- task.spawn: o CriarPainelAdmin espera o remote AdminMusicAdd
+	-- aparecer, e sem isso a montagem inteira da GUI ficaria travada
+	-- por até 10s quando o MusicCatalogServer não estivesse instalado.
+	task.spawn(CriarPainelAdmin, mainWindow)
 
 	-- =====================================
 	-- LAYOUT PC (3 COLUNAS)
@@ -1236,6 +1709,10 @@ local function FadeStop(sound, pause)
 	if not sound then
 		return
 	end
+
+	-- (V6) a sonda de grave morre junto com a faixa
+	PararSonda()
+
 	local tw = TweenService:Create(sound, TweenInfo.new(0.6), { Volume = 0 })
 	tw.Completed:Connect(function()
 		if pause then
@@ -1246,6 +1723,66 @@ local function FadeStop(sound, pause)
 	end)
 	tw:Play()
 end
+
+-- =====================================
+-- (V6) LAÇO DO VISUALIZER
+-- =====================================
+-- Um laço só, ligado o tempo todo. Ele sai cedo quando a janela está
+-- fechada, então não custa nada com o menu escondido.
+task.spawn(function()
+	local semSonda = 0
+
+	VisualizerConn = RunService.RenderStepped:Connect(function()
+		if not isMenuOpen or #VisualizerBarras == 0 then
+			return
+		end
+
+		local tocando = CurrentSong and CurrentSong.IsPlaying
+
+		-- Nível bruto: sonda de grave, com o nível geral como reserva
+		local nivel = 0
+		if tocando then
+			if VisualizerSonda and VisualizerSonda.IsPlaying then
+				nivel = VisualizerSonda.PlaybackLoudness
+
+				-- A sonda muda ficou muda de verdade nesta versão do
+				-- motor: cai para o nível geral em vez de travar em zero.
+				if nivel <= 0 then
+					semSonda = semSonda + 1
+					if semSonda > 60 then
+						nivel = CurrentSong.PlaybackLoudness * 0.6
+					end
+				else
+					semSonda = 0
+				end
+			else
+				nivel = CurrentSong.PlaybackLoudness * 0.6
+			end
+		end
+
+		-- PlaybackLoudness vai de 0 a 1000
+		local alvo = math.clamp(nivel / 420, 0, 1)
+
+		local meio = (#VisualizerBarras + 1) / 2
+		for i, barra in ipairs(VisualizerBarras) do
+			-- Barras do centro respondem mais: grave no meio, corpo nas
+			-- pontas. Sem FFT, o formato é o que dá a leitura de "grave".
+			local distancia = math.abs(i - meio) / meio
+			local peso = 1 - (distancia * 0.65)
+			local alvoBarra = alvo * peso
+
+			local atual = VisualizerNiveis[i] or 0
+			local taxa = alvoBarra > atual and VIS_SUAVIZA_SUBIDA or VIS_SUAVIZA_DESCIDA
+			atual = atual + (alvoBarra - atual) * taxa
+			VisualizerNiveis[i] = atual
+
+			barra.Size = UDim2.new(barra.Size.X.Scale, 0, math.max(atual, 0.04), 0)
+
+			-- Estoura para a cor de destaque no pico
+			barra.BackgroundColor3 = atual > 0.72 and COLORS.progress or COLORS.music
+		end
+	end)
+end)
 
 local function PlaySong(sound)
 	if not sound then
@@ -1322,6 +1859,9 @@ local function PlaySong(sound)
 	sound.Volume = 0
 	local base = sound:FindFirstChild("BaseVolume") and sound.BaseVolume.Value or 0.5
 	TweenService:Create(sound, TweenInfo.new(0.8), { Volume = base * PlayerVolume }):Play()
+
+	-- (V6) sonda de grave acompanha a faixa que acabou de entrar
+	PrepararSonda(sound)
 
 	notify("♪ " .. sound.Name, true)
 end

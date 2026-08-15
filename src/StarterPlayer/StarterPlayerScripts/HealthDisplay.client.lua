@@ -1,5 +1,23 @@
 -- ============================================
--- HEALTH DISPLAY V4 - RETRO STYLE + BARRA DE ENERGIA
+-- HEALTH DISPLAY V7 - VIDA + ENERGIA + BARRA DE DESPERTAR
+-- Coloque em StarterPlayer > StarterPlayerScripts
+-- Nome: "HealthDisplay"
+-- SUBSTITUI: HealthDisplay (V4)
+-- (V7) Mostra a janela de TRANSFORMANDO: o jogador fica desarmado por
+--      alguns segundos enquanto a forma troca, nos dois sentidos. Sem
+--      indicação na tela isso parece travamento.
+-- (V6) A BARRA DE DESPERTAR NÃO APARECIA. Duas causas:
+--      1. Ela estava dentro do MainContainer, em Y 0.845 com altura
+--         0.2 — exatamente em cima do EnergyText (0.845 a 0.995) e
+--         passando de 1.0, ou seja, metade fora do container. Virou
+--         faixa própria logo abaixo dele.
+--      2. O cliente só ESCUTAVA o estado. O pacote inicial do servidor
+--         saía enquanto este script ainda esperava o remote aparecer, se
+--         perdia, e depois nada mais mudava — nenhum outro pacote vinha.
+--         Agora ele PUXA o estado (GetAwakeningMeter) assim que conecta.
+-- (V5) BARRA DE DESPERTAR: enche batendo e apanhando; cheia, troca as
+--      Tools para a forma despertada por um tempo. Números vindos do
+--      AwakeningMeterServer.
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "HealthDisplay"
 -- SUBSTITUI: HealthDisplay V3
@@ -206,6 +224,148 @@ EnergyText.TextStrokeTransparency = 0.5
 EnergyText.TextStrokeColor3 = COLORS.background
 EnergyText.Visible = false
 EnergyText.Parent = MainContainer
+
+-- =====================================
+-- (V5) BARRA DE DESPERTAR
+-- =====================================
+-- Enche batendo e apanhando. Cheia, o personagem troca para a forma
+-- despertada por um tempo; depois volta ao normal e entra em cooldown.
+-- Quem manda os números é o AwakeningMeterServer.
+--
+-- Só aparece quando o personagem equipado TEM Despertar — personagem
+-- sem forma despertada não mostra barra nenhuma.
+
+-- ⚠️ FICA FORA DO MainContainer, DE PROPÓSITO.
+--
+-- O container já está lotado: HealthText em 0.455, StatusIndicator em
+-- 0.26, EnergyBackground em 0.63 e EnergyText de 0.845 a 0.995. A
+-- primeira versão desta barra ficou em 0.845 com altura 0.2, ou seja,
+-- exatamente por cima do texto de energia e passando de 1.0 — metade
+-- dela caía fora do container.
+--
+-- Aqui ela vira uma faixa própria logo abaixo: o MainContainer está em
+-- Y 0.06 com altura 0.12, então termina em 0.18.
+local AwakenBackground = Instance.new("Frame")
+AwakenBackground.Name = "AwakenBackground"
+AwakenBackground.Size = UDim2.new(0.25, 0, 0.028, 0)
+AwakenBackground.Position = UDim2.new(0.375, 0, 0.187, 0)
+AwakenBackground.BackgroundColor3 = COLORS.barBackground
+AwakenBackground.BorderColor3 = COLORS.border
+AwakenBackground.BorderSizePixel = 2
+AwakenBackground.Visible = false
+AwakenBackground.Parent = HealthGui
+
+local AwakenBar = Instance.new("Frame")
+AwakenBar.Name = "AwakenBar"
+AwakenBar.Size = UDim2.new(0, 0, 1, 0)
+AwakenBar.BackgroundColor3 = Color3.fromRGB(180, 90, 255)
+AwakenBar.BorderSizePixel = 0
+AwakenBar.Parent = AwakenBackground
+
+local AwakenText = Instance.new("TextLabel")
+AwakenText.Name = "AwakenText"
+AwakenText.Size = UDim2.new(1, 0, 1, 0)
+AwakenText.BackgroundTransparency = 1
+AwakenText.Text = ""
+AwakenText.TextColor3 = COLORS.text or Color3.fromRGB(255, 255, 255)
+AwakenText.TextScaled = true
+AwakenText.Font = Enum.Font.Arcade
+AwakenText.TextStrokeTransparency = 0.4
+AwakenText.TextStrokeColor3 = COLORS.background
+AwakenText.ZIndex = 3
+AwakenText.Parent = AwakenBackground
+
+-- task.spawn: os WaitForChild abaixo esperam até 60s somados. Sem
+-- isolar, a barra de VIDA (o resto deste script) ficaria travada esse
+-- tempo todo quando o AwakeningMeterServer não estivesse instalado.
+task.spawn(function()
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 30)
+	local meterUpdate = remotes and remotes:WaitForChild("AwakeningMeterUpdate", 30)
+
+	if meterUpdate then
+		local piscando = false
+
+		local function aplicar(dados)
+			if type(dados) ~= "table" then
+				return
+			end
+
+			-- Personagem sem Despertar: some com a barra
+			if not dados.ativo then
+				AwakenBackground.Visible = false
+				return
+			end
+
+			AwakenBackground.Visible = true
+
+			local max = math.max(1, dados.max or 100)
+			local fracao = math.clamp((dados.valor or 0) / max, 0, 1)
+
+			-- (V7) Janela de transformação: o jogador fica desarmado por
+			-- alguns segundos enquanto a forma troca, nos dois sentidos.
+			-- Precisa aparecer, senão parece que o jogo travou.
+			if dados.transformando then
+				piscando = false
+				AwakenBar.Size = UDim2.new(1, 0, 1, 0)
+				AwakenBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+				AwakenBackground.BorderColor3 = Color3.fromRGB(255, 255, 255)
+				AwakenText.Text = string.format(
+					"TRANSFORMANDO  %.1fs",
+					dados.transformandoRestante or 0
+				)
+			elseif dados.desperto then
+				-- Desperto: a barra vira contagem regressiva da forma
+				AwakenBar.Size = UDim2.new(1, 0, 1, 0)
+				AwakenBar.BackgroundColor3 = Color3.fromRGB(255, 210, 70)
+				AwakenText.Text = string.format("DESPERTO  %.0fs", dados.restante or 0)
+
+				if not piscando then
+					piscando = true
+					task.spawn(function()
+						while AwakenBackground.Visible and piscando do
+							AwakenBackground.BorderColor3 = Color3.fromRGB(255, 210, 70)
+							task.wait(0.25)
+							AwakenBackground.BorderColor3 = COLORS.border
+							task.wait(0.25)
+						end
+					end)
+				end
+			elseif (dados.cooldown or 0) > 0 then
+				piscando = false
+				AwakenBackground.BorderColor3 = COLORS.border
+				AwakenBar.Size = UDim2.new(0, 0, 1, 0)
+				AwakenText.Text = string.format("RECARGA  %.0fs", dados.cooldown)
+			else
+				piscando = false
+				AwakenBackground.BorderColor3 = COLORS.border
+				AwakenBar.Size = UDim2.new(fracao, 0, 1, 0)
+				AwakenBar.BackgroundColor3 = fracao >= 1 and Color3.fromRGB(255, 210, 70)
+					or Color3.fromRGB(180, 90, 255)
+				AwakenText.Text = string.format("DESPERTAR  %d%%", math.floor(fracao * 100))
+			end
+		end
+
+		meterUpdate.OnClientEvent:Connect(aplicar)
+
+		-- PUXA o estado agora que já estamos escutando.
+		--
+		-- O servidor só empurrava quando algo mudava, e o pacote inicial
+		-- saía enquanto este script ainda esperava o remote aparecer. O
+		-- pacote se perdia, nada mais mudava, e a barra ficava invisível
+		-- para sempre. Esta chamada fecha essa janela.
+		local pull = remotes:FindFirstChild("GetAwakeningMeter")
+		if pull then
+			local ok, estadoAtual = pcall(function()
+				return pull:InvokeServer()
+			end)
+			if ok and type(estadoAtual) == "table" then
+				aplicar(estadoAtual)
+			end
+		end
+	else
+		warn("[HEALTH V7] AwakeningMeterUpdate não encontrado — barra de Despertar desligada")
+	end
+end)
 
 -- =====================================
 -- VARIÁVEIS DE CONTROLE
