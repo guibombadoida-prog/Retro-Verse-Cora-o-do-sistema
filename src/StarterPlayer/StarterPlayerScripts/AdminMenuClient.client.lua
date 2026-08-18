@@ -1,5 +1,8 @@
 -- ============================================
 -- ADMIN MENU CLIENT V12 — WIZARD DO DESPERTAR EM ETAPAS
+-- Coloque em StarterPlayer > StarterPlayerScripts
+-- Nome: "AdminMenuClient"
+-- SUBSTITUI: AdminMenuClient V11
 -- ============================================
 -- (V12) DOIS PROBLEMAS DO PAINEL DE DESPERTAR:
 --
@@ -22,9 +25,6 @@
 -- payload deste wizard é montado explicitamente, então sem um campo aqui
 -- a história do servidor ficaria sempre vazia por mais que a definição
 -- aceitasse o dado.
--- Coloque em StarterPlayer > StarterPlayerScripts
--- Nome: "AdminMenuClient"
--- SUBSTITUI: AdminMenuClient V9
 -- REMOVER:   AdminMenuClient V9
 -- ============================================
 -- (V10) ALTERAÇÃO ÚNICA — TEXTO, NENHUMA LÓGICA

@@ -1,5 +1,8 @@
 -- ============================================
 -- AWAKENING SYSTEM SERVER V8 — ÓRFÃO DEIXA DE SER VEREDITO DEFINITIVO
+-- Coloque em ServerScriptService
+-- Nome: "AwakeningSystemServer"
+-- SUBSTITUI: AwakeningSystemServer V7
 -- ============================================
 -- (V8) O DESPERTAR CONTINUAVA ÓRFÃO COM O PERSONAGEM EXISTINDO.
 --
@@ -32,9 +35,6 @@
 -- (V6) O card do Despertar mostra imagem, nome, história e as Tools.
 -- Para isso a definição ganhou `lore` e `description`, e o CheckAwakening
 -- passou a devolver imageId, lore, description e health junto.
--- Coloque em ServerScriptService
--- Nome: "AwakeningSystemServer"
--- SUBSTITUI: AwakeningSystemServer V4
 -- ============================================
 -- (V5) A MUDANÇA DE CONCEITO
 --

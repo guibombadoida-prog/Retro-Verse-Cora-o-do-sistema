@@ -19,13 +19,13 @@ de cada arquivo e o mapa de dependências entre eles.
 | `AntiLag.server.lua` | *(não declarado)* | V2 | Varre a Workspace e remove objetos de lag sem tocar em materiais/VFX |
 | `AntiToolSystem.server.lua` | `AntiToolSystem` | V2 | Bloqueio de ferramentas indevidas |
 | `AwakeningSystemServer.server.lua` | `AwakeningSystemServer` | V8 | Guarda as DEFINIÇÕES de Despertar (imagem, história, Tools, badge opcional). Não desperta ninguém — quem dispara é o `AwakeningMeterServer` |
-| `BossRaidServer.server.lua` | `BossRaidServer` | V3 | Catálogo de bosses via DataStore + teleporte para a *place* do chefe |
+| `BossRaidServer.server.lua` | `BossRaidServer` | V4 | Catálogo de bosses via DataStore + teleporte para a *place* do chefe |
 | `CharacterCatalogServer.server.lua` | `CharacterCatalogServer` | V7 | Catálogo de personagens 100% dinâmico |
 | `CharacterLevelServer.server.lua` | `CharacterLevelServer` | V1 | Nível **por personagem** (1–30): curva de XP, slots de passiva e energia |
 | `CharacterStatsServer.server.lua` | `CharacterStatsServer` | V2 | Atributos por personagem |
 | `DailyRewardsServer.server.lua` | `DailyRewardsServer` | V6 | Recompensas diárias e recuperação de dia perdido. O V6 tirou o personagem-fantasma "Daily Champion" do bônus do dia 6 |
 | `DamageAttribution.server.lua` | `DamageAttribution` | V4 | Atribui a autoria de cada dano — base do sistema de kill |
-| `DataManager.server.lua` | `DataManager` | V8 | DataStore, moedas, bounty, inventário. **Dono de `_G.PlayerDataManager`** |
+| `DataManager.server.lua` | `DataManager` | V9 | DataStore, moedas, bounty, inventário. **Dono de `_G.PlayerDataManager`** |
 | `DuelSystemServer.server.lua` | `DuelSystemServer` | V2 | Duelos 1v1 |
 | `EnergySystemServer.server.lua` | `EnergySystemServer` | V1 | Energia/stamina para habilidades |
 | `GameManager.server.lua` | `GameManager` | V10 | Preços, vida e seleção de personagem |

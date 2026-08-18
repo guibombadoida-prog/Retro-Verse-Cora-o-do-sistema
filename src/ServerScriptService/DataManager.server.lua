@@ -1,9 +1,30 @@
 -- ============================================
--- DATA MANAGER SERVER V8 — LIMITES DE PASSIVA AMPLIADOS
+-- DATA MANAGER SERVER V9 — O SAVE PARA DE APAGAR O EQUIPADO
 -- Coloque em ServerScriptService
 -- Nome: "DataManager"
--- SUBSTITUI: DataManager V7
--- REMOVER:   DataManager V7
+-- SUBSTITUI: DataManager V8
+-- ============================================
+-- (V9) O BUG MAIS CARO DO PROJETO, CORRIGIDO NA ORIGEM.
+--
+-- O savePlayerData fazia `data.equippedCharacter = nil` no CACHE VIVO
+-- antes de gravar. A intenção é certa — equipar não deve persistir entre
+-- sessões — mas apagar do cache vivo, e não da cópia serializada, fazia
+-- com que TODO script que lê esse campo visse `nil` a cada autosave, ou
+-- seja, de 30 em 30 segundos, com o jogador tendo personagem equipado.
+--
+-- São 16 leitores no projeto, e o estrago aparecia longe daqui:
+--   • BossRaidServer dizia "equipe um personagem" para quem já tinha;
+--   • o mesmo BossRaidServer salvava e LOGO DEPOIS lia o campo para
+--     montar o TeleportData do chefão — a lista de personagens do raid
+--     saía SEMPRE vazia, que era justamente a razão de existir o V3 dele;
+--   • a barra de Despertar sumia da tela sozinha;
+--   • o capítulo 1 da Jornada do Recruta zerava sozinho.
+--
+-- Cada um desses foi remendado no seu próprio arquivo ao longo do tempo.
+-- Agora a limpeza acontece numa CÓPIA RASA feita só para a serialização,
+-- o cache vivo não é tocado, e os 16 leitores passam a ver a verdade.
+--
+-- O `playtime` seguiu o mesmo caminho: sai da cópia, fica no cache.
 -- ============================================
 -- (V8) DUAS CONSTANTES, MAS SEM ELAS NADA DO RESTO FUNCIONA:
 --
@@ -345,9 +366,9 @@ local function validateData(data)
 	-- Migrar ownedCharacters (V3 strings → V4 objetos)
 	if data.ownedCharacters then
 		if isOldFormat(data.ownedCharacters) then
-			print("[DATA V8] Migrando ownedCharacters de V3 (strings) para V4 (objetos)...")
+			print("[DATA V9] Migrando ownedCharacters de V3 (strings) para V4 (objetos)...")
 			validated.ownedCharacters = migrateCharacterList(data.ownedCharacters)
-			print("[DATA V8] Migração concluída: " .. #validated.ownedCharacters .. " personagens")
+			print("[DATA V9] Migração concluída: " .. #validated.ownedCharacters .. " personagens")
 		else
 			validated.ownedCharacters = {}
 			for _, charObj in ipairs(data.ownedCharacters) do
@@ -475,21 +496,21 @@ local function loadPlayerData(player)
 			playerDataCache[player] = data
 
 			if result and isOldFormat(result.ownedCharacters) then
-				print("[DATA V8] Salvando dados migrados de " .. player.Name)
+				print("[DATA V9] Salvando dados migrados de " .. player.Name)
 				task.spawn(function()
 					local ok, err = pcall(function()
 						playerDataStore:SetAsync(userId, data)
 					end)
 					if ok then
-						print("[DATA V8] Dados migrados salvos: " .. player.Name)
+						print("[DATA V9] Dados migrados salvos: " .. player.Name)
 					else
-						warn("[DATA V8] Erro ao salvar migração: " .. tostring(err))
+						warn("[DATA V9] Erro ao salvar migração: " .. tostring(err))
 					end
 				end)
 			end
 
 			print(
-				"[DATA V8] Dados carregados: "
+				"[DATA V9] Dados carregados: "
 					.. player.Name
 					.. " ("
 					.. #data.ownedCharacters
@@ -498,7 +519,7 @@ local function loadPlayerData(player)
 			return data
 		else
 			warn(
-				"[DATA V8] Erro ao carregar dados de "
+				"[DATA V9] Erro ao carregar dados de "
 					.. player.Name
 					.. " (tentativa "
 					.. attempts
@@ -512,7 +533,7 @@ local function loadPlayerData(player)
 	end
 
 	playerDataCache[player] = getDefaultData()
-	warn("[DATA V8] Usando dados padrão para " .. player.Name)
+	warn("[DATA V9] Usando dados padrão para " .. player.Name)
 	return playerDataCache[player]
 end
 
@@ -542,9 +563,39 @@ local function savePlayerData(player, isLeaving)
 		return false
 	end
 
-	data.equippedCharacter = nil
+	-- (V9) ⚠️ O BUG MAIS CARO DESTE ARQUIVO, CORRIGIDO.
+	--
+	-- Estas duas linhas apagavam `equippedCharacter` e `playtime` do
+	-- CACHE VIVO, não da cópia que vai para o DataStore. A intenção é
+	-- certa (equipar não deve persistir entre sessões), mas o efeito
+	-- colateral era enorme: como o autosave roda a cada 30 segundos, TODO
+	-- script que lê data.equippedCharacter via `nil` de meio em meio
+	-- minuto, com o jogador tendo um personagem equipado na tela.
+	--
+	-- São 16 leitores no projeto, e o estrago aparecia longe daqui:
+	--   • BossRaidServer dizia "equipe um personagem" para quem já tinha;
+	--   • o mesmo BossRaidServer salvava e LOGO DEPOIS lia o campo para
+	--     montar o TeleportData — ou seja, a lista de personagens do raid
+	--     saía sempre vazia, e era justamente o motivo de existir o V3;
+	--   • a barra de Despertar sumia da tela sozinha;
+	--   • o capítulo 1 da Jornada do Recruta zerava sozinho.
+	--
+	-- Agora a limpeza acontece numa CÓPIA RASA, só para a serialização. O
+	-- cache vivo não é tocado, e os 16 leitores passam a ver a verdade.
+	local paraSalvar = {}
+	for chave, valor in pairs(data) do
+		paraSalvar[chave] = valor
+	end
+
+	paraSalvar.equippedCharacter = nil
+
 	if data.stats then
-		data.stats.playtime = nil
+		local statsCopia = {}
+		for chave, valor in pairs(data.stats) do
+			statsCopia[chave] = valor
+		end
+		statsCopia.playtime = nil
+		paraSalvar.stats = statsCopia
 	end
 
 	local attempts = 0
@@ -554,16 +605,16 @@ local function savePlayerData(player, isLeaving)
 		attempts = attempts + 1
 
 		local success, err = pcall(function()
-			playerDataStore:SetAsync(userId, data)
+			playerDataStore:SetAsync(userId, paraSalvar)
 		end)
 
 		if success then
-			print("[DATA V8] Dados salvos: " .. player.Name)
+			print("[DATA V9] Dados salvos: " .. player.Name)
 			isSaving[player] = false
 			return true
 		else
 			warn(
-				"[DATA V8] Erro ao salvar "
+				"[DATA V9] Erro ao salvar "
 					.. player.Name
 					.. " (tentativa "
 					.. attempts
@@ -692,7 +743,7 @@ task.spawn(function()
 			end)
 		end
 		if #players > 0 then
-			print("[DATA V8] Auto-save: " .. #players .. " jogadores")
+			print("[DATA V9] Auto-save: " .. #players .. " jogadores")
 		end
 	end
 end)
@@ -702,7 +753,7 @@ end)
 -- =====================================
 
 game:BindToClose(function()
-	print("[DATA V8] Servidor fechando, salvando todos os dados...")
+	print("[DATA V9] Servidor fechando, salvando todos os dados...")
 	local players = Players:GetPlayers()
 
 	for _, player in ipairs(players) do
@@ -727,7 +778,7 @@ game:BindToClose(function()
 		timeout = timeout + 0.1
 	end
 
-	print("[DATA V8] Shutdown save completo")
+	print("[DATA V9] Shutdown save completo")
 end)
 
 -- =====================================
