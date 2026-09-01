@@ -1,15 +1,19 @@
-# central/ — aguardando instalação no Studio
+# central/ — aguardando instalação manual no Studio
 
 **O que está nesta pasta ainda NÃO está rodando no jogo.**
 
-É a sua lista de pendências: script entregue, revisado, mas que ainda precisa
-ser colado no Roblox Studio.
+É a lista de mudanças **estruturais** que ainda precisam ser instaladas no
+Roblox Studio: script novo na produção, mudança de classe/local ou qualquer
+alteração que o publicador seguro de `Source` não possa fazer.
 
-## A regra que isto garante
+## O que esta pasta garante
 
-**`src/` espelha o que está rodando no Studio agora. `central/` é o que falta subir.**
+Mudanças somente no conteúdo de scripts existentes são feitas diretamente em
+`src/` e publicadas pelo workflow Open Cloud. Elas não passam por esta pasta.
 
-`central/` vazia (só este arquivo) = repositório e Studio em sincronia, nada pendente.
+`central/` vazia (só este arquivo) significa: **nenhuma instalação manual
+pendente**. Para saber se o `Source` de `src/` já está no ar, rode o modo
+`verificar` do workflow **Publicar somente código**.
 
 ```
    script alterado / novo
@@ -23,8 +27,9 @@ ser colado no Roblox Studio.
    (fica no histórico do Git)
 ```
 
-Nenhum arquivo existe nos dois lugares ao mesmo tempo — é isso que mata a
-duplicação. Cada versão está em `central/` **ou** em `src/`, nunca nos dois.
+Em `src/` existe uma única versão ativa de cada sistema. O arquivo versionado em
+`central/` representa a próxima instalação manual; depois de promovido, ele
+substitui o arquivo ativo e sai daqui.
 
 ## Seu ciclo de trabalho
 
@@ -44,8 +49,8 @@ tools/promover.sh AwakeningSystemServer_V3.server.lua
 git add -A && git commit -m "AwakeningSystemServer V2 -> V3 instalado"
 ```
 
-⚠️ **Rode o `promover.sh` só DEPOIS de colar no Studio.** Antes disso o `src/`
-estaria mentindo sobre o que está no ar.
+⚠️ **Rode o `promover.sh` só DEPOIS de colar no Studio.** Antes disso o
+repositório perderia o registro da instalação manual pendente.
 
 ## Cabeçalho de entrega
 

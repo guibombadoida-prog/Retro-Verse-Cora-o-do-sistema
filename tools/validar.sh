@@ -6,7 +6,7 @@
 #   1. duplicata de família em src/ (dois scripts do mesmo sistema ativos)
 #   2. barreiras `repeat task.wait() until _G.X` com dono presente
 #   3. APIs _G consumidas sem ninguém definir
-#   4. central/ vazia (senão, promoção pendente)
+#   4. central/ vazia (senão, instalação manual pendente)
 #   5. regras de código do projeto: wait()/spawn()/:Destroy()
 #   6. nome do arquivo batendo com o `-- Nome:` do cabeçalho
 #   7. sintaxe Lua de todos os scripts, incluindo boss-place/ (se houver luac)
@@ -186,7 +186,7 @@ titulo "4. Área de trânsito (central/)"
 
 mapfile -t pendentes < <(find "$CENTRAL" -maxdepth 1 -type f -name "*.lua" 2>/dev/null | sort)
 if ((${#pendentes[@]} == 0)); then
-	ok "central/ vazia — repositório e Studio em sincronia"
+	ok "central/ vazia — nenhuma instalação manual pendente"
 else
 	for p in "${pendentes[@]}"; do
 		base_p="$(basename "$p")"

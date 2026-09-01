@@ -1,4 +1,5 @@
 -- Script: Simple Character Coin Drop V2
+-- Nome: "SimpleCharacterCoinDrop"
 -- (V2) ALTERAÇÕES: wait() -> task.wait(); :Destroy() -> .Parent = nil; posição do drop sem math.random (offset fixo); fonte retro
 -- Coloque este script em StarterPlayer > StarterCharacterScripts
 

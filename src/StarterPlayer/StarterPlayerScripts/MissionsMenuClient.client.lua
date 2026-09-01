@@ -1,5 +1,6 @@
 -- ============================================
 -- MISSIONS MENU CLIENT V2
+-- Nome: "MissionsMenuClient"
 -- (V2) ALTERAÇÕES: :Destroy() -> .Parent = nil; fontes retro (Arcade)
 -- StarterPlayer > StarterPlayerScripts > MissionsMenuClient
 -- ============================================

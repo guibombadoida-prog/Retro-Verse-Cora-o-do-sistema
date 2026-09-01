@@ -20,16 +20,41 @@ env:
   ROJO_SHA256: "22503e5839864f9d7c2171c48b536fc229f2cc4d8774c9cc149f60941d864073"
   ROCALE_VERSION: "0.1.3"
   ROCALE_SHA256: "93b71143ecda25ab67c075843f4d82d283d600a25ea1ae27a7d70183bda1f1f2"
-  ROBLOX_API_KEY: ${{ secrets.ROBLOX_TEST_API_KEY }}
-  ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_TEST_UNIVERSE_ID }}
-  ROBLOX_PLACE_ID: ${{ vars.ROBLOX_TEST_PLACE_ID }}
   CONFIRMACAO: ${{ inputs.confirmacao }}
 
 jobs:
+  exigir-main:
+    name: Recusar execução fora da main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Conferir a referência escolhida
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Execução recusada: use este workflow somente na branch main." >&2
+            exit 1
+          fi
+
+  validar:
+    name: Validar exatamente o commit que será executado
+    needs: exigir-main
+    permissions:
+      contents: read
+    uses: ./.github/workflows/validate-code.yml
+
   executar:
     name: Smoke test no motor Roblox
+    needs: validar
     runs-on: ubuntu-24.04
     timeout-minutes: 12
+    environment:
+      name: roblox-test
+    env:
+      ROBLOX_API_KEY: ${{ secrets.ROBLOX_TEST_API_KEY }}
+      ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_TEST_UNIVERSE_ID }}
+      ROBLOX_PLACE_ID: ${{ vars.ROBLOX_TEST_PLACE_ID }}
 
     steps:
       - name: Baixar o código

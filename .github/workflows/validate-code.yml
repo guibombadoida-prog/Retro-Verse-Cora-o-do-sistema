@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "src/**"
+      - "central/**"
+      - "boss-place/**"
       - "tasks/**"
       - "tests/**"
       - "tools/**"
@@ -14,12 +16,15 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "central/**"
+      - "boss-place/**"
       - "tasks/**"
       - "tests/**"
       - "tools/**"
       - "default.project.json"
       - "code-payload.project.json"
       - ".github/workflows/**"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -75,7 +80,11 @@ jobs:
           while IFS= read -r -d '' file; do
             echo "Analisando $file"
             luau-compile --only-parse "$file" > /dev/null
-          done < <(find src tasks tests -type f \( -name '*.lua' -o -name '*.luau' \) -print0 | sort -z)
+          done < <(find src central boss-place tasks tests -type f \( -name '*.lua' -o -name '*.luau' \) -print0 | sort -z)
+
+      - name: Conferir as regras estruturais do RetroVerse
+        shell: bash
+        run: bash tools/validar.sh
 
       - name: Verificar o cliente Open Cloud
         shell: bash
@@ -92,7 +101,22 @@ jobs:
           assert 'local RETROVERSE_MODE = "check"' in source
           assert 'local EXPECTED_UNIVERSE_ID = "123"' in source
           assert publish.validate_numeric_id("teste", "456") == "456"
-          print(f"Cliente Open Cloud válido: tarefa com {len(source.encode('utf-8'))} bytes")
+
+          bootstrap = publish.build_task_source(
+              Path("tasks/bootstrap_code_payload.luau"),
+              "bootstrap-check",
+              "123",
+              "456",
+              forbidden_universe_id="789",
+              forbidden_place_id="987",
+          )
+          assert 'local FORBIDDEN_PRODUCTION_UNIVERSE_ID = "789"' in bootstrap
+          assert 'local FORBIDDEN_PRODUCTION_PLACE_ID = "987"' in bootstrap
+          print(
+              "Cliente Open Cloud válido: "
+              f"publicação={len(source.encode('utf-8'))} bytes; "
+              f"bootstrap={len(bootstrap.encode('utf-8'))} bytes"
+          )
           PY
 
       - name: Rodar teste de lógica pura

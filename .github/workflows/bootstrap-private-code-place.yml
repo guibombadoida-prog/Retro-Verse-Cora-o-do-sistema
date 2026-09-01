@@ -1,0 +1,143 @@
+name: Preparar place privada de código
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "Planeje primeiro; criar salva uma versão na experience de TESTE"
+        required: true
+        default: planejar
+        type: choice
+        options:
+          - planejar
+          - criar
+      confirmacao:
+        description: "Para criar, digite CRIAR_SCRIPTS_TESTE; no planejamento deixe vazio"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-codigo-${{ vars.ROBLOX_TEST_UNIVERSE_ID }}-${{ vars.ROBLOX_TEST_PLACE_ID }}
+  cancel-in-progress: false
+
+env:
+  ROJO_VERSION: "7.7.0"
+  ROJO_SHA256: "22503e5839864f9d7c2171c48b536fc229f2cc4d8774c9cc149f60941d864073"
+  MODO: ${{ inputs.modo }}
+  CONFIRMACAO: ${{ inputs.confirmacao }}
+
+jobs:
+  exigir-main:
+    name: Recusar bootstrap fora da main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Conferir a referência escolhida
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Bootstrap recusado: execute este workflow somente na branch main." >&2
+            exit 1
+          fi
+
+  validar:
+    name: Validar exatamente o commit que será instalado
+    needs: exigir-main
+    permissions:
+      contents: read
+    uses: ./.github/workflows/validate-code.yml
+
+  bootstrap:
+    name: Planejar ou criar a árvore de scripts
+    needs: validar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment:
+      name: roblox-test
+    env:
+      ROBLOX_API_KEY: ${{ secrets.ROBLOX_TEST_API_KEY }}
+      ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_TEST_UNIVERSE_ID }}
+      ROBLOX_PLACE_ID: ${{ vars.ROBLOX_TEST_PLACE_ID }}
+      ROBLOX_FORBIDDEN_UNIVERSE_ID: ${{ vars.ROBLOX_PUBLISH_UNIVERSE_ID }}
+      ROBLOX_FORBIDDEN_PLACE_ID: ${{ vars.ROBLOX_PUBLISH_PLACE_ID }}
+
+    steps:
+      - name: Baixar o código validado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Conferir isolamento e confirmação
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            ROBLOX_API_KEY
+            ROBLOX_UNIVERSE_ID
+            ROBLOX_PLACE_ID
+            ROBLOX_FORBIDDEN_UNIVERSE_ID
+            ROBLOX_FORBIDDEN_PLACE_ID
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Configuração obrigatória ausente: $name" >&2
+              exit 1
+            fi
+          done
+          if [[ ! "$ROBLOX_UNIVERSE_ID" =~ ^[0-9]+$ || ! "$ROBLOX_PLACE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Os IDs de teste precisam conter somente números." >&2
+            exit 1
+          fi
+          if [[ ! "$ROBLOX_FORBIDDEN_UNIVERSE_ID" =~ ^[0-9]+$ || ! "$ROBLOX_FORBIDDEN_PLACE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Os IDs de produção proibidos precisam conter somente números." >&2
+            exit 1
+          fi
+          if [[ "$ROBLOX_UNIVERSE_ID" == "$ROBLOX_FORBIDDEN_UNIVERSE_ID" ]]; then
+            echo "Bootstrap recusado: teste e produção usam a mesma experience." >&2
+            exit 1
+          fi
+          if [[ "$ROBLOX_PLACE_ID" == "$ROBLOX_FORBIDDEN_PLACE_ID" || "$ROBLOX_PLACE_ID" == "133619220682618" ]]; then
+            echo "Bootstrap recusado: o alvo é o place de produção." >&2
+            exit 1
+          fi
+          if [[ "$MODO" == "criar" && "$CONFIRMACAO" != "CRIAR_SCRIPTS_TESTE" ]]; then
+            echo "Criação cancelada: digite exatamente CRIAR_SCRIPTS_TESTE." >&2
+            exit 1
+          fi
+
+      - name: Instalar Rojo verificado
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="$RUNNER_TEMP/retroverse-bootstrap-tools"
+          mkdir -p "$tools_dir/rojo"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$tools_dir/rojo.zip" \
+            "https://github.com/rojo-rbx/rojo/releases/download/v${ROJO_VERSION}/rojo-${ROJO_VERSION}-linux-x86_64.zip"
+          echo "${ROJO_SHA256}  ${tools_dir}/rojo.zip" | sha256sum --check --strict
+          unzip -q "$tools_dir/rojo.zip" -d "$tools_dir/rojo"
+          chmod +x "$tools_dir/rojo/rojo"
+          echo "$tools_dir/rojo" >> "$GITHUB_PATH"
+
+      - name: Montar pacote que contém somente scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          rojo build code-payload.project.json --output build/RetroVerse-code-payload.rbxm
+
+      - name: Planejar ou preparar a place privada
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$MODO" == "criar" ]]; then
+            api_mode="bootstrap"
+          else
+            api_mode="bootstrap-check"
+          fi
+          python3 tools/run_code_publish.py \
+            --mode "$api_mode" \
+            --payload build/RetroVerse-code-payload.rbxm \
+            --task tasks/bootstrap_code_payload.luau
