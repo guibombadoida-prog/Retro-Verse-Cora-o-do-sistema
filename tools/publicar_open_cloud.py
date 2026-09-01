@@ -214,6 +214,10 @@ def montar_script(itens):
     return LUAU.format(eq=nivel_seguro(payload), json=payload)
 
 
+class SemPermissaoDeLeitura(Exception):
+    """A chave pode criar a tarefa mas não pode ler o resultado."""
+
+
 def pedir(url, chave, metodo="GET", corpo=None):
     dados = json.dumps(corpo).encode() if corpo is not None else None
     req = urllib.request.Request(url, data=dados, method=metodo)
@@ -225,6 +229,13 @@ def pedir(url, chave, metodo="GET", corpo=None):
             return json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         detalhe = e.read().decode(errors="replace")
+
+        # 401/403 numa LEITURA quase sempre é escopo :read faltando na
+        # chave. Não é motivo para abortar: a tarefa já foi criada e vai
+        # rodar do mesmo jeito — só perdemos o acompanhamento.
+        if metodo == "GET" and e.code in (401, 403):
+            raise SemPermissaoDeLeitura(detalhe)
+
         raise SystemExit(f"HTTP {e.code} em {metodo} {url}\n{detalhe}")
 
 
@@ -280,18 +291,42 @@ def main():
     # Polling. O teto de 5 min é da API; aqui damos folga e desistimos depois.
     limite = time.time() + 360
     estado = tarefa.get("state")
-    while estado in ("STATE_UNSPECIFIED", "QUEUED", "PROCESSING") and time.time() < limite:
-        time.sleep(3)
-        tarefa = pedir(f"{API}/{caminho}", chave)
-        estado = tarefa.get("state")
-        print(f"  ... {estado}")
 
-    print(f"\nEstado final: {estado}")
+    try:
+        while (
+            estado in ("STATE_UNSPECIFIED", "QUEUED", "PROCESSING")
+            and time.time() < limite
+        ):
+            time.sleep(3)
+            tarefa = pedir(f"{API}/{caminho}", chave)
+            estado = tarefa.get("state")
+            print(f"  ... {estado}")
 
-    logs = pedir(f"{API}/{caminho}/logs", chave)
-    for entrada in logs.get("luauExecutionSessionTaskLogs", []):
-        for linha in entrada.get("messages", []):
-            print("  |", linha)
+        print(f"\nEstado final: {estado}")
+
+        logs = pedir(f"{API}/{caminho}/logs", chave)
+        for entrada in logs.get("luauExecutionSessionTaskLogs", []):
+            for linha in entrada.get("messages", []):
+                print("  |", linha)
+
+    except SemPermissaoDeLeitura:
+        # A chave só tem o escopo de escrita. A tarefa FOI criada e vai
+        # rodar normalmente — o que perdemos é só o acompanhamento.
+        print()
+        print("=" * 62)
+        print("A tarefa foi criada, mas esta chave não pode LER o resultado.")
+        print()
+        print("Falta o escopo de leitura:")
+        print("  universe.place.luau-execution-session:read")
+        print()
+        print("A publicação provavelmente funcionou — só não dá para")
+        print("confirmar por aqui. Para checar, entre no jogo e veja se as")
+        print("mudanças estão lá.")
+        print()
+        print("Para voltar a ter confirmação, edite a chave no Creator")
+        print("Dashboard e marque também a operação de leitura.")
+        print("=" * 62)
+        return
 
     if estado != "COMPLETE":
         print(json.dumps(tarefa.get("error", {}), indent=2, ensure_ascii=False))
