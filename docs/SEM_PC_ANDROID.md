@@ -76,8 +76,13 @@ esse arquivo como entrada binária de uma tarefa Luau Execution. Dentro da cópi
 versão atual do place, `tasks/apply_code_payload.luau`:
 
 - encontra cada script pelo caminho e pela classe;
-- interrompe antes de escrever se algum objeto estiver ausente ou incompatível;
-- não cria, apaga, move nem renomeia instâncias;
+- classifica **todos** os scripts antes de escrever qualquer coisa e só então
+  relata: `=` igual, `~` diferente, `+` ausente no place, `!` problema;
+- cria o script (e as pastas do caminho) quando ele existe no repositório mas
+  ainda não existe no place — é assim que um sistema novo chega ao jogo sem
+  Studio;
+- interrompe antes de escrever se houver qualquer `!`, listando todos de uma vez;
+- não apaga, não move e não renomeia instâncias;
 - altera somente propriedades `Source` diferentes;
 - chama `AssetService:SavePlaceAsync({ SaveWithoutPublish = false })` apenas no modo
   de publicação e apenas quando houve mudança.
@@ -108,8 +113,10 @@ Restrinja essa chave ao place privado e conceda somente
 ### Verificar e publicar
 
 1. Abra **Actions → Publicar somente código → Run workflow**.
-2. Escolha `verificar`. A tarefa mostra `=` para código igual e `~` para diferente,
-   mas não salva nada.
+2. Escolha `verificar`. A tarefa mostra `=` para código igual, `~` para diferente,
+   `+` para o que seria criado e `!` para problemas, mas não salva nada.
+   Leia a lista de `+` com atenção: se um script já existe no place com **outro
+   nome**, publicar criaria uma segunda cópia e os dois rodariam juntos.
 3. Confira o Place ID exibido na configuração da execução e os caminhos nos logs.
 4. Rode novamente, escolha `publicar` e digite exatamente `PUBLICAR`.
 5. Confirme no histórico de versões do Creator Dashboard que surgiu uma versão nova.
@@ -139,8 +146,9 @@ necessário para este projeto.
 - mantenha publicação e teste headless manuais;
 - use chaves diferentes, limitadas a um place privado e com validade curta;
 - nunca envie a chave a outra pessoa; GitHub Secrets já a oculta dos arquivos;
-- o publicador só atualiza scripts que **já existem** no place com mesmo caminho e
-  mesma classe;
+- o publicador atualiza scripts existentes e cria os ausentes, mas nunca apaga
+  nem renomeia; rode `verificar` antes para revisar a lista de `+`;
+- classe diferente no mesmo caminho é tratada como problema, não como troca;
 - `SavePlaceAsync` pode falhar se a permissão do place estiver desligada ou se Team
   Create estiver ativo;
 - valide primeiro e consulte o histórico de versões depois de cada publicação;

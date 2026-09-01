@@ -40,26 +40,14 @@ local function displayPath(parts)
 	return table.concat(parts, " > ")
 end
 
-local function findUniqueChild(parent, name, fullPath)
-	local match = nil
-	local count = 0
+local function findChildrenByName(parent, name)
+	local found = {}
 	for _, child in parent:GetChildren() do
 		if child.Name == name then
-			match = child
-			count += 1
+			table.insert(found, child)
 		end
 	end
-	assert(count == 1, `{fullPath}: esperado 1 objeto chamado {name}, encontrados {count}`)
-	return match
-end
-
-local function resolveTarget(parts)
-	local current = game
-	for index, name in parts do
-		local partial = table.concat(parts, " > ", 1, index)
-		current = findUniqueChild(current, name, partial)
-	end
-	return current
+	return found
 end
 
 local scripts = {}
@@ -76,59 +64,170 @@ assert(#scripts > 0, "nenhum script foi encontrado no pacote")
 
 local unchanged = 0
 local changes = {}
+local creations = {}
+local problems = {}
 
--- Primeiro resolve e compara tudo. Se um caminho ou uma classe estiver errado,
--- nenhuma escrita é iniciada.
+-- Contêineres que ainda não existem no place. A chave é o caminho completo, para
+-- que dois scripts irmãos não peçam a mesma pasta duas vezes.
+local plannedFolders = {}
+
+-- Resolve os contêineres do caminho (tudo menos a folha). Quando uma pasta não
+-- existe no place, ela é planejada aqui mesmo e só vai ao ar no modo publicar.
+-- Devolve o pai a usar, ou nil mais a explicação do que impede a resolução.
+local function resolveParent(parts)
+	local current = game
+	for index = 1, #parts - 1 do
+		local partial = table.concat(parts, " > ", 1, index)
+		local planned = plannedFolders[partial]
+		if planned then
+			current = planned.instance
+		else
+			local found = findChildrenByName(current, parts[index])
+			if #found > 1 then
+				return nil, `há {#found} objetos chamados {parts[index]} em {partial}`
+			elseif #found == 1 then
+				current = found[1]
+			else
+				local folder = Instance.new("Folder")
+				folder.Name = parts[index]
+				plannedFolders[partial] = { instance = folder, parent = current, path = partial }
+				print(`+ {partial} (pasta nova)`)
+				current = folder
+			end
+		end
+	end
+	return current, nil
+end
+
+-- Primeiro classifica tudo. Nenhuma escrita começa antes do relatório completo,
+-- para que um caminho errado não deixe o place pela metade.
 for _, sourceScript in scripts do
 	local parts = pathFromPayload(sourceScript)
 	local path = displayPath(parts)
-	local targetScript = resolveTarget(parts)
-	assert(
-		targetScript.ClassName == sourceScript.ClassName,
-		`{path}: classe no place é {targetScript.ClassName}, pacote exige {sourceScript.ClassName}`
-	)
+	local parent, impedimento = resolveParent(parts)
 
-	if targetScript.Source == sourceScript.Source then
-		unchanged += 1
-		print(`= {path}`)
+	if impedimento then
+		table.insert(problems, `{path}: {impedimento}`)
+		print(`! {path} — {impedimento}`)
 	else
-		table.insert(changes, {
-			path = path,
-			target = targetScript,
-			oldSource = targetScript.Source,
-			newSource = sourceScript.Source,
-		})
-		print(`~ {path}`)
+		local found = findChildrenByName(parent, parts[#parts])
+		if #found > 1 then
+			local detalhe = `há {#found} objetos chamados {parts[#parts]} em {path}`
+			table.insert(problems, `{path}: {detalhe}`)
+			print(`! {path} — {detalhe}`)
+		elseif #found == 0 then
+			table.insert(creations, { path = path, parent = parent, source = sourceScript })
+			print(`+ {path} (script novo)`)
+		else
+			local targetScript = found[1]
+			if targetScript.ClassName ~= sourceScript.ClassName then
+				local detalhe =
+					`classe no place é {targetScript.ClassName}, pacote exige {sourceScript.ClassName}`
+				table.insert(problems, `{path}: {detalhe}`)
+				print(`! {path} — {detalhe}`)
+			elseif targetScript.Source == sourceScript.Source then
+				unchanged += 1
+				print(`= {path}`)
+			else
+				table.insert(changes, {
+					path = path,
+					target = targetScript,
+					oldSource = targetScript.Source,
+					newSource = sourceScript.Source,
+				})
+				print(`~ {path}`)
+			end
+		end
 	end
 end
 
-print(`Resumo: {#scripts} scripts; {unchanged} iguais; {#changes} diferentes`)
+local plannedFolderCount = 0
+for _ in plannedFolders do
+	plannedFolderCount += 1
+end
+
+print(
+	`Resumo: {#scripts} scripts; {unchanged} iguais; {#changes} diferentes; `
+		.. `{#creations} novos; {plannedFolderCount} pastas novas; {#problems} problemas`
+)
+
+if #problems > 0 then
+	print("Problemas encontrados:")
+	for _, problem in problems do
+		print(`  ! {problem}`)
+	end
+end
 
 if RETROVERSE_MODE == "check" then
 	print("[VERIFICAÇÃO] nenhuma alteração foi salva")
-	return "check", #scripts, unchanged, #changes
+	return "check", #scripts, unchanged, #changes, #creations, #problems
 end
 
-if #changes == 0 then
+assert(
+	#problems == 0,
+	`{#problems} problema(s) impedem a publicação; nada foi alterado (veja as linhas com !)`
+)
+
+if #changes == 0 and #creations == 0 then
 	print("[PUBLICAÇÃO] nada mudou; nenhuma versão nova foi criada")
-	return "unchanged", #scripts, unchanged, 0
+	return "unchanged", #scripts, unchanged, 0, 0, 0
 end
 
+-- Tudo o que for criado ou alterado entra nesta lista para poder ser desfeito
+-- caso alguma escrita seguinte falhe.
 local applied = {}
+
+local function rollback()
+	for index = #applied, 1, -1 do
+		local previous = applied[index]
+		pcall(function()
+			if previous.created then
+				previous.instance.Parent = nil
+			else
+				previous.target.Source = previous.oldSource
+			end
+		end)
+	end
+end
+
+for _, planned in plannedFolders do
+	local ok, problem = pcall(function()
+		planned.instance.Parent = planned.parent
+	end)
+	if not ok then
+		rollback()
+		error(`falha ao criar a pasta {planned.path}; alterações desta tarefa foram revertidas: {problem}`)
+	end
+	table.insert(applied, { created = true, instance = planned.instance })
+end
+
+for _, creation in creations do
+	local ok, problem = pcall(function()
+		local novo = Instance.new(creation.source.ClassName)
+		novo.Name = creation.source.Name
+		novo.Source = creation.source.Source
+		-- RunContext só existe em Script/LocalScript; ignorado onde não se aplica.
+		pcall(function()
+			novo.RunContext = creation.source.RunContext
+		end)
+		novo.Parent = creation.parent
+		table.insert(applied, { created = true, instance = novo })
+	end)
+	if not ok then
+		rollback()
+		error(`falha ao criar {creation.path}; alterações desta tarefa foram revertidas: {problem}`)
+	end
+end
+
 for _, change in changes do
 	local ok, problem = pcall(function()
 		change.target.Source = change.newSource
 	end)
 	if not ok then
-		for index = #applied, 1, -1 do
-			local previous = applied[index]
-			pcall(function()
-				previous.target.Source = previous.oldSource
-			end)
-		end
+		rollback()
 		error(`falha ao alterar {change.path}; alterações desta tarefa foram revertidas: {problem}`)
 	end
-	table.insert(applied, change)
+	table.insert(applied, { created = false, target = change.target, oldSource = change.oldSource })
 end
 
 local saved, saveProblem = pcall(function()
@@ -138,5 +237,5 @@ local saved, saveProblem = pcall(function()
 end)
 assert(saved, `SavePlaceAsync falhou: {saveProblem}`)
 
-print(`[PUBLICAÇÃO] nova versão criada com {#changes} Source alterados`)
-return "published", #scripts, unchanged, #changes
+print(`[PUBLICAÇÃO] {#changes} atualizados, {#creations} criados, {plannedFolderCount} pastas criadas`)
+return "published", #scripts, unchanged, #changes, #creations, 0
