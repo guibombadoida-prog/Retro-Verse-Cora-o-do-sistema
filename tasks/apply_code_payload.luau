@@ -9,6 +9,24 @@ local SCRIPT_CLASSES = {
 	ModuleScript = true,
 }
 
+-- Nomes que o mesmo script já teve dentro do place. Quando o nome canônico do
+-- repositório não existe ali mas o antigo existe, a publicação renomeia a
+-- instância em vez de criar uma segunda cópia rodando em paralelo. Cada entrada
+-- foi confirmada por tamanho idêntico do Source ou pelo cabeçalho "-- Nome:"
+-- lido do próprio script no place. Depois da primeira publicação a entrada
+-- deixa de casar com qualquer coisa e fica inerte.
+local LEGACY_NAMES = {
+	["ServerScriptService > AntiLag"] = "Anti-Anti-Lag Script",
+	["StarterPlayer > StarterCharacterScripts > Health"] = "Heatlh",
+	["StarterPlayer > StarterCharacterScripts > SimpleCharacterCoinDrop"] = "Simple Character Coin Drop",
+	["StarterPlayer > StarterPlayerScripts > ClientSync"] = "Client Sync",
+	["StarterPlayer > StarterPlayerScripts > MissionsMenuClient"] = "MISSIONS MENU CLIENT",
+	["StarterPlayer > StarterPlayerScripts > MusicPlayerClient_V2"] = "MusicPlayerClient",
+	["StarterPlayer > StarterPlayerScripts > RetroHotbarClient"] = "RetroHotbarClient_V1",
+	["StarterPlayer > StarterPlayerScripts > TeamMenuClient_V2"] = "TeamMenuClient",
+	["StarterPlayer > StarterPlayerScripts > TutorialMenuClient_V2"] = "TutorialMenuClient",
+}
+
 local runArguments = ({ ... })[1]
 assert(type(runArguments) == "table" and runArguments.BinaryInput, "pacote binário de código ausente")
 assert(RETROVERSE_MODE == "check" or RETROVERSE_MODE == "publish", "modo inválido")
@@ -83,6 +101,7 @@ assert(#scripts > 0, "nenhum script foi encontrado no pacote")
 local unchanged = 0
 local changes = {}
 local creations = {}
+local renames = {}
 local problems = {}
 
 -- Contêineres que ainda não existem no place. A chave é o caminho completo, para
@@ -148,8 +167,41 @@ for _, sourceScript in scripts do
 			table.insert(problems, `{path}: {detalhe}`)
 			print(`! {path} — {detalhe}`)
 		elseif #found == 0 then
-			table.insert(creations, { path = path, parent = parent, source = sourceScript })
-			print(`+ {path} (script novo)`)
+			local legacy = LEGACY_NAMES[path]
+			local legacyFound = legacy and findChildrenByName(parent, legacy) or {}
+			if #legacyFound > 1 then
+				local detalhe = `há {#legacyFound} objetos chamados {legacy} em {containerPath}`
+				table.insert(problems, `{path}: {detalhe}`)
+				print(`! {path} — {detalhe}`)
+			elseif #legacyFound == 1 and legacyFound[1].ClassName ~= sourceScript.ClassName then
+				local detalhe = `{legacy} é {legacyFound[1].ClassName}, pacote exige {sourceScript.ClassName}`
+				table.insert(problems, `{path}: {detalhe}`)
+				print(`! {path} — {detalhe}`)
+			elseif #legacyFound == 1 then
+				local targetScript = legacyFound[1]
+				-- Reivindica o nome antigo para que ele não seja listado como órfão.
+				container.claimed[legacy] = true
+				table.insert(renames, {
+					path = path,
+					target = targetScript,
+					oldName = legacy,
+					newName = parts[#parts],
+				})
+				if targetScript.Source == sourceScript.Source then
+					print(`> {path} — renomeia "{legacy}"; código já igual`)
+				else
+					table.insert(changes, {
+						path = path,
+						target = targetScript,
+						oldSource = targetScript.Source,
+						newSource = sourceScript.Source,
+					})
+					print(`> {path} — renomeia "{legacy}" e atualiza o código`)
+				end
+			else
+				table.insert(creations, { path = path, parent = parent, source = sourceScript })
+				print(`+ {path} (script novo)`)
+			end
 		else
 			local targetScript = found[1]
 			if targetScript.ClassName ~= sourceScript.ClassName then
@@ -208,7 +260,7 @@ end
 
 print(
 	`Resumo: {#scripts} scripts; {unchanged} iguais; {#changes} diferentes; `
-		.. `{#creations} novos; {plannedFolderCount} pastas novas; `
+		.. `{#renames} renomeados; {#creations} novos; {plannedFolderCount} pastas novas; `
 		.. `{#orphans} só no place; {#problems} problemas`
 )
 
@@ -221,7 +273,7 @@ end
 
 if RETROVERSE_MODE == "check" then
 	print("[VERIFICAÇÃO] nenhuma alteração foi salva")
-	return "check", #scripts, unchanged, #changes, #creations, #problems
+	return "check", #scripts, unchanged, #changes, #renames, #creations, #problems
 end
 
 assert(
@@ -229,9 +281,9 @@ assert(
 	`{#problems} problema(s) impedem a publicação; nada foi alterado (veja as linhas com !)`
 )
 
-if #changes == 0 and #creations == 0 then
+if #changes == 0 and #creations == 0 and #renames == 0 then
 	print("[PUBLICAÇÃO] nada mudou; nenhuma versão nova foi criada")
-	return "unchanged", #scripts, unchanged, 0, 0, 0
+	return "unchanged", #scripts, unchanged, 0, 0, 0, 0
 end
 
 -- Tudo o que for criado ou alterado entra nesta lista para poder ser desfeito
@@ -244,11 +296,24 @@ local function rollback()
 		pcall(function()
 			if previous.created then
 				previous.instance.Parent = nil
+			elseif previous.renamed then
+				previous.target.Name = previous.oldName
 			else
 				previous.target.Source = previous.oldSource
 			end
 		end)
 	end
+end
+
+for _, rename in renames do
+	local ok, problem = pcall(function()
+		rename.target.Name = rename.newName
+	end)
+	if not ok then
+		rollback()
+		error(`falha ao renomear {rename.oldName}; alterações desta tarefa foram revertidas: {problem}`)
+	end
+	table.insert(applied, { renamed = true, target = rename.target, oldName = rename.oldName })
 end
 
 for _, planned in plannedFolders do
@@ -298,5 +363,8 @@ local saved, saveProblem = pcall(function()
 end)
 assert(saved, `SavePlaceAsync falhou: {saveProblem}`)
 
-print(`[PUBLICAÇÃO] {#changes} atualizados, {#creations} criados, {plannedFolderCount} pastas criadas`)
-return "published", #scripts, unchanged, #changes, #creations, 0
+print(
+	`[PUBLICAÇÃO] {#changes} atualizados, {#renames} renomeados, {#creations} criados, `
+		.. `{plannedFolderCount} pastas criadas`
+)
+return "published", #scripts, unchanged, #changes, #renames, #creations, 0
