@@ -1,0 +1,91 @@
+name: Executar no Roblox sem Studio
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmacao:
+        description: "Digite TESTE para usar somente o place privado de testes"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roblox-headless-${{ vars.ROBLOX_TEST_UNIVERSE_ID }}
+  cancel-in-progress: false
+
+env:
+  ROJO_VERSION: "7.7.0"
+  ROJO_SHA256: "22503e5839864f9d7c2171c48b536fc229f2cc4d8774c9cc149f60941d864073"
+  ROCALE_VERSION: "0.1.3"
+  ROCALE_SHA256: "93b71143ecda25ab67c075843f4d82d283d600a25ea1ae27a7d70183bda1f1f2"
+  ROBLOX_API_KEY: ${{ secrets.ROBLOX_TEST_API_KEY }}
+  ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_TEST_UNIVERSE_ID }}
+  ROBLOX_PLACE_ID: ${{ vars.ROBLOX_TEST_PLACE_ID }}
+  CONFIRMACAO: ${{ inputs.confirmacao }}
+
+jobs:
+  executar:
+    name: Smoke test no motor Roblox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Conferir trava e configuração
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRMACAO" != "TESTE" ]]; then
+            echo "Execução cancelada: a confirmação precisa ser exatamente TESTE." >&2
+            exit 1
+          fi
+          if [[ -z "$ROBLOX_API_KEY" || -z "$ROBLOX_UNIVERSE_ID" || -z "$ROBLOX_PLACE_ID" ]]; then
+            echo "Configure ROBLOX_TEST_API_KEY e as variáveis ROBLOX_TEST_UNIVERSE_ID/ROBLOX_TEST_PLACE_ID." >&2
+            exit 1
+          fi
+          if [[ ! "$ROBLOX_UNIVERSE_ID" =~ ^[0-9]+$ || ! "$ROBLOX_PLACE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Universe ID e Place ID precisam conter somente números." >&2
+            exit 1
+          fi
+
+      - name: Instalar ferramentas oficiais verificadas
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="$RUNNER_TEMP/retroverse-headless-tools"
+          mkdir -p "$tools_dir/rojo" "$tools_dir/rocale"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$tools_dir/rojo.zip" \
+            "https://github.com/rojo-rbx/rojo/releases/download/v${ROJO_VERSION}/rojo-${ROJO_VERSION}-linux-x86_64.zip"
+          echo "${ROJO_SHA256}  ${tools_dir}/rojo.zip" | sha256sum --check --strict
+          unzip -q "$tools_dir/rojo.zip" -d "$tools_dir/rojo"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$tools_dir/rocale.zip" \
+            "https://github.com/Roblox/rocale-cli/releases/download/v${ROCALE_VERSION}/rocale-cli-linux-x86_64.zip"
+          echo "${ROCALE_SHA256}  ${tools_dir}/rocale.zip" | sha256sum --check --strict
+          unzip -q "$tools_dir/rocale.zip" -d "$tools_dir/rocale"
+
+          chmod +x "$tools_dir/rojo/rojo" "$tools_dir/rocale/rocale-cli"
+          echo "$tools_dir/rojo" >> "$GITHUB_PATH"
+          echo "$tools_dir/rocale" >> "$GITHUB_PATH"
+
+      - name: Executar tarefa e mostrar logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          rocale-cli run \
+            --universeId "$ROBLOX_UNIVERSE_ID" \
+            --placeId "$ROBLOX_PLACE_ID" \
+            --load.project default.project.json \
+            --script tasks/smoke.luau \
+            --output build/RetroVerse-headless.rbxl \
+            --timeout 300 \
+            --pollInterval 2 \
+            --verbose

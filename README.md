@@ -96,6 +96,19 @@ Cada passiva do `PassiveCatalog` já declara seu `vfx` (`BRILHO_METALICO`,
 
 - [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) — inventário completo dos scripts, versões e mapa de dependências `_G`
 - [`docs/Diretrizes_Sistema_Chefao_Boss.md`](docs/Diretrizes_Sistema_Chefao_Boss.md) — regras formais (V5) para criar chefões
+- [`docs/SEM_PC_ANDROID.md`](docs/SEM_PC_ANDROID.md) — editar no Android, validar no GitHub, executar headless e publicar somente código via Open Cloud
+
+### Fluxo sem Roblox Studio
+
+O projeto inclui projetos Rojo e três automações com travas de segurança:
+
+- validação de sintaxe, teste puro e build de um place sem 3D;
+- execução de uma tarefa Luau dentro do motor Roblox pela Open Cloud;
+- publicação manual somente do `Source` de scripts que já existam em um place,
+  preservando o mapa e criando uma versão recuperável no histórico.
+
+As chaves da Roblox ficam em GitHub Secrets e nunca fazem parte do repositório. Veja
+o guia acima antes de apontar qualquer workflow para um place.
 
 ---
 

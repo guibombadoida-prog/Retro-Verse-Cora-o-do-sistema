@@ -10,10 +10,14 @@
 
 # Ferramentas de build Roblox
 /sourcemap.json
+/build/
+/.tools/
 /Packages/
 /ServerPackages/
 /DevPackages/
 /roblox.toml
+__pycache__/
+*.pyc
 
 # Sistema operacional
 .DS_Store

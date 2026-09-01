@@ -1,0 +1,30 @@
+{
+  "name": "RetroVerseCodePayload",
+  "tree": {
+    "$className": "Folder",
+
+    "ReplicatedFirst": {
+      "$className": "Folder",
+      "$path": "src/ReplicatedFirst"
+    },
+
+    "ServerScriptService": {
+      "$className": "Folder",
+      "$path": "src/ServerScriptService"
+    },
+
+    "StarterPlayer": {
+      "$className": "Folder",
+
+      "StarterCharacterScripts": {
+        "$className": "Folder",
+        "$path": "src/StarterPlayer/StarterCharacterScripts"
+      },
+
+      "StarterPlayerScripts": {
+        "$className": "Folder",
+        "$path": "src/StarterPlayer/StarterPlayerScripts"
+      }
+    }
+  }
+}
