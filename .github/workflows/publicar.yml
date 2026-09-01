@@ -1,0 +1,36 @@
+name: Publicar scripts na place
+
+# Sobe os scripts de src/ direto para a place, sem Studio.
+#
+# Não roda sozinho a cada push de propósito: publicar é ação com efeito
+# no jogo ao vivo. Você dispara pela aba Actions quando quiser — dá para
+# fazer isso pelo navegador do celular.
+on:
+  workflow_dispatch:
+    inputs:
+      ensaio:
+        description: "Só conferir, sem publicar"
+        type: boolean
+        default: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar antes de qualquer coisa
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
+          bash tools/validar.sh
+
+      - name: Conferir o pacote
+        run: python3 tools/publicar_open_cloud.py
+
+      - name: Publicar
+        if: ${{ github.event.inputs.ensaio == 'false' }}
+        env:
+          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+          ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
+          ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
+        run: python3 tools/publicar_open_cloud.py --publicar

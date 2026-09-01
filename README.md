@@ -3,6 +3,9 @@
 Repositório de código-fonte dos scripts do **RetroVerse** (jogo de combate no Roblox),
 da Retro-Verse Studios.
 
+O projeto tem **duas Places** do Roblox: a principal (`133619220682618`) em `src/`,
+e a Place do Chefão em `boss-place/`. Cada uma tem seu próprio DataModel.
+
 A árvore de pastas em `src/` **espelha exatamente a hierarquia do Roblox Studio**.
 O caminho do arquivo é o lugar onde o script vive no Studio — não existe adivinhação:
 
@@ -17,13 +20,15 @@ src/ServerScriptService/DataManager.server.lua
 
 | Pasta | Corresponde no Studio a | Conteúdo |
 |---|---|---|
-| `src/ServerScriptService/` | `ServerScriptService` | 31 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
+| `src/ServerScriptService/` | `ServerScriptService` | 32 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
 | `src/ServerScriptService/RetroVerse/` | `ServerScriptService > RetroVerse` | 1 `ModuleScript` (Núcleo de Combate) |
-| `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 18 `LocalScript` de interface/cliente |
+| `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 19 `LocalScript` de interface/cliente |
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
 | `src/ReplicatedFirst/` | `ReplicatedFirst` | 1 `LocalScript` (tela de carregamento) |
 | `docs/` | — | Diretrizes formais e mapa da arquitetura |
-| `legacy/` | — | Versões **substituídas**, guardadas só como histórico |
+| `boss-place/` | **outra Place do Roblox** | Scripts exclusivos da Place do Chefão — ver `boss-place/LEIA-ME.md` |
+| `central/` | — | **Aguardando instalação no Studio.** Vazia = tudo sincronizado |
+| `tools/` | — | `promover.sh` (confirma instalação no Studio) e `validar.sh` (7 checagens) |
 
 ### Convenção de extensão
 
@@ -50,6 +55,93 @@ com sufixo de versão — o nome do arquivo respeita isso:
 - `TutorialMenuClient_V2.client.lua` (código na V6)
 - `NPC_Server_V2.server.lua` (código na V2)
 - `RetroVerse/NucleoCombate_V2.lua` (exigido pelo `require`)
+
+---
+
+## 🔄 Fluxo de atualização de script
+
+**Duas regras, e é o que faz este repositório valer algo:**
+
+1. **`src/` espelha o que está rodando no Studio agora.** Não "o mais novo que
+   existe" — o que está *no ar*.
+2. **`central/` é o que falta subir.** Vazia = repositório e Studio em sincronia.
+
+Existe exatamente uma versão de cada script no repositório, em `central/` **ou** em
+`src/`, nunca nos dois. Nada de `_V6` ao lado de `_V8`. O histórico do Git faz o
+papel de arquivo morto.
+
+```
+   script alterado / novo
+            ↓
+       central/          ←── ENTREGUE, mas ainda não está no jogo
+            ↓  você cola no Studio
+            ↓  tools/promover.sh   ("já instalei")
+ src/<local do Studio>/  ←── o que está REALMENTE rodando
+            ↓
+   versão anterior APAGADA
+   (fica no histórico do Git)
+```
+
+### Na prática
+
+```bash
+# 1. veja o que está pendente de instalação
+tools/validar.sh
+#    → AGUARDA INSTALAÇÃO NO STUDIO: AwakeningSystemServer_V3.server.lua
+#      (substitui V2 que está no ar)
+
+# 2. cole no Studio, no local e nome que o cabeçalho manda,
+#    apagando a versão anterior
+
+# 3. confirme que instalou
+tools/promover.sh AwakeningSystemServer_V3.server.lua
+
+# 4. comite
+git add -A && git commit -m "AwakeningSystemServer V2 -> V3 instalado"
+```
+
+⚠️ **`promover.sh` só depois de colar no Studio.** Antes disso o `src/` estaria
+mentindo sobre o que está no ar — e é justamente essa mentira que o fluxo existe
+para impedir.
+
+O `promover.sh` não adivinha nada: o destino sai do `-- Nome:` e do
+`-- Coloque em ...` do cabeçalho do próprio script. Ele também **se recusa** a
+apagar um arquivo que ainda não foi comitado, porque aí a versão antiga seria
+perdida de verdade em vez de ir para o histórico.
+
+### Cabeçalho de entrega
+
+Toda alteração de script vem acompanhada disto, no chat:
+
+```
+## Scripts Entregues — [Sistema]
+Scripts Novos:        [Nome_V1] — o que faz
+Scripts Modificados:  [Nome_V1] → [Nome_V2] — o que mudou
+Scripts Substituídos: ⚠️ REMOVER [Nome_V1]
+```
+
+### Recuperar uma versão apagada
+
+Apagar não perde nada — só sai do caminho:
+
+```bash
+git log --oneline -- src/ServerScriptService/DataManager.server.lua
+git show <commit>:src/ServerScriptService/DataManager.server.lua > recuperado.lua
+```
+
+### O que o `validar.sh` confere
+
+| # | Checagem | Por que importa |
+|:--:|---|---|
+| 1 | Duplicata de família em `src/` | É a regra "nunca dois scripts da mesma família rodando ao mesmo tempo", virando checagem em vez de disciplina |
+| 2 | Barreiras `repeat ... until _G.X` | Se a dependência não existir, o script espera **para sempre sem erro no Output** — a falha mais difícil de achar no projeto |
+| 3 | APIs `_G` sem dono | Pega dependência quebrada antes de virar bug em jogo |
+| 4 | `central/` vazia | Lista o que falta colar no Studio, e qual versão substitui |
+| 5 | `wait()` / `spawn()` / `:Destroy()` | As regras de código do projeto, ignorando comentário e bloco `--[[ ]]` |
+| 6 | Nome do arquivo × `-- Nome:` | O caminho do arquivo é a instrução de instalação; divergência faz colar no lugar errado |
+| 7 | Sintaxe (`src/` + `central/` + `boss-place/`) | Pega erro de estrutura antes de você colar no Studio |
+
+Sai com código 1 se achar erro, então dá para usar como *gate* antes de comitar.
 
 ---
 
@@ -111,6 +203,22 @@ Válidas para qualquer script novo ou alterado:
 - `ResetOnSpawn = false` em `ScreenGui` persistente
 - Nunca dois scripts da mesma família rodando ao mesmo tempo — ao subir uma versão
   nova, o cabeçalho informa qual remover
+
+O `tools/validar.sh` confere as três primeiras automaticamente.
+
+### ⚠️ Uma exceção pendente de decisão
+
+`src/ServerScriptService/AntiLag.server.lua:56` usa `obj:Destroy()`, contra a regra.
+É código anterior a esta organização e **não foi alterado** — a regra diz "nunca
+`:Destroy()` **sem autorização**", e trocar por `.Parent = nil` num script cuja
+função é justamente remover objetos de lag é decisão sua, não automática.
+
+Está registrado em `EXCECOES_DESTROY`, no topo do `validar.sh`, e aparece como aviso
+em toda execução — para não sumir de vista nem deixar o validador vermelho para
+sempre. Ao decidir, tire da lista.
+
+Vale notar que os outros 29 casos de `:Destroy()` no repositório são todos
+comentários do tipo `-- regra do projeto: sem :Destroy()`. Só este é código de verdade.
 
 ## 💾 DataStore
 

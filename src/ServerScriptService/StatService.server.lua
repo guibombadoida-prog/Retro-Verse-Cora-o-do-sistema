@@ -1,5 +1,14 @@
 -- ============================================
--- STAT SERVICE V3 — ATRIBUTOS CENTRALIZADOS
+-- STAT SERVICE V4 — VIDA DO DESPERTAR SEGUE A FORMA
+-- ============================================
+-- (V4) A vida do Despertar deixou de ser permanente.
+-- Era decidida por `_G.PlayerDataManager.hasAwakening`, que respondia
+-- true para sempre depois do desbloqueio: quem tinha o Despertar andava
+-- com a vida dele o tempo todo, mesmo sem estar desperto. Agora segue
+-- `_G.AwakeningMeter.estaDesperto` — sobe quando a forma dispara, volta
+-- quando ela acaba.
+-- ============================================
+-- (V3) ATRIBUTOS CENTRALIZADOS
 -- Coloque em ServerScriptService
 -- Nome: "StatService"
 -- DEPENDE DE: DataManager V7
@@ -276,15 +285,25 @@ local function getBaseHealth(player)
 		end
 	end
 
-	-- Despertar tem vida própria e sobrepõe a do catálogo
+	-- (V4) A VIDA DO DESPERTAR SÓ VALE ENQUANTO A FORMA ESTÁ ATIVA.
+	--
+	-- Antes esta checagem era `_G.PlayerDataManager.hasAwakening`, que
+	-- respondia true para sempre depois de desbloquear — quem tinha o
+	-- Despertar andava com a vida dele o tempo todo, mesmo sem estar
+	-- desperto.
+	--
+	-- Agora o Despertar é uma forma temporária disparada pela barra do
+	-- AwakeningMeterServer, então a vida acompanha a forma: sobe quando
+	-- desperta, volta quando acaba.
 	if
 		equipped
-		and _G.PlayerDataManager.hasAwakening
+		and _G.AwakeningMeter
+		and _G.AwakeningMeter.estaDesperto
 		and _G.AwakeningSystem
 		and _G.AwakeningSystem.getDefinition
 	then
-		local ok, hasIt = pcall(_G.PlayerDataManager.hasAwakening, player, equipped)
-		if ok and hasIt then
+		local ok, desperto = pcall(_G.AwakeningMeter.estaDesperto, player)
+		if ok and desperto then
 			local okDef, def = pcall(_G.AwakeningSystem.getDefinition, equipped)
 			if okDef and type(def) == "table" and type(def.health) == "number" then
 				baseHealth = def.health

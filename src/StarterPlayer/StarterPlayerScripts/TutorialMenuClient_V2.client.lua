@@ -1,9 +1,35 @@
 -- ============================================
--- TUTORIAL MENU CLIENT V6 — INTERATIVO
--- (V6) ALTERAÇÕES: fontes unificadas em estilo retro (Arcade/Code)
+-- TUTORIAL MENU CLIENT V7 — TODOS OS SISTEMAS ATUAIS
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "TutorialMenuClient_V2"
--- SUBSTITUI: TutorialMenuClient (V4)  →  REMOVER o antigo
+-- SUBSTITUI: TutorialMenuClient_V2 (V6)
+-- ============================================
+-- ⚠️ As linhas 'Coloque em' e 'Nome:' ficam LOGO ABAIXO do título de
+-- propósito: o tools/promover.sh lê o cabeçalho nas 20 primeiras linhas.
+-- Explicação longa antes delas empurra o 'Nome:' para fora dessa janela,
+-- e o destino passa a ser deduzido do título — foi assim que este
+-- arquivo virou 'TutorialMenuClient' e perdeu o _V2.
+-- ============================================
+-- (V7) O tutorial estava desatualizado e, no caso do Despertar,
+-- ENSINANDO ERRADO: dizia para procurar o botão ⚡ no card e desbloquear
+-- com Badge ou Gamepass. Esse sistema não existe mais — o Despertar
+-- virou forma temporária conquistada em combate.
+--
+-- Foram de 15 para 24 passos, cobrindo o que o jogo tem hoje:
+--   • Energia, hotbar e nível POR PERSONAGEM
+--   • Passivas, com a regra de só editar desequipado ou no lobby
+--   • Despertar em 4 passos: como funciona, como encher a barra, a
+--     transformação de 3s / forma de 3min30, e o card de informação
+--   • Jornada do Recruta
+--   • Chefão em place separada
+--   • Player de música com visualizer de grave
+--   • Bounty/Procurado, missões, conquistas, diárias, times, duelos e
+--     trocas
+--
+-- O contador de passos já lia #STEPS; só os textos fixos "15" foram
+-- corrigidos.
+-- ============================================
+-- (V6) ALTERAÇÕES: fontes unificadas em estilo retro (Arcade/Code)
 -- ============================================
 -- CORREÇÃO V5 (bug):
 -- • Typewriter tinha RACE CONDITION (flag 'isTyping' compartilhada +
@@ -11,7 +37,7 @@
 --   "ressuscitava" e embaralhava com o novo. Agora usa TOKEN de geração:
 --   cada digitação tem ID único e a anterior é cancelada de verdade.
 -- ============================================
--- Mantém: mascote RPG, 15 passos, setas, barra de progresso,
+-- Mantém: mascote RPG, setas, barra de progresso,
 --         auto-show p/ novos jogadores, sem botão próprio (menu unificado).
 -- ============================================
 
@@ -90,7 +116,7 @@ local C = {
 }
 
 -- =====================================
--- 15 PASSOS DO TUTORIAL
+-- PASSOS DO TUTORIAL
 -- arrowX / arrowY  = posição Scale da seta na tela
 -- arrowDir         = direção para onde a seta aponta (up/down/left/right)
 -- arrowText        = texto sobre a seta
@@ -103,7 +129,7 @@ local STEPS = {
 		title = "🎮 BEM-VINDO AO RETRO-VERSE!",
 		mascot = "😁",
 		mascotColor = C.cyan,
-		dialogue = "Olá, guerreiro! Eu sou o NOOB GUIA e vou te mostrar tudo sobre o jogo!\n\nAqui no RetroVerse você escolhe personagens épicos e batalha contra outros jogadores pelo mapa. Vamos começar?",
+		dialogue = "Olá, guerreiro! Eu sou o NOOB GUIA.\n\nO RetroVerse tem MUITA coisa: personagens, passivas, níveis, despertar, chefões, times, trocas e mais. Vou te mostrar tudo, na ordem.\n\nUse ◀ ▶ para navegar. Bora?",
 		arrow = false,
 	},
 	-- ── PASSO 2 ───────────────────────────────────────────────
@@ -111,147 +137,183 @@ local STEPS = {
 		title = "🛡️ A ZONA SEGURA",
 		mascot = "😌",
 		mascotColor = C.green,
-		dialogue = "Você SEMPRE começa na ZONA SEGURA! Percebe o escudo azul ao seu redor? Aqui você está 100% protegido — nenhum inimigo pode te machucar.\n\nUse a zona segura para preparar seu personagem antes de entrar em batalha!",
+		dialogue = "Você SEMPRE nasce na ZONA SEGURA. Aqui ninguém te machuca.\n\nEla não é só um abrigo: é o único lugar (junto de estar desequipado) onde você pode MEXER NAS SUAS PASSIVAS. Guarde isso, volto nesse assunto.",
 		arrow = true,
-		arrowX = 0.50,
-		arrowY = 0.34,
-		arrowXM = 0.50,
-		arrowYM = 0.30,
-		arrowDir = "down",
-		arrowText = "📍 VOCÊ ESTÁ NA ZONA SEGURA!",
 	},
 	-- ── PASSO 3 ───────────────────────────────────────────────
 	{
 		title = "☰ O MENU PRINCIPAL",
-		mascot = "👆",
+		mascot = "🤓",
 		mascotColor = C.gold,
-		dialogue = "Vê esse botão ☰ no lado ESQUERDO da tela? É o seu MENU PRINCIPAL!\n\nClique nele para abrir o hub com todos os sistemas: Loja, Inventário, Times, Música, Tutorial e muito mais!",
+		dialogue = "Tudo se abre pelo botão ☰.\n\nLoja, Inventário, Passivas, Missões, Conquistas, Times, Duelos, Trocas, Diárias, Jornada do Recruta, Chefão e Música. Nenhuma tela tem botão próprio flutuando na sua frente.",
 		arrow = true,
-		arrowX = 0.13,
-		arrowY = 0.37,
-		arrowXM = 0.20,
-		arrowYM = 0.41,
-		arrowDir = "left",
-		arrowText = "☰ CLIQUE AQUI!",
 	},
 	-- ── PASSO 4 ───────────────────────────────────────────────
 	{
-		title = "🎭 PERSONAGENS DO JOGO",
-		mascot = "🤩",
+		title = "🎭 OS PERSONAGENS",
+		mascot = "🦸",
 		mascotColor = C.purple,
-		dialogue = "O jogo tem VÁRIOS personagens para desbloquear, cada um com habilidades únicas e HP diferente!\n\nExistem 4 tipos:\n• 🛒 LOJA — Compre com Moedas\n• 🏆 BOUNTY — Desbloqueie pela sua Fama\n• 💎 GAMEPASS — Compre com Robux\n• 🎯 INICIAL — Você já possui (Noob)!",
+		dialogue = "Cada personagem tem VIDA própria, ATRIBUTOS próprios e até 7 HABILIDADES (Tools).\n\nEles vêm de categorias diferentes: GRÁTIS, LOJA (moedas), BOUNTY (reputação), GAMEPASS e EMBLEMA.",
 		arrow = false,
 	},
 	-- ── PASSO 5 ───────────────────────────────────────────────
 	{
-		title = "🛒 A LOJA — COMPRE COM MOEDAS",
-		mascot = "💰",
+		title = "🛒 A LOJA",
+		mascot = "🤑",
 		mascotColor = C.gold,
-		dialogue = "Abra o Menu ☰ e vá em LOJA 🛒!\n\nLá você encontra personagens para comprar com suas MOEDAS 💰. Quanto mais raro o personagem, mais caro ele é. Comece pelo Noob (gratuito) e junte moedas para desbloquear os mais poderosos!",
+		dialogue = "Na Loja você compra personagens com MOEDAS 💰.\n\nGanha moedas eliminando jogadores, derrotando NPCs, completando missões e coletando a recompensa diária. Se vender um personagem, recebe 25% de volta.",
 		arrow = true,
-		arrowX = 0.13,
-		arrowY = 0.37,
-		arrowXM = 0.20,
-		arrowYM = 0.41,
-		arrowDir = "left",
-		arrowText = "☰ → LOJA!",
 	},
 	-- ── PASSO 6 ───────────────────────────────────────────────
 	{
-		title = "📦 INVENTÁRIO — EQUIPE SEU HERÓI",
-		mascot = "⚔️",
-		mascotColor = Color3.fromRGB(0, 200, 150),
-		dialogue = "No Menu ☰ vá em INVENTÁRIO 📦!\n\nLá estão TODOS os personagens que você possui. Selecione um e clique em ▶ EQUIPAR para preparar seu herói.\n\n💡 Você também pode VENDER personagens de loja pelo botão 💰 — recebe 25% do preço original de volta!",
+		title = "📦 INVENTÁRIO — EQUIPAR",
+		mascot = "😎",
+		mascotColor = C.cyan,
+		dialogue = "No Inventário estão os seus personagens.\n\nClicar em EQUIPAR troca sua vida, seus atributos e suas habilidades para as daquele personagem — e te manda para o mapa.\n\n⚠️ Equipado = fora da proteção. Prepare-se antes.",
 		arrow = true,
-		arrowX = 0.13,
-		arrowY = 0.37,
-		arrowXM = 0.20,
-		arrowYM = 0.41,
-		arrowDir = "left",
-		arrowText = "☰ → INVENTÁRIO!",
 	},
 	-- ── PASSO 7 ───────────────────────────────────────────────
 	{
-		title = "🗺️ EQUIPAR = IR PARA O MAPA!",
-		mascot = "🚀",
-		mascotColor = C.orange,
-		dialogue = "Quando você EQUIPA um personagem acontece algo incrível...\n\nVocê é teleportado AUTOMATICAMENTE para o mapa de batalha! 🗺️\n\nPara voltar à Zona Segura, você precisa ser eliminado em combate. Escolha bem seu personagem antes de sair!",
+		title = "⚔️ O COMBATE",
+		mascot = "😤",
+		mascotColor = C.red,
+		dialogue = "O dano não é um número solto: ele passa por ATAQUE, DEFESA, CRÍTICO e RESISTÊNCIA.\n\nSeu personagem, seu nível e suas passivas mexem nesses números. Dois personagens com a mesma Tool batem diferente.",
 		arrow = false,
 	},
 	-- ── PASSO 8 ───────────────────────────────────────────────
 	{
-		title = "⚔️ O COMBATE",
-		mascot = "💥",
-		mascotColor = C.red,
-		dialogue = "No mapa, você tem FERRAMENTAS (armas) no Backpack — elas aparecem na parte inferior da tela!\n\nEquipe sua arma clicando nela e ataque outros jogadores. Cada personagem vem com ferramentas EXCLUSIVAS.\n\nFique de olho no HP no topo da tela — se chegar a ZERO você é eliminado!",
-		arrow = false,
+		title = "⚡ ENERGIA",
+		mascot = "😮‍💨",
+		mascotColor = C.cyan,
+		dialogue = "Cada uso de habilidade gasta ENERGIA (a barra abaixo da vida).\n\nZerou, a habilidade TRAVA até regenerar. É isso que dá preço às passivas — sem energia, não existiria escolha.\n\nEnergia máxima e regeneração sobem com o NÍVEL do personagem.",
+		arrow = true,
 	},
 	-- ── PASSO 9 ───────────────────────────────────────────────
 	{
-		title = "💰 RECOMPENSAS POR ELIMINAR",
-		mascot = "🏆",
-		mascotColor = C.gold,
-		dialogue = "Eliminou um inimigo? PARABÉNS, guerreiro!\n\nVocê ganha automaticamente:\n• 💰 +50 MOEDAS por kill\n• ⚔️ +BOUNTY baseado na vítima\n\nO BOUNTY é sua FAMA no jogo — quanto mais kills, mais bounty você acumula. Use as moedas para comprar personagens melhores!",
+		title = "🎒 A HOTBAR",
+		mascot = "🕹️",
+		mascotColor = C.orange,
+		dialogue = "Suas habilidades ficam na hotbar retrô, embaixo da tela.\n\nNo PC use as teclas 1-7. No celular e no console os botões se ajustam sozinhos ao seu aparelho.",
+		arrow = true,
+	},
+	-- ── PASSO 10 ───────────────────────────────────────────────
+	{
+		title = "📈 NÍVEL POR PERSONAGEM",
+		mascot = "🧗",
+		mascotColor = C.green,
+		dialogue = "O nível é DE CADA PERSONAGEM, não seu.\n\nUsar um personagem em combate dá XP a ELE. Subir de nível aumenta atributos, energia máxima, regeneração e o número de espaços de passiva.\n\nOu seja: vale a pena escolher um favorito.",
 		arrow = false,
 	},
-	-- ── PASSO 10 ──────────────────────────────────────────────
+	-- ── PASSO 11 ───────────────────────────────────────────────
 	{
-		title = "💀 DROP DE MOEDAS NA MORTE",
-		mascot = "😱",
+		title = "🧬 PASSIVAS",
+		mascot = "🧠",
+		mascotColor = C.purple,
+		dialogue = "Passivas são efeitos permanentes que você encaixa nos espaços do personagem.\n\n⚠️ REGRA IMPORTANTE: com o personagem EQUIPADO fora da zona segura, você NÃO pode trocá-las. Só desequipado ou dentro do lobby.\n\nÉ o que impede trocar passiva no meio da briga.",
+		arrow = true,
+	},
+	-- ── PASSO 12 ───────────────────────────────────────────────
+	{
+		title = "⚡ O DESPERTAR — COMO FUNCIONA",
+		mascot = "😲",
+		mascotColor = C.purple,
+		dialogue = "O Despertar NÃO é um personagem separado e NÃO se equipa.\n\nEle já vem junto com o personagem normal: é uma FORMA TEMPORÁRIA que você conquista LUTANDO.\n\nRepare na barra roxa embaixo da energia — é ela que manda.",
+		arrow = true,
+	},
+	-- ── PASSO 13 ───────────────────────────────────────────────
+	{
+		title = "🔥 ENCHENDO A BARRA",
+		mascot = "😡",
 		mascotColor = C.red,
-		dialogue = "⚠️ ATENÇÃO! Quando você MORRE, 10% das suas moedas caem no chão como um COFRE!\n\nOutros jogadores podem ROUBAR suas moedas coletando o cofre.\n\n💡 Mas você também pode COLETAR as moedas de quem você eliminar! Nunca fique com muito dinheiro no bolso antes de uma batalha!",
+		dialogue = "A barra sobe quando você DÁ DANO, LEVA DANO e USA HABILIDADE.\n\nBater rende mais que apanhar, e nenhum golpe sozinho enche tudo. Quem foge da briga não desperta.\n\nCheia: transformação!",
 		arrow = false,
 	},
-	-- ── PASSO 11 ──────────────────────────────────────────────
+	-- ── PASSO 14 ───────────────────────────────────────────────
 	{
-		title = "🏆 PERSONAGENS DE BOUNTY",
-		mascot = "⭐",
-		mascotColor = Color3.fromRGB(255, 100, 200),
-		dialogue = "Além da Loja, no Menu ☰ → INVENTÁRIO → aba RECOMPENSA existem personagens especiais!\n\nEsses personagens são desbloqueados pelo seu BOUNTY (fama). Quanto mais jogadores você eliminar, mais bounty ganha — e mais personagens exclusivos você pode usar no combate!",
+		title = "💥 A TRANSFORMAÇÃO",
+		mascot = "⚡",
+		mascotColor = C.gold,
+		dialogue = "Ao encher, você fica 3 SEGUNDOS DESARMADO — é a transformação, e vale nos dois sentidos.\n\nDepois suas habilidades normais SOMEM e entram as DESPERTAS, por 3 minutos e meio.\n\nAcabou o tempo: outros 3 segundos e você volta ao normal.\n\nMorrer desperto CANCELA a forma e ZERA a barra.",
 		arrow = true,
-		arrowX = 0.13,
-		arrowY = 0.37,
-		arrowXM = 0.20,
-		arrowYM = 0.41,
-		arrowDir = "left",
-		arrowText = "☰ → LOJA → RECOMPENSA",
 	},
-	-- ── PASSO 12 ──────────────────────────────────────────────
+	-- ── PASSO 15 ───────────────────────────────────────────────
 	{
-		title = "👥 SISTEMA DE TIMES",
-		mascot = "🤝",
-		mascotColor = Color3.fromRGB(0, 100, 255),
-		dialogue = "Você pode criar ou entrar em um TIME 👥!\n\nVá em Menu ☰ → TIMES. Com aliados você batalha em equipe e o melhor: membros do mesmo time NÃO se machucam entre si!\n\n• Crie um time e escolha uma cor\n• Convide amigos clicando em ✉️\n• Times são desfeitos quando o líder sai",
+		title = "📖 VENDO O DESPERTAR",
+		mascot = "🔎",
+		mascotColor = C.cyan,
+		dialogue = "No card do personagem tem o botão ⚡ VER DESPERTAR.\n\nEle NÃO equipa nada — abre a imagem, o nome, a história, o HP e as habilidades da forma desperta. Funciona mesmo bloqueado, para você saber o que existe e o que falta.",
 		arrow = true,
-		arrowX = 0.13,
-		arrowY = 0.37,
-		arrowXM = 0.20,
-		arrowYM = 0.41,
-		arrowDir = "left",
-		arrowText = "☰ → TIMES!",
 	},
-	-- ── PASSO 13 ──────────────────────────────────────────────
+	-- ── PASSO 16 ───────────────────────────────────────────────
+	{
+		title = "💰 RECOMPENSAS E MORTE",
+		mascot = "😱",
+		mascotColor = C.gold,
+		dialogue = "Eliminar rende moedas e reputação. Derrotar NPC rende proporcional à vida dele.\n\nMas ao MORRER você derruba parte das suas moedas no chão — e qualquer um pode pegar. Quanto mais você carrega, mais arrisca.",
+		arrow = false,
+	},
+	-- ── PASSO 17 ───────────────────────────────────────────────
+	{
+		title = "🏆 BOUNTY E PROCURADO",
+		mascot = "😈",
+		mascotColor = C.orange,
+		dialogue = "Eliminar jogadores sobe seu BOUNTY.\n\nBounty alto libera personagens exclusivos — mas também te coloca na lista de PROCURADOS, visível para todo mundo. Fama tem preço.",
+		arrow = true,
+	},
+	-- ── PASSO 18 ───────────────────────────────────────────────
+	{
+		title = "🎯 JORNADA DO RECRUTA",
+		mascot = "🐣",
+		mascotColor = C.green,
+		dialogue = "Começando agora? A JORNADA DO RECRUTA te guia.\n\nSão capítulos curtos: equipar o primeiro personagem, entrar no combate, subir de nível. Cada um paga moedas e bounty na hora.\n\nEstá no menu ☰, aba RECRUTA.",
+		arrow = true,
+	},
+	-- ── PASSO 19 ───────────────────────────────────────────────
+	{
+		title = "📜 MISSÕES E CONQUISTAS",
+		mascot = "🗒️",
+		mascotColor = C.cyan,
+		dialogue = "MISSÕES são objetivos que renovam e pagam moedas.\n\nCONQUISTAS são marcos permanentes — algumas dão personagens exclusivos e emblemas de verdade.\n\nOs dois ficam no menu ☰.",
+		arrow = false,
+	},
+	-- ── PASSO 20 ───────────────────────────────────────────────
 	{
 		title = "🎁 RECOMPENSAS DIÁRIAS",
-		mascot = "🎁",
-		mascotColor = C.orange,
-		dialogue = "Todo dia você pode coletar RECOMPENSAS DIÁRIAS 🎁!\n\nVá em Menu ☰ → DAILY. Quanto mais dias seguidos você jogar (STREAK 🔥), maior a recompensa!\n\n• Após 3 dias seguidos: desbloqueie RECUPERAÇÃO\n• Final de semana: RECOMPENSA DOBRADA!\n• Dia 6: Personagem exclusivo temporário!",
-		arrow = false,
+		mascot = "🥳",
+		mascotColor = C.gold,
+		dialogue = "Entre todo dia e colete. A sequência aumenta o prêmio a cada dia seguido.\n\nSe perder um dia, dá para recuperar depois de 3 dias consecutivos. Fim de semana paga em dobro.",
+		arrow = true,
 	},
-	-- ── PASSO 14 ──────────────────────────────────────────────
+	-- ── PASSO 21 ───────────────────────────────────────────────
 	{
-		title = "⚡ SISTEMA DE DESPERTAR",
-		mascot = "⚡",
+		title = "👥 TIMES, DUELOS E TROCAS",
+		mascot = "🤝",
+		mascotColor = C.green,
+		dialogue = "TIMES: aliados não se machucam entre si.\nDUELOS: desafie alguém para um 1x1 combinado.\nTROCAS: negocie personagens com outro jogador, com as duas partes confirmando.\n\nPersonagem de emblema e gamepass não é trocável.",
+		arrow = true,
+	},
+	-- ── PASSO 22 ───────────────────────────────────────────────
+	{
+		title = "👹 O CHEFÃO",
+		mascot = "😨",
+		mascotColor = C.red,
+		dialogue = "O CHEFÃO acontece em um LUGAR SEPARADO.\n\nVocê entra em grupo, e a vida dele cresce conforme o número de jogadores. Lá não existe dano entre jogadores — é todo mundo contra ele.\n\nO prêmio só sai depois de confirmado, antes de te trazer de volta.",
+		arrow = true,
+	},
+	-- ── PASSO 23 ───────────────────────────────────────────────
+	{
+		title = "🎵 A MÚSICA",
+		mascot = "🎧",
 		mascotColor = C.purple,
-		dialogue = "Alguns personagens podem DESPERTAR ⚡!\n\nDespertares são formas EVOLUÍDAS com poderes maiores e aparência diferente. Para despertar você precisa:\n\n1️⃣ Possuir o personagem original\n2️⃣ Ter o Badge OU Gamepass especial\n\nProcure o botão ⚡ DESPERTAR nos cards de personagem no Inventário!",
+		dialogue = "O player de música fica no menu ☰.\n\nDá para tocar, pausar, pular faixa, mexer no volume e ver o VISUALIZER DE GRAVE reagindo à batida.\n\nA trilha é atualizada pelos admins dentro do jogo — sem precisar derrubar o servidor.",
 		arrow = false,
 	},
-	-- ── PASSO 15 ──────────────────────────────────────────────
+	-- ── PASSO 24 ───────────────────────────────────────────────
 	{
-		title = "✅ TUTORIAL COMPLETO — BOA SORTE!",
+		title = "✅ TUTORIAL COMPLETO!",
 		mascot = "🏆",
 		mascotColor = C.green,
-		dialogue = "PARABÉNS! Você completou o tutorial e ganhou 💰 100 MOEDAS de bônus!\n\nO ciclo do RetroVerse é simples:\n🛡️ Zona Segura → 🎭 Escolher Personagem → ⚔️ Batalhar → 💰 Ganhar Moedas → 🛒 Comprar Mais!\n\nAté em breve, guerreiro! Use o Menu ☰ sempre que precisar de ajuda. 🎮",
+		dialogue = "PARABÉNS! Você ganhou 💰 100 MOEDAS de bônus!\n\nO ciclo é este:\n🛡️ Preparar → 🎭 Equipar → ⚔️ Lutar → ⚡ Despertar → 💰 Ganhar → 📈 Evoluir\n\nO menu ☰ tem tudo, e este tutorial fica lá para reler quando quiser. Boa sorte, guerreiro! 🎮",
 		arrow = false,
 		isLast = true,
 	},
@@ -404,13 +466,13 @@ local function createTutorialInterface()
 	stepTitleLabel.ZIndex = 17
 	stepTitleLabel.Parent = headerBar
 
-	-- Contador passo X/15
+	-- Contador passo X/N (o total sai de #STEPS, nunca cravado)
 	local stepCounter = Instance.new("TextLabel")
 	stepCounter.Name = "StepCounter"
 	stepCounter.Size = UDim2.new(0.20, 0, 0.55, 0)
 	stepCounter.Position = UDim2.new(0.62, 0, 0.05, 0)
 	stepCounter.BackgroundTransparency = 1
-	stepCounter.Text = "1 / 15"
+	stepCounter.Text = "1 / " .. #STEPS
 	stepCounter.TextColor3 = C.bg
 	stepCounter.TextScaled = true
 	stepCounter.Font = Enum.Font.Arcade

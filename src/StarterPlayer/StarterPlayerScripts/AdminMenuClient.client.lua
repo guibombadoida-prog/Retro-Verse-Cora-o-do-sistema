@@ -1,11 +1,55 @@
 -- ============================================
--- ADMIN MENU CLIENT V9 — EDITAR PERSONAGENS + ABA ADMINS
+-- ADMIN MENU CLIENT V12 — WIZARD DO DESPERTAR EM ETAPAS
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "AdminMenuClient"
--- SUBSTITUI: AdminMenuClient V8
--- REMOVER:   AdminMenuClient V8
+-- SUBSTITUI: AdminMenuClient V11
+-- ============================================
+-- (V12) DOIS PROBLEMAS DO PAINEL DE DESPERTAR:
+--
+-- 1. TUDO NUMA TELA SÓ. Personagem, badge, nome, imagem, vida, história
+--    e os sete campos de Tool disputavam o mesmo espaço vertical, e com
+--    a história somada os campos ficaram colados. Agora são 3 etapas,
+--    no mesmo desenho do wizard de personagem normal:
+--      1/3 PERSONAGEM  — base, nome de exibição, badge
+--      2/3 APARÊNCIA   — imagem, vida, história
+--      3/3 HABILIDADES — as 7 Tools e o salvar
+--
+-- 2. O BADGE AINDA ERA OBRIGATÓRIO AQUI. Ele virou opcional no
+--    AwakeningSystemServer V5, mas o botão de salvar continuava barrando
+--    sem ele — dava para configurar no servidor e não conseguir salvar
+--    pelo painel. Agora só o personagem base é exigido.
+-- ============================================
+-- ============================================
+-- (V11) CAMPO HISTÓRIA no wizard de Despertar.
+-- O card do Despertar mostra imagem, nome, história e as Tools. O
+-- payload deste wizard é montado explicitamente, então sem um campo aqui
+-- a história do servidor ficaria sempre vazia por mais que a definição
+-- aceitasse o dado.
+-- REMOVER:   AdminMenuClient V9
+-- ============================================
+-- (V10) ALTERAÇÃO ÚNICA — TEXTO, NENHUMA LÓGICA
+-- O AwakeningSystemServer_V4 e o CharacterCatalogServer_V7 passaram a
+-- aceitar UM ID de Model com várias Tools dentro, no lugar de um ID por
+-- Tool. A lógica do painel já funcionava para isso sem mudar nada (é o
+-- mesmo campo de ID), mas o recurso ficava invisível — ninguém
+-- adivinharia que pode pôr um Model naquele campo.
+--
+-- Os DOIS formulários receberam a dica:
+--   • PASSO 2/3 do wizard (personagem NORMAL): "máx. 7 no TOTAL", o
+--     aviso agora diz "UM Model com várias Tools dentro vale por
+--     todas", e o primeiro campo virou "ID de uma Tool OU de um Model
+--     com várias".
+--   • Formulário de DESPERTAR: "máx. 7 no TOTAL — 1 ID de Model com
+--     Tools dentro vale por todas", primeiro campo "Tool ou Model".
+--
+-- O "no TOTAL" também corrige o sentido: o teto agora é sobre a
+-- quantidade de Tools, não de IDs.
+--
+-- Instalar isto é OPCIONAL — sem o V10 o Model funciona igual, você só
+-- não vê a dica no painel.
+-- ============================================
 -- DEPENDE DE: AdminRegistryServer_V1 (novo, no ServerScriptService)
---             CharacterCatalogServer_V5 / AwakeningSystemServer_V2
+--             CharacterCatalogServer_V7 / AwakeningSystemServer_V4
 -- ============================================
 -- (V9) ALTERAÇÕES:
 -- • LISTA "ADMIN_IDS" REMOVIDA DO CÓDIGO: o painel agora pergunta
@@ -570,6 +614,7 @@ local function createAdminInterface()
 			imageId = "",
 			displayName = "",
 			health = "",
+			lore = "",
 			toolIds = { "", "", "", "", "", "", "" },
 		}
 	end
@@ -607,6 +652,7 @@ local function createAdminInterface()
 		awakenDraft.imageId = (tonumber(def.imageId) and tonumber(def.imageId) > 0) and tostring(def.imageId) or ""
 		awakenDraft.displayName = def.displayName or ""
 		awakenDraft.health = def.health and tostring(def.health) or ""
+		awakenDraft.lore = def.lore or ""
 		for i = 1, 7 do
 			local id = def.toolIds and def.toolIds[i]
 			awakenDraft.toolIds[i] = id and tostring(id) or ""
@@ -949,15 +995,25 @@ local function createAdminInterface()
 	-- ---------- VIEW: PASSO 2 — TOOLS (até 7) ----------
 
 	local function renderStep2()
-		label(catalogContent, "[ PASSO 2/3 — HABILIDADES (TOOLS) — máx. 7 ]", UDim2.new(1, 0, 0.06, 0), UDim2.new(0, 0, 0, 0), COLORS.catalog)
-		label(catalogContent, "Cole o Model ID de cada Tool publicada. Vazio = não usa.", UDim2.new(0.96, 0, 0.05, 0), UDim2.new(0.02, 0, 0.06, 0), Color3.fromRGB(180, 180, 180))
+		label(catalogContent, "[ PASSO 2/3 — HABILIDADES (TOOLS) — máx. 7 no TOTAL ]", UDim2.new(1, 0, 0.06, 0), UDim2.new(0, 0, 0, 0), COLORS.catalog)
+		-- (V10) A dica do Model entrou no aviso que já existia aqui, sem
+		-- elemento novo: as 7 linhas de campo ocupam de 0.13 a 0.70 em
+		-- Scale e outra linha empurraria os botões.
+		label(
+			catalogContent,
+			"Cole o Model ID de cada Tool. UM Model com várias Tools dentro vale por todas. Vazio = não usa.",
+			UDim2.new(0.96, 0, 0.05, 0),
+			UDim2.new(0.02, 0, 0.06, 0),
+			Color3.fromRGB(180, 180, 180)
+		)
 
 		for i = 1, 7 do
 			local rowY = 0.13 + (i - 1) * 0.095
 			label(catalogContent, "TOOL " .. i .. ":", UDim2.new(0.15, 0, 0.06, 0), UDim2.new(0.02, 0, rowY, 0))
 			local box = textBox(
 				catalogContent,
-				"Model ID da Tool (opcional)",
+				-- (V10) O primeiro campo é onde se põe o Model único
+				i == 1 and "ID de uma Tool OU de um Model com várias" or "Model ID da Tool (opcional)",
 				UDim2.new(0.8, 0, 0.06, 0),
 				UDim2.new(0.18, 0, rowY, 0),
 				wizardDraft.toolIds[i]
@@ -982,7 +1038,16 @@ local function createAdminInterface()
 
 	-- ---------- VIEW: PASSO 3 — LORE + RARIDADE + PUBLICAR ----------
 
-	local RARITY_OPTIONS = { "ROBLOXIANOS", "HEROXIANOS", "NULLXIANOS", "BTUDIOS", "BOSSXIANOS", "SUPREMO", "AWAKENED" }
+	-- (V10) "AWAKENED" SAIU DAQUI.
+	-- Despertar não é uma raridade que se escolhe ao criar personagem
+	-- normal: ele tem formulário próprio (botão ⚡ CONFIGURAR DESPERTAR)
+	-- e depende SEMPRE de um personagem original já existente. Ter a
+	-- opção aqui deixava criar um "personagem de raridade AWAKENED" solto,
+	-- que é um personagem comum pintado de despertado — a mesma confusão
+	-- que o AwakeningSystemServer_V3 fechou do lado do servidor.
+	-- A largura dos botões é 1/#RARITY_OPTIONS, então a linha se reajusta
+	-- sozinha para 6 opções.
+	local RARITY_OPTIONS = { "ROBLOXIANOS", "HEROXIANOS", "NULLXIANOS", "BTUDIOS", "BOSSXIANOS", "SUPREMO" }
 
 	local function renderStep3()
 		label(
@@ -1087,18 +1152,40 @@ local function createAdminInterface()
 
 	-- ---------- VIEW: DESPERTAR ----------
 
-	local function renderAwaken()
+	-- =====================================
+	-- (V12) WIZARD DO DESPERTAR EM 3 ETAPAS
+	-- =====================================
+	-- Antes era tudo numa tela só: personagem, badge, nome, imagem, vida,
+	-- história e os 7 campos de Tool disputando o mesmo espaço vertical.
+	-- Com a história somada, os campos ficaram colados uns nos outros.
+	--
+	-- Agora segue o mesmo desenho do wizard de personagem normal
+	-- (step1/step2/step3): cada etapa cuida de um assunto e tem espaço
+	-- para respirar.
+
+	local function cabecalhoAwaken(etapa, titulo)
 		label(
 			catalogContent,
-			awakenDraft.editing and ("[ ✏️ EDITANDO DESPERTAR DE '" .. awakenDraft.characterName .. "' ]")
-				or "[ ⚡ CONFIGURAR DESPERTAR — Badge obrigatório ]",
+			string.format(
+				"[ ⚡ DESPERTAR — ETAPA %d/3: %s ]%s",
+				etapa,
+				titulo,
+				awakenDraft.editing and ("  ✏️ " .. awakenDraft.characterName) or ""
+			),
 			UDim2.new(1, 0, 0.06, 0),
 			UDim2.new(0, 0, 0, 0),
 			COLORS.awaken
 		)
+	end
 
-		label(catalogContent, awakenDraft.editing and "PERSONAGEM (travado):" or "PERSONAGEM BASE:", UDim2.new(0.3, 0, 0.055, 0), UDim2.new(0.02, 0, 0.08, 0))
-		local nameBox = textBox(catalogContent, "Nome exato de um personagem existente", UDim2.new(0.64, 0, 0.055, 0), UDim2.new(0.34, 0, 0.08, 0), awakenDraft.characterName)
+	local renderAwaken1, renderAwaken2, renderAwaken3
+
+	-- ETAPA 1 — de quem é a forma
+	function renderAwaken1()
+		cabecalhoAwaken(1, "PERSONAGEM")
+
+		label(catalogContent, awakenDraft.editing and "PERSONAGEM (travado):" or "PERSONAGEM BASE:", UDim2.new(0.32, 0, 0.06, 0), UDim2.new(0.02, 0, 0.12, 0))
+		local nameBox = textBox(catalogContent, "Nome exato de um personagem existente", UDim2.new(0.62, 0, 0.06, 0), UDim2.new(0.36, 0, 0.12, 0), awakenDraft.characterName)
 		if awakenDraft.editing then
 			nameBox.TextEditable = false
 			nameBox.TextColor3 = Color3.fromRGB(150, 150, 150)
@@ -1107,45 +1194,28 @@ local function createAdminInterface()
 			awakenDraft.characterName = nameBox.Text
 		end)
 
-		label(catalogContent, "BADGE ID:", UDim2.new(0.3, 0, 0.055, 0), UDim2.new(0.02, 0, 0.16, 0))
-		local badgeBox = textBox(catalogContent, "Obrigatório — condição do Despertar", UDim2.new(0.64, 0, 0.055, 0), UDim2.new(0.34, 0, 0.16, 0), awakenDraft.badgeId)
-		badgeBox:GetPropertyChangedSignal("Text"):Connect(function()
-			awakenDraft.badgeId = badgeBox.Text
-		end)
-
-		label(catalogContent, "IMAGE ID DESPERTO:", UDim2.new(0.3, 0, 0.055, 0), UDim2.new(0.02, 0, 0.24, 0))
-		local imgBox = textBox(catalogContent, "Aparência da forma despertada", UDim2.new(0.64, 0, 0.055, 0), UDim2.new(0.34, 0, 0.24, 0), awakenDraft.imageId)
-		imgBox:GetPropertyChangedSignal("Text"):Connect(function()
-			awakenDraft.imageId = imgBox.Text
-		end)
-
-		label(catalogContent, "NOME DE EXIBIÇÃO:", UDim2.new(0.3, 0, 0.055, 0), UDim2.new(0.02, 0, 0.32, 0))
-		local dispBox = textBox(catalogContent, "Ex: Danilo Despertado", UDim2.new(0.64, 0, 0.055, 0), UDim2.new(0.34, 0, 0.32, 0), awakenDraft.displayName)
+		label(catalogContent, "NOME DE EXIBIÇÃO:", UDim2.new(0.32, 0, 0.06, 0), UDim2.new(0.02, 0, 0.24, 0))
+		local dispBox = textBox(catalogContent, "Ex: Danilo Despertado", UDim2.new(0.62, 0, 0.06, 0), UDim2.new(0.36, 0, 0.24, 0), awakenDraft.displayName)
 		dispBox:GetPropertyChangedSignal("Text"):Connect(function()
 			awakenDraft.displayName = dispBox.Text
 		end)
 
-		label(catalogContent, "VIDA (opcional):", UDim2.new(0.3, 0, 0.055, 0), UDim2.new(0.02, 0, 0.4, 0))
-		local hpBox = textBox(catalogContent, "Vazio = mantém a vida normal", UDim2.new(0.64, 0, 0.055, 0), UDim2.new(0.34, 0, 0.4, 0), awakenDraft.health)
-		hpBox:GetPropertyChangedSignal("Text"):Connect(function()
-			awakenDraft.health = hpBox.Text
+		-- (V12) O Badge deixou de ser obrigatório no AwakeningSystemServer
+		-- V5, mas este painel continuava exigindo. Agora o rótulo e a
+		-- validação dizem a verdade.
+		label(catalogContent, "BADGE ID (opcional):", UDim2.new(0.32, 0, 0.06, 0), UDim2.new(0.02, 0, 0.36, 0))
+		local badgeBox = textBox(catalogContent, "Vazio = liberado para quem tem o personagem", UDim2.new(0.62, 0, 0.06, 0), UDim2.new(0.36, 0, 0.36, 0), awakenDraft.badgeId)
+		badgeBox:GetPropertyChangedSignal("Text"):Connect(function()
+			awakenDraft.badgeId = badgeBox.Text
 		end)
 
-		label(catalogContent, "TOOLS DESPERTAS (máx. 7):", UDim2.new(0.6, 0, 0.05, 0), UDim2.new(0.02, 0, 0.48, 0))
-		for i = 1, 7 do
-			local col = (i - 1) % 4
-			local row = math.floor((i - 1) / 4)
-			local box = textBox(
-				catalogContent,
-				"Tool " .. i,
-				UDim2.new(0.23, 0, 0.055, 0),
-				UDim2.new(0.02 + col * 0.245, 0, 0.54 + row * 0.075, 0),
-				awakenDraft.toolIds[i]
-			)
-			box:GetPropertyChangedSignal("Text"):Connect(function()
-				awakenDraft.toolIds[i] = box.Text
-			end)
-		end
+		label(
+			catalogContent,
+			"O Despertar é uma FORMA do personagem, conquistada em combate pela barra. Não é um personagem separado.",
+			UDim2.new(0.95, 0, 0.12, 0),
+			UDim2.new(0.02, 0, 0.5, 0),
+			COLORS.warning
+		)
 
 		local backBtn = button(catalogContent, "◀ VOLTAR", COLORS.panel, UDim2.new(0.3, 0, 0.08, 0), UDim2.new(0.02, 0, 0.88, 0))
 		backBtn.MouseButton1Click:Connect(function()
@@ -1153,7 +1223,95 @@ local function createAdminInterface()
 			renderCatalogView()
 		end)
 
-		-- (V9) Texto muda quando é edição
+		local nextBtn = button(catalogContent, "PRÓXIMO ▶", COLORS.success, UDim2.new(0.4, 0, 0.08, 0), UDim2.new(0.58, 0, 0.88, 0))
+		nextBtn.MouseButton1Click:Connect(function()
+			if awakenDraft.characterName:match("^%s*(.-)%s*$") == "" then
+				showToast("Diga de qual personagem é esta forma!", false)
+				return
+			end
+			currentView = "awaken2"
+			renderCatalogView()
+		end)
+	end
+
+	-- ETAPA 2 — como ela se apresenta
+	function renderAwaken2()
+		cabecalhoAwaken(2, "APARÊNCIA E HISTÓRIA")
+
+		label(catalogContent, "IMAGE ID:", UDim2.new(0.32, 0, 0.06, 0), UDim2.new(0.02, 0, 0.12, 0))
+		local imgBox = textBox(catalogContent, "Aparece no card do Despertar", UDim2.new(0.62, 0, 0.06, 0), UDim2.new(0.36, 0, 0.12, 0), awakenDraft.imageId)
+		imgBox:GetPropertyChangedSignal("Text"):Connect(function()
+			awakenDraft.imageId = imgBox.Text
+		end)
+
+		label(catalogContent, "VIDA (opcional):", UDim2.new(0.32, 0, 0.06, 0), UDim2.new(0.02, 0, 0.24, 0))
+		local hpBox = textBox(catalogContent, "Vazio = mantém a vida normal", UDim2.new(0.62, 0, 0.06, 0), UDim2.new(0.36, 0, 0.24, 0), awakenDraft.health)
+		hpBox:GetPropertyChangedSignal("Text"):Connect(function()
+			awakenDraft.health = hpBox.Text
+		end)
+
+		label(catalogContent, "HISTÓRIA:", UDim2.new(0.32, 0, 0.06, 0), UDim2.new(0.02, 0, 0.36, 0))
+		local loreBox = textBox(catalogContent, "Texto que aparece no card do Despertar", UDim2.new(0.62, 0, 0.2, 0), UDim2.new(0.36, 0, 0.36, 0), awakenDraft.lore)
+		loreBox.TextWrapped = true
+		loreBox.TextYAlignment = Enum.TextYAlignment.Top
+		loreBox.ClearTextOnFocus = false
+		loreBox:GetPropertyChangedSignal("Text"):Connect(function()
+			awakenDraft.lore = loreBox.Text
+		end)
+
+		local backBtn = button(catalogContent, "◀ VOLTAR", COLORS.panel, UDim2.new(0.3, 0, 0.08, 0), UDim2.new(0.02, 0, 0.88, 0))
+		backBtn.MouseButton1Click:Connect(function()
+			currentView = "awaken1"
+			renderCatalogView()
+		end)
+
+		local nextBtn = button(catalogContent, "PRÓXIMO ▶", COLORS.success, UDim2.new(0.4, 0, 0.08, 0), UDim2.new(0.58, 0, 0.88, 0))
+		nextBtn.MouseButton1Click:Connect(function()
+			currentView = "awaken3"
+			renderCatalogView()
+		end)
+	end
+
+	-- ETAPA 3 — as habilidades e o salvar
+	function renderAwaken3()
+		cabecalhoAwaken(3, "HABILIDADES")
+
+		label(
+			catalogContent,
+			"TOOLS DESPERTAS (máx. 7 no TOTAL) — 1 ID de Model com as Tools dentro vale por todas:",
+			UDim2.new(0.95, 0, 0.09, 0),
+			UDim2.new(0.02, 0, 0.1, 0)
+		)
+
+		for i = 1, 7 do
+			local col = (i - 1) % 4
+			local row = math.floor((i - 1) / 4)
+			local box = textBox(
+				catalogContent,
+				i == 1 and "Tool ou Model" or ("Tool " .. i),
+				UDim2.new(0.23, 0, 0.07, 0),
+				UDim2.new(0.02 + col * 0.245, 0, 0.24 + row * 0.11, 0),
+				awakenDraft.toolIds[i]
+			)
+			box:GetPropertyChangedSignal("Text"):Connect(function()
+				awakenDraft.toolIds[i] = box.Text
+			end)
+		end
+
+		label(
+			catalogContent,
+			"A forma dura um tempo e depois volta ao normal. A barra enche batendo, apanhando e usando habilidade.",
+			UDim2.new(0.95, 0, 0.1, 0),
+			UDim2.new(0.02, 0, 0.5, 0),
+			COLORS.warning
+		)
+
+		local backBtn = button(catalogContent, "◀ VOLTAR", COLORS.panel, UDim2.new(0.3, 0, 0.08, 0), UDim2.new(0.02, 0, 0.88, 0))
+		backBtn.MouseButton1Click:Connect(function()
+			currentView = "awaken2"
+			renderCatalogView()
+		end)
+
 		local saveBtn = button(
 			catalogContent,
 			awakenDraft.editing and "✅ SALVAR EDIÇÃO" or "✅ SALVAR DESPERTAR",
@@ -1166,8 +1324,14 @@ local function createAdminInterface()
 			if saving then
 				return
 			end
-			if awakenDraft.characterName == "" or not tonumber(awakenDraft.badgeId) then
-				showToast("Personagem base e Badge ID são obrigatórios!", false)
+
+			-- (V12) Só o personagem base é obrigatório. O Badge virou
+			-- opcional no AwakeningSystemServer V5 e este painel continuava
+			-- barrando o salvamento sem ele.
+			if awakenDraft.characterName:match("^%s*(.-)%s*$") == "" then
+				showToast("Personagem base é obrigatório!", false)
+				currentView = "awaken1"
+				renderCatalogView()
 				return
 			end
 
@@ -1188,6 +1352,7 @@ local function createAdminInterface()
 				imageId = tonumber(awakenDraft.imageId) or 0,
 				displayName = awakenDraft.displayName ~= "" and awakenDraft.displayName or nil,
 				health = tonumber(awakenDraft.health),
+				lore = awakenDraft.lore ~= "" and awakenDraft.lore or nil,
 				toolIds = toolIds,
 			}
 
@@ -1217,8 +1382,12 @@ local function createAdminInterface()
 			renderStep2()
 		elseif currentView == "step3" then
 			renderStep3()
-		elseif currentView == "awaken" then
-			renderAwaken()
+		elseif currentView == "awaken" or currentView == "awaken1" then
+			renderAwaken1()
+		elseif currentView == "awaken2" then
+			renderAwaken2()
+		elseif currentView == "awaken3" then
+			renderAwaken3()
 		end
 	end
 

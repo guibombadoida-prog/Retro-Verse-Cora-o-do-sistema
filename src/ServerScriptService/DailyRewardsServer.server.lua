@@ -1,9 +1,32 @@
 -- ============================================
--- SISTEMA DE RECOMPENSAS DIÁRIAS - SERVIDOR V5
+-- SISTEMA DE RECOMPENSAS DIÁRIAS - SERVIDOR V6
 -- Coloque em ServerScriptService
 -- Nome: "DailyRewardsServer"
--- SUBSTITUI: DailyRewardsServer V4
+-- SUBSTITUI: DailyRewardsServer V5
 -- ============================================
+-- (V6) CORREÇÕES — o "personagem vazio" do dia 6:
+-- • FIX personagem fantasma: o V5 dava "Daily Champion" como bônus do
+--   dia 6. Esse nome NÃO existe no catálogo, e o
+--   addCharacterToInventory não valida nada — ele caía no ramo final
+--   (source = "Shop") e inseria um personagem SEM definição. Resultado:
+--   um card vazio no inventário, impossível de equipar.
+-- • FIX o fantasma era permanente: a remoção depois de 24h usava
+--   table.find(ownedCharacters, "Daily Champion") — mas ownedCharacters
+--   é lista de OBJETOS desde o V4 do DataManager, não de strings. O
+--   table.find nunca casava, index era sempre nil, e o fantasma ficava
+--   para sempre. O bloco inteiro do "TempCharacter" foi removido.
+-- • FIX o fantasma era vendável e trocável: source = "Shop" dá
+--   tradeable = true e sellable = true (SOURCE_PERMISSIONS no
+--   DataManager). Dava para vender por moedas e passar adiante um
+--   personagem que não existe.
+-- • LIMPEZA retroativa: quem já tem o "Daily Champion" preso no
+--   inventário perde ele no próximo login (limparPersonagemFantasma).
+--   Se estiver equipado, é desequipado antes.
+-- • O bônus do dia 6 agora só entrega personagem REAL, conferido no
+--   _G.CharacterCatalog. Configure em PERSONAGEM_BONUS_DIA_6. Vazio ou
+--   inexistente = paga a compensação em moedas/bounty e não inventa
+--   nada.
+-- • Logs atualizados para [DAILY V6].
 -- (V5) CORREÇÕES:
 -- • FIX ciclo de 6 dias: o reset do streak agora acontece ANTES do
 --   saveDailyData (no V4 salvava streak=6 e resetava depois — se o
@@ -49,7 +72,7 @@ local function getOrCreateRemote(name, remoteType)
 		end
 		remote.Name = name
 		remote.Parent = remotes
-		print("[DAILY V5] ✓ Remote criado: " .. name)
+		print("[DAILY V6] ✓ Remote criado: " .. name)
 	end
 	return remote
 end
@@ -63,6 +86,21 @@ local recoverLostDay = getOrCreateRemote("RecoverLostDay", "Function")
 -- CONFIGURAÇÃO DAS RECOMPENSAS (6 DIAS)
 -- =====================================
 
+-- (V6) Personagem do bônus do dia 6.
+-- Precisa ser um nome que EXISTE no catálogo (_G.CharacterCatalog).
+-- Deixe "" para desligar o bônus de personagem — nesse caso o dia 6
+-- paga COMPENSACAO_SEM_PERSONAGEM em moedas/bounty no lugar.
+-- ⚠️ NÃO invente nome aqui. Nome fora do catálogo = card vazio no
+-- inventário, que foi exatamente o bug do V5.
+local PERSONAGEM_BONUS_DIA_6 = ""
+
+-- Pago no dia 6 quando não há personagem válido configurado
+local COMPENSACAO_SEM_PERSONAGEM = { coins = 150, bounty = 50 }
+
+-- (V6) Nome do fantasma que o V5 criava. Mantido só para a limpeza
+-- retroativa de quem já tem ele preso no inventário.
+local PERSONAGEM_FANTASMA_V5 = "Daily Champion"
+
 local dailyRewards = {
 	{ day = 1, coins = 20, bounty = 3, bonus = nil, description = "Iniciante" },
 	{ day = 2, coins = 40, bounty = 10, bonus = nil, description = "Dedicado" },
@@ -73,7 +111,7 @@ local dailyRewards = {
 		day = 6,
 		coins = 110,
 		bounty = 70,
-		bonus = "Personagem Exclusivo Temporário",
+		bonus = "Personagem Exclusivo",
 		description = "Lendário",
 	},
 }
@@ -176,7 +214,7 @@ local function loadDailyData(player)
 		playerDailyData[player] = deserializeData(data)
 		print(
 			string.format(
-				"[DAILY V5] ✓ Dados carregados: %s (Streak: %d)",
+				"[DAILY V6] ✓ Dados carregados: %s (Streak: %d)",
 				player.Name,
 				playerDailyData[player].currentStreak
 			)
@@ -192,7 +230,7 @@ local function loadDailyData(player)
 			lastRecoveryUse = 0,
 			missionsCompleted = 0,
 		}
-		print(string.format("[DAILY V5] ✓ Dados padrão criados: %s", player.Name))
+		print(string.format("[DAILY V6] ✓ Dados padrão criados: %s", player.Name))
 	end
 
 	return playerDailyData[player]
@@ -213,9 +251,9 @@ local function saveDailyData(player)
 	end)
 
 	if success then
-		print(string.format("[DAILY V5] ✓ Dados salvos: %s", player.Name))
+		print(string.format("[DAILY V6] ✓ Dados salvos: %s", player.Name))
 	else
-		warn(string.format("[DAILY V5] ❌ Erro ao salvar: %s - %s", player.Name, tostring(err)))
+		warn(string.format("[DAILY V6] ❌ Erro ao salvar: %s - %s", player.Name, tostring(err)))
 	end
 end
 
@@ -248,7 +286,7 @@ local function canClaimReward(player)
 		end
 
 		data.currentStreak = 0
-		print(string.format("[DAILY V5] ⚠️ Streak resetado: %s", player.Name))
+		print(string.format("[DAILY V6] ⚠️ Streak resetado: %s", player.Name))
 	end
 
 	return true, "Pode coletar", false
@@ -258,6 +296,36 @@ end
 -- APLICAR BÔNUS
 -- =====================================
 
+-- (V6) O personagem só é entregue se existir DE VERDADE no catálogo.
+-- Sem catálogo carregado, ou nome fora dele, devolve nil — e o dia 6
+-- cai na compensação em moedas.
+local function personagemBonusValido()
+	if PERSONAGEM_BONUS_DIA_6 == "" then
+		return nil
+	end
+
+	if not (_G.CharacterCatalog and _G.CharacterCatalog.getDefinition) then
+		warn("[DAILY V6] ⚠️ Catálogo indisponível — bônus do dia 6 vira compensação")
+		return nil
+	end
+
+	local ok, definicao = pcall(_G.CharacterCatalog.getDefinition, PERSONAGEM_BONUS_DIA_6)
+	if not ok or definicao == nil then
+		warn(
+			string.format(
+				"[DAILY V6] ⚠️ '%s' não está no catálogo — bônus do dia 6 vira compensação",
+				PERSONAGEM_BONUS_DIA_6
+			)
+		)
+		return nil
+	end
+
+	return PERSONAGEM_BONUS_DIA_6
+end
+
+-- Devolve: moedasExtra, bountyExtra, textoDoBonus
+-- O texto volta para o cliente, então precisa refletir o que REALMENTE
+-- aconteceu — não o que estava planejado.
 local function applyBonus(player, bonus)
 	local data = playerDailyData[player]
 
@@ -269,17 +337,72 @@ local function applyBonus(player, bonus)
 			_G.SetCoinMultiplier(player, 2, 3600)
 		end
 
-		print(string.format("[DAILY V5] ✅ Bônus 2x Coins ativado: %s", player.Name))
-	elseif bonus == "Personagem Exclusivo Temporário" then
-		local tempCharacter = "Daily Champion"
+		print(string.format("[DAILY V6] ✅ Bônus 2x Coins ativado: %s", player.Name))
+		return 0, 0, bonus
+	elseif bonus == "Personagem Exclusivo" then
+		local nome = personagemBonusValido()
 
-		if _G.PlayerDataManager then
-			_G.PlayerDataManager.addCharacterToInventory(player, tempCharacter)
-			data.bonusActive = "TempCharacter"
-			data.bonusExpiry = os.time() + 86400
-
-			print(string.format("[DAILY V5] ✅ Personagem temporário dado: %s", player.Name))
+		if nome and _G.PlayerDataManager then
+			if _G.PlayerDataManager.ownsCharacter(player, nome) then
+				print(
+					string.format("[DAILY V6] ℹ️ %s já tem '%s' — pagando compensação", player.Name, nome)
+				)
+			elseif _G.PlayerDataManager.addCharacterToInventory(player, nome) then
+				print(string.format("[DAILY V6] ✅ Personagem '%s' entregue: %s", nome, player.Name))
+				return 0, 0, "Personagem: " .. nome
+			else
+				warn(string.format("[DAILY V6] ⚠️ Falha ao entregar '%s' a %s", nome, player.Name))
+			end
 		end
+
+		-- Sem personagem válido: paga em moedas em vez de inventar um
+		-- personagem que não existe.
+		return COMPENSACAO_SEM_PERSONAGEM.coins,
+			COMPENSACAO_SEM_PERSONAGEM.bounty,
+			string.format(
+				"Bônus Lendário (+%d 💰 +%d ⚔️)",
+				COMPENSACAO_SEM_PERSONAGEM.coins,
+				COMPENSACAO_SEM_PERSONAGEM.bounty
+			)
+	end
+
+	return 0, 0, bonus
+end
+
+-- (V6) LIMPEZA RETROATIVA
+-- O V5 enfiava "Daily Champion" no inventário e a remoção dele estava
+-- quebrada (table.find de string numa lista de objetos). Quem coletou o
+-- dia 6 carrega esse card vazio até hoje, e ele é vendável/trocável.
+-- Some com ele no login.
+local function limparPersonagemFantasma(player)
+	if not (_G.PlayerDataManager and _G.PlayerDataManager.getPlayerData) then
+		return
+	end
+
+	local dados = _G.PlayerDataManager.getPlayerData(player)
+	if not dados then
+		return
+	end
+
+	if not _G.PlayerDataManager.ownsCharacter(player, PERSONAGEM_FANTASMA_V5) then
+		return
+	end
+
+	-- Se estiver equipado, desequipa antes de sumir com ele
+	if dados.equippedCharacter == PERSONAGEM_FANTASMA_V5 then
+		dados.equippedCharacter = nil
+	end
+
+	local removido = _G.PlayerDataManager.removeCharacterByName(player, PERSONAGEM_FANTASMA_V5)
+	if removido then
+		_G.PlayerDataManager.savePlayerData(player)
+		print(
+			string.format(
+				"[DAILY V6] 🧹 Personagem fantasma '%s' removido de %s",
+				PERSONAGEM_FANTASMA_V5,
+				player.Name
+			)
+		)
 	end
 end
 
@@ -300,7 +423,7 @@ local function calculateRewards(reward, streak)
 	if isWeekend() then
 		coins = coins * 2
 		bounty = bounty * 2
-		print("[DAILY V5] 🎉 BÔNUS DE FINAL DE SEMANA APLICADO!")
+		print("[DAILY V6] 🎉 BÔNUS DE FINAL DE SEMANA APLICADO!")
 	end
 
 	return coins, bounty
@@ -323,7 +446,7 @@ claimDailyReward.OnServerInvoke = function(player)
 	if needsRecovery then
 		data.canRecoverDay = false
 		data.lastRecoveryUse = getDayTimestamp()
-		print(string.format("[DAILY V5] 🔄 Recuperação consumida automaticamente: %s", player.Name))
+		print(string.format("[DAILY V6] 🔄 Recuperação consumida automaticamente: %s", player.Name))
 	end
 
 	data.currentStreak = data.currentStreak + 1
@@ -345,15 +468,23 @@ claimDailyReward.OnServerInvoke = function(player)
 	-- Streak exibido ao jogador (antes do possível reset de ciclo)
 	local displayStreak = data.currentStreak
 
+	-- (V6) O bônus pode devolver moedas/bounty extra (dia 6 sem
+	-- personagem configurado) e o texto do que de fato aconteceu.
+	local bonusTexto = reward.bonus
+
 	-- Dar recompensas
 	if _G.PlayerDataManager then
+		-- Aplicar bônus se houver, ANTES de creditar, para o total
+		-- mostrado ao jogador já incluir o extra
+		if reward.bonus then
+			local moedasExtra, bountyExtra, texto = applyBonus(player, reward.bonus)
+			coins = coins + (moedasExtra or 0)
+			bounty = bounty + (bountyExtra or 0)
+			bonusTexto = texto or reward.bonus
+		end
+
 		_G.PlayerDataManager.updateCoins(player, coins)
 		_G.PlayerDataManager.updateBounty(player, bounty)
-
-		-- Aplicar bônus se houver
-		if reward.bonus then
-			applyBonus(player, reward.bonus)
-		end
 
 		_G.PlayerDataManager.savePlayerData(player)
 	end
@@ -362,7 +493,7 @@ claimDailyReward.OnServerInvoke = function(player)
 	-- no V4 o save vinha antes do reset e podia persistir streak=6
 	if data.currentStreak >= 6 then
 		data.currentStreak = 0
-		print(string.format("[DAILY V5] 🎊 %s completou o ciclo de 6 dias!", player.Name))
+		print(string.format("[DAILY V6] 🎊 %s completou o ciclo de 6 dias!", player.Name))
 	end
 
 	-- Salvar dados de daily (já com o estado final correto)
@@ -370,7 +501,7 @@ claimDailyReward.OnServerInvoke = function(player)
 
 	print(
 		string.format(
-			"[DAILY V5] ✅ %s coletou Dia %d: %d moedas + %d bounty",
+			"[DAILY V6] ✅ %s coletou Dia %d: %d moedas + %d bounty",
 			player.Name,
 			rewardDay,
 			coins,
@@ -392,7 +523,7 @@ claimDailyReward.OnServerInvoke = function(player)
 	{
 		coins = coins,
 		bounty = bounty,
-		bonus = reward.bonus,
+		bonus = bonusTexto,
 		streak = displayStreak,
 		nextDay = rewardDay < 6 and rewardDay + 1 or 1,
 		isWeekend = isWeekend(),
@@ -491,7 +622,7 @@ recoverLostDay.OnServerInvoke = function(player)
 
 	saveDailyData(player)
 
-	print(string.format("[DAILY V5] 🔄 %s recuperou um dia perdido", player.Name))
+	print(string.format("[DAILY V6] 🔄 %s recuperou um dia perdido", player.Name))
 
 	return true, "Dia recuperado com sucesso!"
 end
@@ -503,6 +634,17 @@ end
 Players.PlayerAdded:Connect(function(player)
 	loadDailyData(player)
 
+	-- (V6) Some com o "Daily Champion" que o V5 deixou preso no
+	-- inventário. Espera os dados do jogador carregarem primeiro.
+	task.spawn(function()
+		local espera = 0
+		while not _G.PlayerDataManager.getPlayerData(player) and espera < 15 do
+			task.wait(0.5)
+			espera = espera + 0.5
+		end
+		limparPersonagemFantasma(player)
+	end)
+
 	-- Inicializar progresso de missões
 	playerMissionProgress[player] = {}
 	for _, mission in ipairs(dailyMissions) do
@@ -510,22 +652,13 @@ Players.PlayerAdded:Connect(function(player)
 	end
 
 	-- Verificar bônus expirados
+	-- (V6) O ramo "TempCharacter" saiu junto com o personagem fantasma.
+	-- Só o multiplicador de moedas expira.
 	task.spawn(function()
 		while player.Parent do
 			local data = playerDailyData[player]
 			if data and data.bonusActive and data.bonusExpiry <= os.time() then
-				-- Remover bônus expirado
-				if data.bonusActive == "TempCharacter" then
-					if _G.PlayerDataManager then
-						local playerData = _G.PlayerDataManager.getPlayerData(player)
-						if playerData then
-							local index = table.find(playerData.ownedCharacters, "Daily Champion")
-							if index then
-								table.remove(playerData.ownedCharacters, index)
-							end
-						end
-					end
-				elseif data.bonusActive == "2xCoins" then
+				if data.bonusActive == "2xCoins" then
 					if _G.SetCoinMultiplier then
 						_G.SetCoinMultiplier(player, 1, 0)
 					end
@@ -535,7 +668,7 @@ Players.PlayerAdded:Connect(function(player)
 				data.bonusExpiry = 0
 				saveDailyData(player)
 
-				print(string.format("[DAILY V5] ⏰ Bônus expirado: %s", player.Name))
+				print(string.format("[DAILY V6] ⏰ Bônus expirado: %s", player.Name))
 			end
 			task.wait(60)
 		end
@@ -565,7 +698,7 @@ task.spawn(function()
 		end
 
 		if count > 0 then
-			print(string.format("[DAILY V5] 💾 Auto-save: %d jogadores", count))
+			print(string.format("[DAILY V6] 💾 Auto-save: %d jogadores", count))
 		end
 	end
 end)
@@ -575,7 +708,7 @@ end)
 -- =====================================
 
 game:BindToClose(function()
-	print("[DAILY V5] 🔒 Servidor fechando, salvando dados...")
+	print("[DAILY V6] 🔒 Servidor fechando, salvando dados...")
 
 	local players = Players:GetPlayers()
 	local saveThreads = {}
@@ -590,7 +723,7 @@ game:BindToClose(function()
 	end
 
 	task.wait(3)
-	print("[DAILY V5] ✓ Shutdown save completo")
+	print("[DAILY V6] ✓ Shutdown save completo")
 end)
 
 -- =====================================

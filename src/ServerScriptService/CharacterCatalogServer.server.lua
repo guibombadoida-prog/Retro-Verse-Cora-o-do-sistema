@@ -1,9 +1,37 @@
 -- ============================================
--- CHARACTER CATALOG SERVER V6 — GAMEPASS AUTOMÁTICO NO INVENTÁRIO
+-- CHARACTER CATALOG SERVER V7 — UM ID DE MODEL TRAZ VÁRIAS TOOLS
 -- Coloque em ServerScriptService
 -- Nome: "CharacterCatalogServer"
--- SUBSTITUI: CharacterCatalogServer V5
--- REMOVER:   CharacterCatalogServer V5
+-- SUBSTITUI: CharacterCatalogServer V6
+-- REMOVER:   CharacterCatalogServer V6
+-- ============================================
+-- (V7) MESMA CAPACIDADE DO AwakeningSystemServer_V4, AGORA PARA
+--      PERSONAGEM NORMAL
+--
+-- O V4 do Despertar passou a aceitar UM ID de Model com várias Tools
+-- dentro. Mas personagem normal continuava exigindo um ID por Tool,
+-- porque quem monta a pasta dele é ESTE script — e ele tinha o mesmo
+-- `if loaded:IsA("Tool")` que rejeitava Model. Resultado: o recurso
+-- parecia não funcionar, porque só valia para a forma despertada.
+--
+-- O que cada campo de ID aceita agora:
+--   • Tool sozinha ................. 1 Tool  (igual ao V6, nada muda)
+--   • Model com N Tools dentro ..... N Tools (o caso novo)
+--   • Model > Folder > Tools ....... funciona, a busca é recursiva
+--   • Várias Tools na raiz do asset  todas elas
+--
+-- Ordem: profundidade na ordem dos filhos. A ordem que você vê no
+-- Explorer do Studio é a ordem que vai para a hotbar.
+--
+-- 🐛 DE QUEBRA, O MESMO BUG DE PERDA SILENCIOSA DO DESPERTAR:
+--    O V6 fazia `container:GetChildren()[1]` ao carregar o asset, ou
+--    seja, ficava só com o PRIMEIRO objeto. Um asset com 7 Tools na
+--    raiz perdia 6 sem avisar nada.
+--
+-- ⚠️ O TETO DE 7 AGORA É SOBRE O TOTAL, não sobre a quantidade de IDs.
+--    O V6 contava IDs (`if i > MAX then break`), o que deixaria de
+--    proteger o limite: 7 IDs de Model com 7 Tools cada dariam 49.
+--    Ao estourar, as extras são ignoradas COM aviso no painel.
 -- DEPENDE DE: AdminRegistryServer_V1
 -- ============================================
 -- (V6) ALTERAÇÕES — DEFEITO CORRIGIDO:
@@ -173,14 +201,11 @@ local indexLoadOk = false
 -- HELPERS: InsertService (carregar Tools por ID)
 -- =====================================
 
-local function extractLoadedContent(container)
-	if not container then
-		return nil
-	end
-	local first = container:GetChildren()[1]
-	return first or container
-end
-
+-- (V7) Devolve o CONTAINER cru do LoadAsset, sem escolher filho.
+-- O V6 fazia `container:GetChildren()[1]`, o que jogava fora tudo que
+-- não fosse o primeiro objeto — se o asset tivesse 7 Tools na raiz,
+-- 6 desapareciam em silêncio. Quem decide o que aproveitar agora é o
+-- collectTools, que varre o container inteiro.
 local function loadAssetSafe(assetId)
 	assetId = tonumber(assetId)
 	if not assetId or assetId <= 0 then
@@ -193,13 +218,43 @@ local function loadAssetSafe(assetId)
 			return InsertService:LoadAsset(assetId)
 		end)
 		if ok and result then
-			return extractLoadedContent(result), nil
+			return result, nil
 		end
 		lastErr = result
 		task.wait(0.5)
 	end
 
 	return nil, "Falha ao carregar asset " .. tostring(assetId) .. ": " .. tostring(lastErr)
+end
+
+-- (V7) UM ID PODE TRAZER VÁRIAS TOOLS
+-- =====================================
+-- Mesma regra do AwakeningSystemServer_V4, agora para personagem
+-- NORMAL. Aceita qualquer formato de asset e devolve as Tools que
+-- existirem dentro:
+--   • Tool sozinha ................ 1 Tool   (como era no V6)
+--   • Model com N Tools dentro .... N Tools  (o caso novo)
+--   • Model > Folder > Tools ...... funciona, a busca é recursiva
+--   • N Tools na raiz do asset .... todas elas
+--
+-- A ordem é a de profundidade na ordem dos filhos: a ordem que você vê
+-- no Explorer do Studio é a ordem que vai para a hotbar. Sem sort, de
+-- propósito — reordenar aqui faria a hotbar não bater com o modelo.
+local function collectTools(container)
+	if not container then
+		return {}
+	end
+	if container:IsA("Tool") then
+		return { container }
+	end
+
+	local encontradas = {}
+	for _, descendente in ipairs(container:GetDescendants()) do
+		if descendente:IsA("Tool") then
+			table.insert(encontradas, descendente)
+		end
+	end
+	return encontradas
 end
 
 local function enforceToolRules(tool)
@@ -211,7 +266,7 @@ local function enforceToolRules(tool)
 	if not tool:FindFirstChild("Handle") then
 		warn(
 			string.format(
-				"[CATALOG V6] ⚠️ Tool '%s' carregada SEM Handle — não vai funcionar até corrigir o modelo de origem.",
+				"[CATALOG V7] ⚠️ Tool '%s' carregada SEM Handle — não vai funcionar até corrigir o modelo de origem.",
 				tool.Name
 			)
 		)
@@ -242,22 +297,82 @@ local function buildCharacterAssets(def)
 
 	local warnings = {}
 
-	for i, toolId in ipairs(def.toolIds or {}) do
-		if i > CONFIG.MAX_TOOLS_PER_CHARACTER then
-			break
-		end
-		local loaded, err = loadAssetSafe(toolId)
-		if loaded and loaded:IsA("Tool") then
-			enforceToolRules(loaded)
-			loaded.Parent = folder
-		elseif loaded then
+	-- (V7) O teto agora é sobre o TOTAL de Tools instaladas, não sobre a
+	-- quantidade de IDs. Um único ID de Model pode trazer as 7 de uma vez,
+	-- então contar IDs (como o V6 fazia) deixaria de proteger o limite.
+	local totalTools = 0
+
+	for _, toolId in ipairs(def.toolIds or {}) do
+		if totalTools >= CONFIG.MAX_TOOLS_PER_CHARACTER then
 			table.insert(
 				warnings,
-				string.format("Tool ID %s não é um Tool válido (era %s)", tostring(toolId), loaded.ClassName)
+				string.format(
+					"Teto de %d Tools atingido — ID %s e os seguintes foram ignorados",
+					CONFIG.MAX_TOOLS_PER_CHARACTER,
+					tostring(toolId)
+				)
 			)
-		else
-			table.insert(warnings, "Tool " .. tostring(toolId) .. ": " .. tostring(err))
+			break
 		end
+
+		local loaded, err = loadAssetSafe(toolId)
+		if not loaded then
+			table.insert(warnings, "Tool " .. tostring(toolId) .. ": " .. tostring(err))
+			continue
+		end
+
+		local tools = collectTools(loaded)
+
+		if #tools == 0 then
+			table.insert(
+				warnings,
+				string.format(
+					"ID %s não tem nenhuma Tool dentro (era %s) — suba uma Tool, ou um Model com Tools dentro",
+					tostring(toolId),
+					loaded.ClassName
+				)
+			)
+			continue
+		end
+
+		local espaco = CONFIG.MAX_TOOLS_PER_CHARACTER - totalTools
+		if #tools > espaco then
+			table.insert(
+				warnings,
+				string.format(
+					"ID %s traz %d Tools, mas só cabiam %d (teto de %d no total) — as extras foram ignoradas",
+					tostring(toolId),
+					#tools,
+					espaco,
+					CONFIG.MAX_TOOLS_PER_CHARACTER
+				)
+			)
+		end
+
+		for i = 1, math.min(#tools, espaco) do
+			local tool = tools[i]
+			enforceToolRules(tool)
+			-- Reparentar tira a Tool de dentro do Model; o GameManager_V9
+			-- só olha os filhos DIRETOS da pasta do personagem, então elas
+			-- têm que subir um nível aqui.
+			tool.Parent = folder
+			totalTools += 1
+		end
+
+		if #tools > 1 then
+			print(
+				string.format(
+					"[CATALOG V7] ID %s rendeu %d Tools para '%s' (Model com várias)",
+					tostring(toolId),
+					math.min(#tools, espaco),
+					def.name
+				)
+			)
+		end
+	end
+
+	if totalTools == 0 and #(def.toolIds or {}) > 0 then
+		table.insert(warnings, "Nenhuma Tool foi instalada — confira os IDs")
 	end
 
 	if def.imageId and def.imageId > 0 then
@@ -398,7 +513,9 @@ local function validatePayload(payload)
 		return false, "Raridade inválida!"
 	end
 	if payload.toolIds and #payload.toolIds > CONFIG.MAX_TOOLS_PER_CHARACTER then
-		return false, "Máximo de " .. CONFIG.MAX_TOOLS_PER_CHARACTER .. " Tools por personagem!"
+		return false, "Máximo de "
+			.. CONFIG.MAX_TOOLS_PER_CHARACTER
+			.. " IDs de Tool! (dica: 1 ID de Model com Tools dentro conta todas de uma vez)"
 	end
 	if payload.category == "Gamepass" and (not payload.gamepassId or payload.gamepassId <= 0) then
 		return false, "Categoria Gamepass exige um Gamepass ID válido!"
@@ -474,7 +591,7 @@ local function grantGamepassCharactersToPlayer(player)
 				string.format("🎟️ Personagem '%s' liberado no seu inventário (Gamepass)!", charName),
 				true
 			)
-			print(string.format("[CATALOG V6] Gamepass: '%s' concedido a %s", charName, player.Name))
+			print(string.format("[CATALOG V7] Gamepass: '%s' concedido a %s", charName, player.Name))
 		end
 	end
 end
@@ -507,7 +624,7 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gameP
 					)
 					print(
 						string.format(
-							"[CATALOG V6] Compra em jogo: '%s' concedido a %s (gamepass %d)",
+							"[CATALOG V7] Compra em jogo: '%s' concedido a %s (gamepass %d)",
 							charName,
 							player.Name,
 							gamePassId
@@ -589,7 +706,7 @@ local function cleanupRemovedFromPlayer(player, characterName)
 
 	print(
 		string.format(
-			"[CATALOG V6] Limpeza de '%s' em %s | devolvido: %d | equipado: %s",
+			"[CATALOG V7] Limpeza de '%s' em %s | devolvido: %d | equipado: %s",
 			characterName,
 			player.Name,
 			refund,
@@ -650,7 +767,7 @@ local function applyRemoteChange(action, name, adminName, isUpdate)
 				grantGamepassesToAll()
 			end
 			if #warnings > 0 then
-				warn("[CATALOG V6] Avisos ao sincronizar '" .. name .. "': " .. table.concat(warnings, " | "))
+				warn("[CATALOG V7] Avisos ao sincronizar '" .. name .. "': " .. table.concat(warnings, " | "))
 			end
 		end
 	elseif action == "remove" then
@@ -726,7 +843,7 @@ adminCatalogAdd.OnServerInvoke = function(player, payload)
 
 	print(
 		string.format(
-			"[CATALOG V6] %s %s '%s' (%s)",
+			"[CATALOG V7] %s %s '%s' (%s)",
 			player.Name,
 			isUpdate and "atualizou" or "adicionou",
 			def.name,
@@ -766,7 +883,7 @@ adminCatalogRemove.OnServerInvoke = function(player, characterName)
 	-- (os outros servidores fazem o mesmo ao receber o sync)
 	cleanupRemovedFromAllPlayers(characterName)
 
-	print(string.format("[CATALOG V6] %s removeu '%s'", player.Name, characterName))
+	print(string.format("[CATALOG V7] %s removeu '%s'", player.Name, characterName))
 	return true, "Personagem removido em todos os servidores!"
 end
 
@@ -856,7 +973,7 @@ local function onPlayerAdded(player)
 				if #toRemove > 0 then
 					print(
 						string.format(
-							"[CATALOG V6] Prune de login em %s: %d personagem(ns) removido(s)",
+							"[CATALOG V7] Prune de login em %s: %d personagem(ns) removido(s)",
 							player.Name,
 							#toRemove
 						)
@@ -877,7 +994,7 @@ end
 -- =====================================
 
 local function bootLoadCatalog()
-	print("[CATALOG V6] Carregando catálogo salvo...")
+	print("[CATALOG V7] Carregando catálogo salvo...")
 	local index, okIndex = loadIndex()
 	indexLoadOk = okIndex
 	local loaded = 0
@@ -889,7 +1006,7 @@ local function bootLoadCatalog()
 			applyDefinitionToConfig(def)
 			loaded += 1
 			if #warnings > 0 then
-				warn("[CATALOG V6] Avisos ao carregar '" .. name .. "': " .. table.concat(warnings, " | "))
+				warn("[CATALOG V7] Avisos ao carregar '" .. name .. "': " .. table.concat(warnings, " | "))
 			end
 		end
 	end
@@ -903,13 +1020,13 @@ local function bootLoadCatalog()
 
 	print(
 		string.format(
-			"[CATALOG V6] ✓ %d personagem(ns) carregado(s) | índice ok: %s",
+			"[CATALOG V7] ✓ %d personagem(ns) carregado(s) | índice ok: %s",
 			loaded,
 			tostring(indexLoadOk)
 		)
 	)
 	if not indexLoadOk then
-		warn("[CATALOG V6] ⚠️ Índice do catálogo falhou ao carregar — prune de login DESATIVADO nesta sessão.")
+		warn("[CATALOG V7] ⚠️ Índice do catálogo falhou ao carregar — prune de login DESATIVADO nesta sessão.")
 	end
 end
 
@@ -937,7 +1054,7 @@ _G.CharacterCatalog = {
 }
 
 _G.DebugCatalog = function()
-	print("\n========== DEBUG CATALOG V6 ==========")
+	print("\n========== DEBUG CATALOG V7 ==========")
 	for name, def in pairs(GCC.catalogByName) do
 		print(
 			string.format(
@@ -955,10 +1072,14 @@ end
 
 print([[
 ╔════════════════════════════════════════════════════╗
-║  ✅ CHARACTER CATALOG SERVER V6 CARREGADO          ║
+║  ✅ CHARACTER CATALOG SERVER V7 CARREGADO          ║
 ╠════════════════════════════════════════════════════╣
-║  SUBSTITUI: CharacterCatalogServer V5               ║
+║  SUBSTITUI: CharacterCatalogServer V6               ║
+║  REMOVER:   CharacterCatalogServer V6               ║
 ║  DEPENDE DE: AdminRegistryServer_V1                 ║
+╠════════════════════════════════════════════════════╣
+║  (V7) 1 ID de Model pode trazer as 7 Tools          ║
+║  (V7) Teto de 7 agora é sobre o TOTAL de Tools      ║
 ╠════════════════════════════════════════════════════╣
 ║  (V6) GAMEPASS AUTOMÁTICO:                          ║
 ║  • Login: concede após o catálogo carregar          ║

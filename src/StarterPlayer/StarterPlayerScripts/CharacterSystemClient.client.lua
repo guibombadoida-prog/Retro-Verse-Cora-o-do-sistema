@@ -1,9 +1,87 @@
 -- ============================================
--- CHARACTER SYSTEM CLIENT V7 — MOSTRA OS ATRIBUTOS
+-- CHARACTER SYSTEM CLIENT V10 — CARD DO DESPERTAR COMPLETO
+-- ============================================
+-- (V10) O botão VOLTOU, abrindo informação em vez de equipar.
+-- O V9 tirou o botão inteiro e deixou só um rótulo com o nome — longe
+-- demais: sumiam a imagem, a história e as habilidades da forma. Agora
+-- "VER DESPERTAR" abre um painel com imagem, nome, história, HP e a
+-- lista de Tools despertas (lidas do que está REALMENTE carregado em
+-- ReplicatedStorage, não do que o catálogo diz que deveria estar).
+-- Equipar continua não existindo: a forma é conquistada em combate.
+-- ============================================
+-- (V9) O card do Despertar não tem mais botão.
+--
+-- Até o V8 o card trazia "🔓 DESBLOQUEAR DESPERTAR", que gravava o
+-- Despertar no save e fazia o personagem nascer desperto para sempre.
+--
+-- Agora o Despertar é uma FORMA TEMPORÁRIA do personagem normal: já vem
+-- junto com ele, e quem dispara é a barra do AwakeningMeterServer, que
+-- enche batendo e apanhando no combate. O card virou o que o desenho
+-- pede — imagem, nome e o que falta para liberar. Nada de equipar.
+-- ============================================
+-- (V8) DESPERTAR VISÍVEL E DESBLOQUEÁVEL (histórico)
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "CharacterSystemClient"
--- SUBSTITUI: CharacterSystemClient V6
--- REMOVER:   CharacterSystemClient V6
+-- SUBSTITUI: CharacterSystemClient V7
+-- REMOVER:   CharacterSystemClient V7
+-- ============================================
+-- (V8) DOIS DEFEITOS DO DESPERTAR NO CARD
+--
+-- 🐛 O BOTÃO NÃO DAVA PARA VER.
+--    Ficava em y=0.915 com altura 0.07 — os últimos 15px de um card de
+--    220px, POR CIMA da borda de 3px do próprio card. A linha de botões
+--    do card termina em 0.85, então havia espaço livre logo abaixo que
+--    ninguém estava usando.
+--    ✅ Agora tem faixa própria: y=0.865, altura 0.09, largura cheia.
+--
+-- 🐛 O BOTÃO NÃO "EQUIPAVA" — porque nunca foi equipar.
+--    O remote EquipAwakening chama `addAwakenedCharacter` no servidor,
+--    que só DESBLOQUEIA (grava em data.awakenedCharacters). Quem equipa
+--    é o SelectCharacter normal: uma vez desbloqueado, equipar o
+--    ORIGINAL já entrega a forma desperta (GameManager_V9,
+--    `usingAwakened`). Não existe "equipar desperto" separado.
+--    O V7 disparava o remote e anunciava "Despertar equipado!" sem
+--    atualizar nada na tela — parecia que o clique não fazia efeito.
+--    ✅ O botão agora se chama DESBLOQUEAR, e depois do clique o
+--       inventário recarrega para o card da forma desperta aparecer.
+--
+-- ✅ CARD SEPARADO DA FORMA DESPERTA NO INVENTÁRIO (novo)
+--    O Despertar não vive em ownedCharacters — o servidor guarda numa
+--    lista à parte. Por isso ele nunca aparecia no inventário, que só
+--    lê ownedCharacters. Agora cada desbloqueio ganha o card dele, com
+--    o displayName do Despertar e raridade AWAKENED. O card equipa pelo
+--    nome do original, porque é assim que o servidor funciona.
+--    Não tem botão de vender: Despertar não é item, é desbloqueio
+--    permanente em cima do original.
+--
+-- ✅ ESTADOS EXPLÍCITOS no lugar de "VER" / "INFO", que não diziam nada:
+--       ⚡ DESPERTO ................. já desbloqueado
+--       🔓 DESBLOQUEAR DESPERTAR .... tem o original + o emblema
+--       🔒 FALTA O EMBLEMA .......... tem o original, falta o requisito
+--       🔒 PRECISA DO ORIGINAL ...... não tem o personagem base
+--    O pulso de destaque agora só acontece quando há ação a tomar.
+-- ============================================
+-- (V8) POPUP DE HABILIDADES MOSTRA AS FERRAMENTAS
+--
+-- Os ATRIBUTOS do popup só existem para admin (vêm do
+-- CharacterStatsServer). Para o público, o popup só tinha HP e
+-- descrição — não dizia o que o personagem faz.
+--
+-- ✅ Nova seção "🛠️ FERRAMENTAS CARREGADAS (n)", que aparece SEMPRE,
+--    inclusive quando não há atributos:
+--      ⚔️ Tools normais, em ordem
+--      ⚡ Tools da forma desperta, em magenta e marcadas "(desperta)"
+--
+--    A leitura é DIRETA de ReplicatedStorage.Characters[nome] e
+--    .AwakenedForm, que já são replicados ao cliente — nenhum remote
+--    novo. E é de propósito: mostra o que está REALMENTE carregado, não
+--    o que o catálogo diz que deveria estar. Se um Model ID falhou, a
+--    Tool não aparece na lista, e essa é justamente a informação útil
+--    para diagnosticar.
+--
+-- ✅ Título "📊 ATRIBUTOS" separando as duas listas, que antes viravam
+--    um bloco só. E o popup ficou mais alto (0.78 desktop / 0.88 mobile)
+--    para as quatro seções caberem sem apertar nenhuma.
 -- ============================================
 -- (V7) ALTERAÇÕES — EDIÇÃO CIRÚRGICA, DE PROPÓSITO:
 -- Só UMA função mudou: `createAbilitiesPopup`. Todo o resto do
@@ -99,7 +177,9 @@ local selectCharacterRemote = remotes:WaitForChild("SelectCharacter")
 local purchaseCharacterRemote = remotes:WaitForChild("PurchaseCharacter")
 local getPlayerDataRemote = remotes:WaitForChild("GetPlayerData")
 local checkAwakeningRemote = remotes:WaitForChild("CheckAwakening", 10)
-local equipAwakeningRemote = remotes:WaitForChild("EquipAwakening", 10)
+-- (V9) EquipAwakening não é mais usado: o Despertar deixou de ser algo
+-- que se desbloqueia e se equipa. Mantido só como referência histórica.
+-- local equipAwakeningRemote = remotes:WaitForChild("EquipAwakening", 10)
 local syncCharacterStateRemote = remotes:WaitForChild("SyncCharacterState", 10)
 local sellCharacterRemote = remotes:WaitForChild("SellCharacter", 10)
 
@@ -748,6 +828,41 @@ end
 -- tabela fixa local
 -- =====================================
 
+-- (V8) DETECÇÃO DE TOOLS DO PERSONAGEM
+-- =====================================
+-- As Tools montadas pelo CharacterCatalogServer ficam em
+-- ReplicatedStorage.Characters[nome], e a forma desperta em
+-- .AwakenedForm. Isso é replicado ao cliente, então dá para listar sem
+-- remote nenhum — é leitura direta do que REALMENTE está carregado, não
+-- do que o catálogo diz que deveria estar. Se um ID falhou ao carregar,
+-- a Tool não aparece aqui, e é exatamente essa a informação útil.
+local function collectCharacterTools(characterName)
+	local normais, despertas = {}, {}
+
+	local pasta = ReplicatedStorage:FindFirstChild("Characters")
+	pasta = pasta and pasta:FindFirstChild(characterName)
+	if not pasta then
+		return normais, despertas
+	end
+
+	for _, item in ipairs(pasta:GetChildren()) do
+		if item:IsA("Tool") then
+			table.insert(normais, item.Name)
+		end
+	end
+
+	local formaDesperta = pasta:FindFirstChild("AwakenedForm")
+	if formaDesperta then
+		for _, item in ipairs(formaDesperta:GetChildren()) do
+			if item:IsA("Tool") then
+				table.insert(despertas, item.Name)
+			end
+		end
+	end
+
+	return normais, despertas
+end
+
 local function createAbilitiesPopup(characterName)
 	playSound(sounds.info)
 	local def = getCatalogDef(characterName)
@@ -767,7 +882,9 @@ local function createAbilitiesPopup(characterName)
 	background.Parent = infoGui
 
 	local popup = Instance.new("Frame")
-	popup.Size = isMobile and UDim2.new(0.9, 0, 0.7, 0) or UDim2.new(0.5, 0, 0.6, 0)
+	-- (V8) Mais alto que o V7: agora cabe HP + FERRAMENTAS + atributos +
+	-- descrição sem apertar nenhuma seção.
+	popup.Size = isMobile and UDim2.new(0.92, 0, 0.88, 0) or UDim2.new(0.55, 0, 0.78, 0)
 	popup.Position = UDim2.new(0.5, 0, 0.5, 0)
 	popup.AnchorPoint = Vector2.new(0.5, 0.5)
 	popup.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
@@ -776,7 +893,7 @@ local function createAbilitiesPopup(characterName)
 	popup.Parent = infoGui
 
 	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1, 0, 0.15, 0)
+	header.Size = UDim2.new(1, 0, 0.12, 0)
 	header.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
 	header.BorderSizePixel = 0
 	header.Parent = popup
@@ -784,7 +901,7 @@ local function createAbilitiesPopup(characterName)
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Size = UDim2.new(0.85, 0, 1, 0)
 	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "⚔️ " .. characterName:upper() .. " - HABILIDADES"
+	titleLabel.Text = "⚔️ " .. characterName:upper() .. " — HABILIDADES"
 	titleLabel.TextColor3 = Color3.new(1, 1, 1)
 	titleLabel.TextScaled = true
 	titleLabel.Font = Enum.Font.Arcade
@@ -828,8 +945,8 @@ local function createAbilitiesPopup(characterName)
 	end
 
 	local statsLabel = Instance.new("TextLabel")
-	statsLabel.Size = UDim2.new(0.96, 0, 0.12, 0)
-	statsLabel.Position = UDim2.new(0.02, 0, 0.17, 0)
+	statsLabel.Size = UDim2.new(0.96, 0, 0.10, 0)
+	statsLabel.Position = UDim2.new(0.02, 0, 0.14, 0)
 	statsLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 	statsLabel.BorderSizePixel = 0
 	statsLabel.Text = healthText .. archetypeText
@@ -906,16 +1023,93 @@ local function createAbilitiesPopup(characterName)
 		end)
 	end
 
+	-- =====================================
+	-- (V8) FERRAMENTAS CARREGADAS NO PERSONAGEM
+	-- =====================================
+	-- Os ATRIBUTOS só existem para quem é admin (vêm do
+	-- CharacterStatsServer). As Tools, não: elas são o que o público
+	-- precisa ver para saber o que o personagem faz. Por isso esta seção
+	-- aparece SEMPRE, inclusive quando statsInfo é nil.
+	local toolsNormais, toolsDespertas = collectCharacterTools(characterName)
+	local totalTools = #toolsNormais + #toolsDespertas
+
+	local toolsTitle = Instance.new("TextLabel")
+	toolsTitle.Size = UDim2.new(0.96, 0, 0.055, 0)
+	toolsTitle.Position = UDim2.new(0.02, 0, 0.30, 0)
+	toolsTitle.BackgroundTransparency = 1
+	toolsTitle.Text = string.format("🛠️ FERRAMENTAS CARREGADAS (%d)", totalTools)
+	toolsTitle.TextColor3 = Color3.fromRGB(0, 220, 255)
+	toolsTitle.TextScaled = true
+	toolsTitle.Font = Enum.Font.Arcade
+	toolsTitle.TextXAlignment = Enum.TextXAlignment.Left
+	toolsTitle.Parent = popup
+
+	local toolsFrame = Instance.new("ScrollingFrame")
+	toolsFrame.Size = UDim2.new(0.96, 0, 0.20, 0)
+	toolsFrame.Position = UDim2.new(0.02, 0, 0.36, 0)
+	toolsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	toolsFrame.BorderSizePixel = 0
+	toolsFrame.ScrollBarThickness = 5
+	toolsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+	toolsFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	toolsFrame.Parent = popup
+
+	local toolsLayout = Instance.new("UIListLayout")
+	toolsLayout.Padding = UDim.new(0.02, 0)
+	toolsLayout.Parent = toolsFrame
+
+	local function linhaTool(texto, cor, ordem)
+		local entry = Instance.new("TextLabel")
+		entry.Size = UDim2.new(0.96, 0, 0.3, 0)
+		entry.BackgroundTransparency = 1
+		entry.Text = texto
+		entry.TextColor3 = cor
+		entry.TextScaled = true
+		entry.Font = Enum.Font.Code
+		entry.TextXAlignment = Enum.TextXAlignment.Left
+		entry.LayoutOrder = ordem
+		entry.Parent = toolsFrame
+	end
+
+	local ordemTool = 0
+	for _, nome in ipairs(toolsNormais) do
+		ordemTool = ordemTool + 1
+		linhaTool(ordemTool .. ". ⚔️ " .. nome, Color3.fromRGB(220, 220, 220), ordemTool)
+	end
+	for _, nome in ipairs(toolsDespertas) do
+		ordemTool = ordemTool + 1
+		-- Magenta é a cor de AWAKENED no resto da tela; mantém a leitura
+		linhaTool(ordemTool .. ". ⚡ " .. nome .. "  (desperta)", Color3.fromRGB(255, 100, 255), ordemTool)
+	end
+
+	if totalTools == 0 then
+		linhaTool("Nenhuma ferramenta carregada neste personagem.", Color3.fromRGB(150, 150, 150), 1)
+	end
+
 	-- Com atributos, a descrição divide espaço com eles.
-	-- Sem atributos, a descrição ocupa tudo (idêntico ao V6).
+	-- Sem atributos, a descrição ocupa o que sobra abaixo das Tools.
 	local hasStats = #statLines > 0
-	local descHeight = hasStats and 0.30 or 0.65
-	local descY = hasStats and 0.66 or 0.31
+	local descHeight = hasStats and 0.16 or 0.38
+	local descY = hasStats and 0.81 or 0.58
 
 	if hasStats then
+		-- (V8) Título para separar visualmente o que é público (as Tools)
+		-- do que é de arquétipo/admin (os atributos). Sem ele as duas
+		-- listas viravam um bloco só e ninguém sabia o que estava lendo.
+		local attrTitle = Instance.new("TextLabel")
+		attrTitle.Size = UDim2.new(0.96, 0, 0.05, 0)
+		attrTitle.Position = UDim2.new(0.02, 0, 0.575, 0)
+		attrTitle.BackgroundTransparency = 1
+		attrTitle.Text = "📊 ATRIBUTOS"
+		attrTitle.TextColor3 = Color3.fromRGB(255, 255, 0)
+		attrTitle.TextScaled = true
+		attrTitle.Font = Enum.Font.Arcade
+		attrTitle.TextXAlignment = Enum.TextXAlignment.Left
+		attrTitle.Parent = popup
+
 		local statsFrame = Instance.new("ScrollingFrame")
-		statsFrame.Size = UDim2.new(0.96, 0, 0.32, 0)
-		statsFrame.Position = UDim2.new(0.02, 0, 0.31, 0)
+		statsFrame.Size = UDim2.new(0.96, 0, 0.17, 0)
+		statsFrame.Position = UDim2.new(0.02, 0, 0.625, 0)
 		statsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 		statsFrame.BorderSizePixel = 0
 		statsFrame.ScrollBarThickness = 5
@@ -962,6 +1156,242 @@ local function createAbilitiesPopup(characterName)
 	descLabel.Font = Enum.Font.Code
 	descLabel.TextYAlignment = Enum.TextYAlignment.Top
 	descLabel.Parent = descFrame
+
+	closeButton.MouseButton1Click:Connect(function()
+		playSound(sounds.close)
+		infoGui.Parent = nil
+	end)
+	background.InputBegan:Connect(function(input)
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			infoGui.Parent = nil
+		end
+	end)
+end
+
+-- =====================================
+-- (V10) POPUP DO DESPERTAR
+-- =====================================
+-- Imagem, nome, história e as Tools da forma desperta — o que o card
+-- do personagem original abre ao clicar em VER DESPERTAR.
+--
+-- Não tem botão de equipar de propósito: o Despertar é conquistado em
+-- combate pela barra, não escolhido no menu. O que este painel faz é
+-- mostrar o que existe e o que falta para liberar.
+local function createAwakeningPopup(characterName, info)
+	playSound(sounds.info)
+
+	local aw = (info and info.awakening) or {}
+	local nomeDesperto = aw.displayName or (characterName .. " (Despertado)")
+	local _, toolsDespertas = collectCharacterTools(characterName)
+
+	local infoGui = Instance.new("ScreenGui")
+	infoGui.Name = "AwakeningPopup"
+	infoGui.DisplayOrder = 100
+	infoGui.ResetOnSpawn = false
+	infoGui.Parent = playerGui
+
+	local background = Instance.new("Frame")
+	background.Size = UDim2.new(1, 0, 1, 0)
+	background.BackgroundColor3 = Color3.new(0, 0, 0)
+	background.BackgroundTransparency = 0.5
+	background.Parent = infoGui
+
+	local popup = Instance.new("Frame")
+	popup.Size = isMobile and UDim2.new(0.92, 0, 0.88, 0) or UDim2.new(0.55, 0, 0.8, 0)
+	popup.Position = UDim2.new(0.5, 0, 0.5, 0)
+	popup.AnchorPoint = Vector2.new(0.5, 0.5)
+	popup.BackgroundColor3 = Color3.fromRGB(18, 12, 26)
+	popup.BorderColor3 = Color3.fromRGB(255, 0, 255)
+	popup.BorderSizePixel = 4
+	popup.Parent = infoGui
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, 0, 0.11, 0)
+	header.BackgroundColor3 = Color3.fromRGB(90, 0, 130)
+	header.BorderSizePixel = 0
+	header.Parent = popup
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(0.85, 0, 1, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = "⚡ " .. nomeDesperto:upper()
+	titleLabel.TextColor3 = Color3.fromRGB(255, 150, 255)
+	titleLabel.TextScaled = true
+	titleLabel.Font = Enum.Font.Arcade
+	titleLabel.Parent = header
+
+	local closeButton = Instance.new("TextButton")
+	closeButton.Size = UDim2.new(0.1, 0, 0.8, 0)
+	closeButton.Position = UDim2.new(0.88, 0, 0.1, 0)
+	closeButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+	closeButton.BorderColor3 = Color3.new(1, 1, 1)
+	closeButton.BorderSizePixel = 2
+	closeButton.Text = "X"
+	closeButton.TextColor3 = Color3.new(1, 1, 1)
+	closeButton.TextScaled = true
+	closeButton.Font = Enum.Font.Arcade
+	closeButton.Parent = header
+
+	-- IMAGEM
+	local imgFrame = Instance.new("Frame")
+	imgFrame.Size = UDim2.new(0.34, 0, 0.3, 0)
+	imgFrame.Position = UDim2.new(0.04, 0, 0.14, 0)
+	imgFrame.BackgroundColor3 = Color3.fromRGB(30, 20, 40)
+	imgFrame.BorderColor3 = Color3.fromRGB(255, 0, 255)
+	imgFrame.BorderSizePixel = 2
+	imgFrame.Parent = popup
+
+	local imageId = tonumber(aw.imageId) or 0
+	if imageId > 0 then
+		local img = Instance.new("ImageLabel")
+		img.Size = UDim2.new(1, 0, 1, 0)
+		img.BackgroundTransparency = 1
+		img.Image = "rbxassetid://" .. tostring(imageId)
+		img.ScaleType = Enum.ScaleType.Fit
+		img.Parent = imgFrame
+	else
+		local semImg = Instance.new("TextLabel")
+		semImg.Size = UDim2.new(1, 0, 1, 0)
+		semImg.BackgroundTransparency = 1
+		semImg.Text = "SEM\nIMAGEM"
+		semImg.TextColor3 = Color3.fromRGB(120, 100, 140)
+		semImg.TextScaled = true
+		semImg.Font = Enum.Font.Arcade
+		semImg.Parent = imgFrame
+	end
+
+	-- ESTADO + HP, ao lado da imagem
+	local estadoLabel = Instance.new("TextLabel")
+	estadoLabel.Size = UDim2.new(0.56, 0, 0.1, 0)
+	estadoLabel.Position = UDim2.new(0.4, 0, 0.15, 0)
+	estadoLabel.BackgroundTransparency = 1
+	estadoLabel.TextScaled = true
+	estadoLabel.TextWrapped = true
+	estadoLabel.Font = Enum.Font.Arcade
+	estadoLabel.TextXAlignment = Enum.TextXAlignment.Left
+	estadoLabel.Parent = popup
+
+	if info and info.liberado then
+		estadoLabel.Text = "✅ LIBERADO"
+		estadoLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+	elseif info and not info.hasOriginal then
+		estadoLabel.Text = "🔒 PRECISA DO ORIGINAL"
+		estadoLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+	else
+		estadoLabel.Text = "🔒 FALTA O EMBLEMA"
+		estadoLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+	end
+
+	local hpLabel = Instance.new("TextLabel")
+	hpLabel.Size = UDim2.new(0.56, 0, 0.07, 0)
+	hpLabel.Position = UDim2.new(0.4, 0, 0.26, 0)
+	hpLabel.BackgroundTransparency = 1
+	hpLabel.Text = "❤️ HP: " .. tostring(aw.health or "—")
+	hpLabel.TextColor3 = Color3.new(1, 1, 1)
+	hpLabel.TextScaled = true
+	hpLabel.Font = Enum.Font.Code
+	hpLabel.TextXAlignment = Enum.TextXAlignment.Left
+	hpLabel.Parent = popup
+
+	local comoLabel = Instance.new("TextLabel")
+	comoLabel.Size = UDim2.new(0.56, 0, 0.1, 0)
+	comoLabel.Position = UDim2.new(0.4, 0, 0.34, 0)
+	comoLabel.BackgroundTransparency = 1
+	comoLabel.Text = aw.duracao
+			and string.format("Enche em combate • dura %ds", aw.duracao)
+		or "Enche em combate"
+	comoLabel.TextColor3 = Color3.fromRGB(180, 150, 220)
+	comoLabel.TextScaled = true
+	comoLabel.TextWrapped = true
+	comoLabel.Font = Enum.Font.Code
+	comoLabel.TextXAlignment = Enum.TextXAlignment.Left
+	comoLabel.Parent = popup
+
+	-- HABILIDADES (TOOLS)
+	local toolsTitulo = Instance.new("TextLabel")
+	toolsTitulo.Size = UDim2.new(0.92, 0, 0.06, 0)
+	toolsTitulo.Position = UDim2.new(0.04, 0, 0.47, 0)
+	toolsTitulo.BackgroundTransparency = 1
+	toolsTitulo.Text = string.format("⚔️ HABILIDADES DESPERTAS (%d)", #toolsDespertas)
+	toolsTitulo.TextColor3 = Color3.fromRGB(255, 210, 70)
+	toolsTitulo.TextScaled = true
+	toolsTitulo.Font = Enum.Font.Arcade
+	toolsTitulo.TextXAlignment = Enum.TextXAlignment.Left
+	toolsTitulo.Parent = popup
+
+	local toolsScroll = Instance.new("ScrollingFrame")
+	toolsScroll.Size = UDim2.new(0.92, 0, 0.2, 0)
+	toolsScroll.Position = UDim2.new(0.04, 0, 0.54, 0)
+	toolsScroll.BackgroundColor3 = Color3.fromRGB(28, 20, 38)
+	toolsScroll.BorderColor3 = Color3.fromRGB(120, 60, 160)
+	toolsScroll.BorderSizePixel = 2
+	toolsScroll.ScrollBarThickness = 6
+	toolsScroll.CanvasSize = UDim2.new(0, 0, 0, #toolsDespertas * 26 + 6)
+	toolsScroll.Parent = popup
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 3)
+	layout.Parent = toolsScroll
+
+	if #toolsDespertas == 0 then
+		local vazio = Instance.new("TextLabel")
+		vazio.Size = UDim2.new(1, -8, 0, 24)
+		vazio.BackgroundTransparency = 1
+		vazio.Text = "Nenhuma Tool carregada nesta forma."
+		vazio.TextColor3 = Color3.fromRGB(150, 130, 170)
+		vazio.TextScaled = true
+		vazio.Font = Enum.Font.Code
+		vazio.Parent = toolsScroll
+	else
+		for i, nome in ipairs(toolsDespertas) do
+			local linha = Instance.new("TextLabel")
+			linha.Size = UDim2.new(1, -8, 0, 23)
+			linha.BackgroundTransparency = 1
+			linha.Text = string.format("  %d. %s", i, nome)
+			linha.TextColor3 = Color3.fromRGB(230, 210, 255)
+			linha.TextScaled = true
+			linha.Font = Enum.Font.Code
+			linha.TextXAlignment = Enum.TextXAlignment.Left
+			linha.Parent = toolsScroll
+		end
+	end
+
+	-- HISTÓRIA
+	local historiaTitulo = Instance.new("TextLabel")
+	historiaTitulo.Size = UDim2.new(0.92, 0, 0.055, 0)
+	historiaTitulo.Position = UDim2.new(0.04, 0, 0.76, 0)
+	historiaTitulo.BackgroundTransparency = 1
+	historiaTitulo.Text = "📖 HISTÓRIA"
+	historiaTitulo.TextColor3 = Color3.fromRGB(0, 220, 255)
+	historiaTitulo.TextScaled = true
+	historiaTitulo.Font = Enum.Font.Arcade
+	historiaTitulo.TextXAlignment = Enum.TextXAlignment.Left
+	historiaTitulo.Parent = popup
+
+	local historiaFrame = Instance.new("Frame")
+	historiaFrame.Size = UDim2.new(0.92, 0, 0.15, 0)
+	historiaFrame.Position = UDim2.new(0.04, 0, 0.82, 0)
+	historiaFrame.BackgroundColor3 = Color3.fromRGB(28, 20, 38)
+	historiaFrame.BorderColor3 = Color3.fromRGB(60, 120, 160)
+	historiaFrame.BorderSizePixel = 2
+	historiaFrame.Parent = popup
+
+	local historiaLabel = Instance.new("TextLabel")
+	historiaLabel.Size = UDim2.new(0.96, 0, 0.9, 0)
+	historiaLabel.Position = UDim2.new(0.02, 0, 0.05, 0)
+	historiaLabel.BackgroundTransparency = 1
+	historiaLabel.Text = (aw.lore ~= nil and aw.lore ~= "" and aw.lore)
+		or (aw.description ~= nil and aw.description ~= "" and aw.description)
+		or "Sem história cadastrada para esta forma."
+	historiaLabel.TextColor3 = Color3.new(1, 1, 1)
+	historiaLabel.TextScaled = true
+	historiaLabel.TextWrapped = true
+	historiaLabel.Font = Enum.Font.Code
+	historiaLabel.TextYAlignment = Enum.TextYAlignment.Top
+	historiaLabel.Parent = historiaFrame
 
 	closeButton.MouseButton1Click:Connect(function()
 		playSound(sounds.close)
@@ -1059,8 +1489,30 @@ end
 -- (reutilizado — AwakeningSystemServer_V1)
 -- =====================================
 
+-- (V8) O BOTÃO É DE DESBLOQUEIO, NÃO DE EQUIPAR.
+--
+-- Dois defeitos do V7 corrigidos aqui:
+--
+-- 🐛 NÃO DAVA PARA VER. Ficava em y=0.915 com altura 0.07, ou seja nos
+--    últimos 15px de um card de 220px, POR CIMA da borda de 3px do card.
+--    Agora tem faixa própria (y=0.865, altura 0.09, largura cheia), que
+--    sobra abaixo da linha de botões do card (que termina em 0.85).
+--
+-- 🐛 NÃO DAVA PARA "EQUIPAR" porque nunca foi equipar. O remote
+--    EquipAwakening chama `addAwakenedCharacter` no servidor, que só
+--    DESBLOQUEIA (grava em data.awakenedCharacters). Quem equipa é o
+--    SelectCharacter normal: uma vez desbloqueado, equipar o original já
+--    entrega a forma desperta (GameManager_V9, `usingAwakened`).
+--    O V7 disparava o remote e dizia "Despertar equipado!" sem atualizar
+--    nada na tela — parecia que o clique não fazia efeito.
+--    Agora o texto diz DESBLOQUEAR, e depois do clique o inventário é
+--    recarregado para o card da forma desperta aparecer na hora.
 local function createAwakeningButton(charData, card)
 	if not checkAwakeningRemote then
+		return
+	end
+	-- O card da própria forma desperta não ganha este botão de novo
+	if charData.isAwakenedCard then
 		return
 	end
 
@@ -1071,62 +1523,66 @@ local function createAwakeningButton(charData, card)
 		return
 	end
 
+	-- (V10) O BOTÃO VOLTOU — mas ele ABRE INFORMAÇÃO, não equipa.
+	--
+	-- No V8 este botão desbloqueava o Despertar e o personagem passava a
+	-- nascer desperto para sempre. No V9 eu tirei o botão inteiro e
+	-- deixei só um rótulo com o nome, o que foi longe demais: some a
+	-- imagem, a história e as habilidades da forma.
+	--
+	-- Agora ele é um botão de VER: abre o painel com imagem, nome,
+	-- história e as Tools despertas. Equipar continua não existindo,
+	-- porque o Despertar é conquistado em combate pela barra.
+	local nomeDesperto = (awakeningInfo.awakening and awakeningInfo.awakening.displayName)
+		or (charData.name .. " (Despertado)")
+
 	local awakeningButton = Instance.new("TextButton")
-	awakeningButton.Size = UDim2.new(0.45, 0, 0.07, 0)
-	awakeningButton.Position = UDim2.new(0.05, 0, 0.915, 0)
-	awakeningButton.BackgroundColor3 = Color3.fromRGB(100, 0, 100)
+	awakeningButton.Name = "AwakeningButton"
+	awakeningButton.Size = UDim2.new(0.96, 0, 0.09, 0)
+	awakeningButton.Position = UDim2.new(0.02, 0, 0.865, 0)
 	awakeningButton.BorderColor3 = Color3.fromRGB(255, 0, 255)
 	awakeningButton.BorderSizePixel = 2
 	awakeningButton.TextScaled = true
 	awakeningButton.Font = Enum.Font.Arcade
 	awakeningButton.ZIndex = 10
+	awakeningButton.AutoButtonColor = true
 	awakeningButton.Parent = card
 
-	if awakeningInfo.hasAwakening then
-		if awakeningInfo.hasOriginal then
-			awakeningButton.Text = "⚡ DESPERTAR"
-			awakeningButton.TextColor3 = Color3.fromRGB(255, 255, 0)
-		else
-			awakeningButton.Text = "🔒 VER"
-			awakeningButton.TextColor3 = Color3.fromRGB(150, 150, 150)
-		end
+	if awakeningInfo.liberado then
+		awakeningButton.Text = "⚡ VER DESPERTAR"
+		awakeningButton.BackgroundColor3 = Color3.fromRGB(120, 0, 160)
+		awakeningButton.TextColor3 = Color3.fromRGB(255, 255, 0)
+	elseif not awakeningInfo.hasOriginal then
+		awakeningButton.Text = "🔒 VER DESPERTAR"
+		awakeningButton.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
+		awakeningButton.TextColor3 = Color3.fromRGB(190, 190, 190)
 	else
-		awakeningButton.Text = "❓ INFO"
-		awakeningButton.TextColor3 = Color3.fromRGB(100, 100, 100)
+		awakeningButton.Text = "🔒 VER DESPERTAR"
+		awakeningButton.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
+		awakeningButton.TextColor3 = Color3.fromRGB(190, 190, 190)
 	end
 
+	-- Clicar SEMPRE abre o painel, mesmo bloqueado: é assim que o jogador
+	-- descobre o que existe e o que precisa fazer para liberar.
 	awakeningButton.MouseButton1Click:Connect(function()
 		playSound(sounds.awakening)
-		if awakeningInfo.hasAwakening and awakeningInfo.hasOriginal and awakeningInfo.canEquip then
-			if equipAwakeningRemote then
-				equipAwakeningRemote:FireServer(charData.name)
-				notify("⚡ Despertar equipado!", true)
-			end
-		else
-			notify(
-				"⚡ "
-					.. (
-						awakeningInfo.awakening and awakeningInfo.awakening.displayName
-						or "Despertar"
-					),
-				true
-			)
-		end
+		createAwakeningPopup(charData.name, awakeningInfo)
 	end)
 
-	if awakeningInfo.hasAwakening and awakeningInfo.hasOriginal then
+	-- Pulsa quando está liberado, para o jogador notar que tem forma
+	if awakeningInfo.liberado then
 		task.spawn(function()
 			while awakeningButton.Parent do
 				TweenService:Create(
 					awakeningButton,
 					TweenInfo.new(1, Enum.EasingStyle.Sine),
-					{ BackgroundColor3 = Color3.fromRGB(150, 0, 150) }
+					{ BackgroundColor3 = Color3.fromRGB(190, 0, 240) }
 				):Play()
 				task.wait(1)
 				TweenService:Create(
 					awakeningButton,
 					TweenInfo.new(1, Enum.EasingStyle.Sine),
-					{ BackgroundColor3 = Color3.fromRGB(100, 0, 100) }
+					{ BackgroundColor3 = Color3.fromRGB(120, 0, 160) }
 				):Play()
 				task.wait(1)
 			end
@@ -1182,7 +1638,10 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Size = UDim2.new(1, 0, 1, 0)
 	nameLabel.BackgroundTransparency = 1
-	nameLabel.Text = charData.name:upper()
+	-- (V8) displayName permite que o card da forma DESPERTA mostre o nome
+	-- dela ("X (Despertado)") mesmo equipando pelo nome do original — que
+	-- é como o servidor funciona.
+	nameLabel.Text = (charData.displayName or charData.name):upper()
 	nameLabel.TextColor3 = Color3.new(1, 1, 1)
 	nameLabel.TextScaled = true
 	nameLabel.Font = Enum.Font.Arcade
@@ -1334,7 +1793,9 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	-- ========== BOTÃO VENDER ==========
 	-- Só aparece no inventário
 
-	if isInventoryMode and sellCharacterRemote then
+	-- (V8) Forma desperta não se vende: ela não é um item do inventário,
+	-- é um desbloqueio permanente em cima do original.
+	if isInventoryMode and sellCharacterRemote and not charData.isAwakenedCard then
 		local canSell, sellPrice, charId = canSellCharacter(charData.name)
 
 		local sellButton = Instance.new("TextButton")
@@ -1694,6 +2155,23 @@ createSystem = function()
 			)
 			index = index + 1
 		end
+		-- (V9) OS CARDS DE FORMA DESPERTA FORAM REMOVIDOS.
+		--
+		-- Até o V8 cada Despertar desbloqueado virava um card separado no
+		-- inventário, gerado a partir de data.awakenedCharacters. Isso
+		-- fazia sentido quando o Despertar era uma posse permanente que
+		-- se equipava.
+		--
+		-- Agora o Despertar é uma FORMA TEMPORÁRIA do personagem normal,
+		-- disparada pela barra do AwakeningMeterServer em combate. Não há
+		-- o que equipar, então o card não tem função — ele só confundiria,
+		-- mostrando algo clicável que não faz nada.
+		--
+		-- A informação do Despertar continua visível: aparece no card do
+		-- personagem NORMAL, como faixa de informação.
+		--
+		-- A lista data.awakenedCharacters de quem jogou no sistema antigo
+		-- é limpa no login pelo AwakeningSystemServer V5.
 
 		-- Inventário vazio → aviso
 		if index == 0 then
@@ -1836,10 +2314,22 @@ end)
 
 print([[
 ╔══════════════════════════════════════════════════════╗
-║  CHARACTER SYSTEM CLIENT V7 — CARREGADO             ║
+║  CHARACTER SYSTEM CLIENT V8 — CARREGADO             ║
 ╠══════════════════════════════════════════════════════╣
-║  SUBSTITUI: CharacterSystemClient V5 (ou V4)         ║
-║  REMOVER:   CharacterSystemClient V5 / V4            ║
+║  SUBSTITUI: CharacterSystemClient V7                 ║
+║  REMOVER:   CharacterSystemClient V7                 ║
+╠══════════════════════════════════════════════════════╣
+║  V8 MUDANÇAS (DESPERTAR):                            ║
+║  * Botão saiu de cima da borda do card (dava pra     ║
+║    ver, agora dá) — faixa própria em y=0.865         ║
+║  * Botão é DESBLOQUEAR, não equipar: o remote só     ║
+║    concede; equipar o original já usa a forma        ║
+║  * Card separado da forma desperta no INVENTÁRIO     ║
+║  * Estados claros: DESPERTO / DESBLOQUEAR / FALTA    ║
+║    O EMBLEMA / PRECISA DO ORIGINAL                   ║
+║  * Popup de habilidades lista as FERRAMENTAS         ║
+║    carregadas (normais + despertas), lendo direto    ║
+║    de ReplicatedStorage.Characters — sem remote      ║
 ╠══════════════════════════════════════════════════════╣
 ║  V6 MUDANÇAS:                                        ║
 ║  * ABA GRÁTIS REMOVIDA (Mandatory vai direto pro     ║

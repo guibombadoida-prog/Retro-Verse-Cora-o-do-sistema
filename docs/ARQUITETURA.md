@@ -18,26 +18,29 @@ de cada arquivo e o mapa de dependências entre eles.
 | `AdminSystemServer.server.lua` | `AdminSystemServer` | V8 | Comandos e ações de admin |
 | `AntiLag.server.lua` | *(não declarado)* | V2 | Varre a Workspace e remove objetos de lag sem tocar em materiais/VFX |
 | `AntiToolSystem.server.lua` | `AntiToolSystem` | V2 | Bloqueio de ferramentas indevidas |
-| `AwakeningSystemServer.server.lua` | `AwakeningSystemServer` | V2 | Sistema de Despertar (personagens evoluídos) |
-| `BossRaidServer.server.lua` | `BossRaidServer` | V2 | Catálogo de bosses via DataStore + teleporte para a *place* do chefe |
-| `CharacterCatalogServer.server.lua` | `CharacterCatalogServer` | V6 | Catálogo de personagens 100% dinâmico |
+| `AwakeningSystemServer.server.lua` | `AwakeningSystemServer` | V8 | Guarda as DEFINIÇÕES de Despertar (imagem, história, Tools, badge opcional). Não desperta ninguém — quem dispara é o `AwakeningMeterServer` |
+| `BossRaidServer.server.lua` | `BossRaidServer` | V4 | Catálogo de bosses via DataStore + teleporte para a *place* do chefe |
+| `CharacterCatalogServer.server.lua` | `CharacterCatalogServer` | V7 | Catálogo de personagens 100% dinâmico |
 | `CharacterLevelServer.server.lua` | `CharacterLevelServer` | V1 | Nível **por personagem** (1–30): curva de XP, slots de passiva e energia |
 | `CharacterStatsServer.server.lua` | `CharacterStatsServer` | V2 | Atributos por personagem |
-| `DailyRewardsServer.server.lua` | `DailyRewardsServer` | V5 | Recompensas diárias e recuperação de dia perdido |
+| `DailyRewardsServer.server.lua` | `DailyRewardsServer` | V6 | Recompensas diárias e recuperação de dia perdido. O V6 tirou o personagem-fantasma "Daily Champion" do bônus do dia 6 |
 | `DamageAttribution.server.lua` | `DamageAttribution` | V4 | Atribui a autoria de cada dano — base do sistema de kill |
-| `DataManager.server.lua` | `DataManager` | V8 | DataStore, moedas, bounty, inventário. **Dono de `_G.PlayerDataManager`** |
+| `DataManager.server.lua` | `DataManager` | V9 | DataStore, moedas, bounty, inventário. **Dono de `_G.PlayerDataManager`** |
 | `DuelSystemServer.server.lua` | `DuelSystemServer` | V2 | Duelos 1v1 |
 | `EnergySystemServer.server.lua` | `EnergySystemServer` | V1 | Energia/stamina para habilidades |
-| `GameManager.server.lua` | `GameManager` | V9 | Preços, vida e seleção de personagem |
+| `GameManager.server.lua` | `GameManager` | V10 | Preços, vida e seleção de personagem |
 | `GlobalSync.server.lua` | `GlobalSync` | V2 | Dono único do sync periódico de `UpdateStats` |
 | `LoadingScreenServer.server.lua` | `LoadingScreenServer` | V2 | Lado servidor do *handshake* da tela de carregamento |
 | `MainSystemInitializer.server.lua` | `MainSystemInitializer` | V2 | Cria pastas e Remotes, conecta sistemas, monitora |
 | `MissionSystemServer.server.lua` | `MissionSystemServer` | V2 | Missões |
+| `AwakeningMeterServer.server.lua` | `AwakeningMeterServer` | V4 | **Barra de Despertar.** Enche com dano dado/recebido e uso de habilidade; cheia, troca as Tools para a forma desperta por 3min30 |
+| `MusicCatalogServer.server.lua` | `MusicCatalogServer` | V2 | Catálogo de músicas em DataStore, editável em jogo, com sync entre servidores |
+| `RecruitJourneyServer.server.lua` | `RecruitJourneyServer` | V2 | Jornada do Recruta: capítulos de onboarding, com DataStore próprio (`RVRecruitJourneyV1`) |
 | `NPC_Server_V2.server.lua` | `NPC_Server_V2` | V2 | NPCs com recompensa proporcional à vida máxima |
 | `NpcPassiveBridge.server.lua` | `NpcPassiveBridge` | V2 | Faz as passivas do jogador valerem contra NPCs |
-| `PassiveSystemServer.server.lua` | `PassiveSystemServer` | V8 | Sistema de passivas |
+| `PassiveSystemServer.server.lua` | `PassiveSystemServer` | V9 | Sistema de passivas |
 | `SpawnSystem.server.lua` | `SpawnSystem` | V8 | Lobby, zona segura, spawn no mapa, modo espectador |
-| `StatService.server.lua` | `StatService` | V3 | **Dono único** de MaxHealth/WalkSpeed/Jump. Agrega os 23 atributos por fonte e resolve a fórmula de dano |
+| `StatService.server.lua` | `StatService` | V4 | **Dono único** de MaxHealth/WalkSpeed/Jump. Agrega os 23 atributos por fonte e resolve a fórmula de dano |
 | `StatusEffectServer.server.lua` | `StatusEffectServer` | V1 | Efeitos temporários de status |
 | `TeamDamageProtection.server.lua` | `TeamDamageProtection` | V4 | Bloqueia dano entre membros do mesmo time |
 | `TeamSystemServer.server.lua` | `TeamSystemServer` | V4 | Times e convites |
@@ -69,21 +72,22 @@ todas as Tools que consomem o núcleo.
 | Arquivo | Nome no Studio | Ver. | Função |
 |---|---|:--:|---|
 | `AchievementMenuClient.client.lua` | `AchievementMenuClient` | V2 | Menu de conquistas + gerenciador para admin |
-| `AdminMenuClient.client.lua` | `AdminMenuClient` | V9 | Painel de admin |
-| `BossRaidClient.client.lua` | `BossRaidClient` | V2 | Menu de raids de boss |
+| `AdminMenuClient.client.lua` | `AdminMenuClient` | V12 | Painel de admin |
+| `BossRaidClient.client.lua` | `BossRaidClient` | V3 | Menu de raids de boss |
 | `CharacterStatsAdminClient.client.lua` | `CharacterStatsAdminClient` | V2 | Edição de atributos em jogo (admin) |
-| `CharacterSystemClient.client.lua` | `CharacterSystemClient` | V7 | Loja e inventário de personagens, com atributos |
+| `CharacterSystemClient.client.lua` | `CharacterSystemClient` | V10 | Loja e inventário de personagens, com atributos |
 | `ClientSync.client.lua` | `ClientSync` | — | Cache local de dados; expõe `_G.updatePlayerData` |
 | `DailyRewardsClient.client.lua` | `DailyRewardsClient` | V1 | GUI da recompensa diária |
 | `DuelMenuClient.client.lua` | `DuelMenuClient` | V2 | Menu de duelos |
-| `HealthDisplay.client.lua` | `HealthDisplay` | V4 | Barra de vida + barra de energia (estilo retro) |
+| `HealthDisplay.client.lua` | `HealthDisplay` | V7 | Barra de vida + barra de energia (estilo retro) |
 | `MissionsMenuClient.client.lua` | `MissionsMenuClient` | V2 | Menu de missões |
-| `MusicPlayerClient_V2.client.lua` | `MusicPlayerClient_V2` | V5 | Player de música (abre só pelo menu unificado) |
-| `PassiveMenuClient.client.lua` | `PassiveMenuClient` | V3 | Menu de passivas |
+| `RecruitJourneyClient.client.lua` | `RecruitJourneyClient` | V2 | Menu da Jornada do Recruta (categoria `RECRUTA`, ordem 3) |
+| `MusicPlayerClient_V2.client.lua` | `MusicPlayerClient_V2` | V6 | Player de música (abre só pelo menu unificado) |
+| `PassiveMenuClient.client.lua` | `PassiveMenuClient` | V4 | Menu de passivas |
 | `RetroHotbarClient.client.lua` | `RetroHotbarClient` | V2 | Hotbar/backpack retrô, com perfis por dispositivo |
 | `TeamMenuClient_V2.client.lua` | `TeamMenuClient_V2` | V6 | Interface de times |
 | `TradeMenuClient.client.lua` | `TradeMenuClient` | V1 | Interface de trocas |
-| `TutorialMenuClient_V2.client.lua` | `TutorialMenuClient_V2` | V6 | Tutorial interativo |
+| `TutorialMenuClient_V2.client.lua` | `TutorialMenuClient_V2` | V7 | Tutorial interativo |
 | `UnifiedMenuClient.client.lua` | `UnifiedMenuClient` | V3 | **Menu ☰ central.** Dono de `_G.RegisterMenuCategory` |
 | `WantedClient.client.lua` | `WantedClient` | V2 | HUD de procurado |
 
@@ -148,6 +152,9 @@ tabelas e funções publicadas em `_G`. Cada API tem **um dono único**.
 | `StatusEffect` | `StatusEffectServer` | — |
 | `CharacterStats` | `CharacterStatsServer` | `StatService` (chama `.refresh` ao equipar). O `CharacterStatsAdminClient` fala por Remote, não por `_G` |
 | `DailyRewards` | `DailyRewardsServer` | — |
+| `RecruitJourney` | `RecruitJourneyServer` | — |
+| `AwakeningMeter` | `AwakeningMeterServer` | `GameManager` (decide de qual pasta saem as Tools) e `StatService` (vida da forma) |
+| `MusicCatalog` | `MusicCatalogServer` | — |
 | `BossRaid` | `BossRaidServer` | — |
 | `WantedSystem` | `WantedSystemServer` | — |
 | `NpcSystem` | `NPC_Server_V2` | — |
@@ -171,7 +178,9 @@ Cada sistema expõe seu próprio `_G.Debug*` para uso no console do servidor:
 `DebugAwakening`, `DebugCatalog`, `DebugCharacterLevel`, `DebugCharacterStats`,
 `DebugDailyRewards`, `DebugEfeitos`, `DebugEnergy`, `DebugGameManager`,
 `DebugMovement`, `DebugNpcBridge`, `DebugNucleo`, `DebugPassives`,
-`DebugPlayerStatus`, `DebugSpawnState`, `DebugStats`, `DebugTeams`, `DebugTutorial`.
+`DebugAwakeningMeter`, `DebugMusicCatalog`, `DebugPlayerStatus`,
+`DebugRecruitJourney`, `DebugSpawnState`, `DebugStats`,
+`DebugTeams`, `DebugTutorial`.
 
 O `StatService` traz também `_G.SimulateDamage("Atacante", "Vítima", 50, "Melee")`,
 que roda a fórmula de dano inteira e imprime cada etapa — dá para conferir
