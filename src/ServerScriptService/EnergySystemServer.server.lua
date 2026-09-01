@@ -1,9 +1,9 @@
 -- ============================================
--- ENERGY SYSTEM SERVER V1 — ENERGIA POR USO DE TOOL
+-- ENERGY SYSTEM SERVER V2 — ENERGIA E MOVIMENTO FÍSICO
 -- Coloque em ServerScriptService
 -- Nome: "EnergySystemServer"
 -- DEPENDE DE: DataManager V7, CharacterLevelServer V1
--- SCRIPT NOVO — não substitui nada
+-- SUBSTITUI: EnergySystemServer V1
 -- ============================================
 -- FUNÇÃO:
 -- • Cada ativação de Tool consome ENERGIA. Zerou, a Tool trava até
@@ -22,11 +22,13 @@
 --   Enabled via GetPropertyChangedSignal: se a Tool tentar se
 --   reabilitar enquanto o jogador está sem energia, ele força de
 --   volta pra false. Quando a energia volta, ele solta.
--- • ⚠️ Consequência conhecida: enquanto o jogador está sem energia,
---   o cooldown próprio da Tool fica "mascarado". Ao liberar, a Tool
---   volta habilitada mesmo que o cooldown dela ainda estivesse
---   correndo. Na prática não abre exploit (a energia é o gargalo,
---   e ela é mais lenta que o cooldown), mas está documentado.
+-- • V2 não reativa uma Tool que já estava desabilitada antes da trava e
+--   detecta quando o cooldown tenta liberá-la enquanto falta energia.
+--
+-- MOVIMENTO V2:
+-- • Regen por inatividade usa velocidade horizontal relativa ao chão,
+--   intenção do Humanoid, contato com o solo e histerese. Plataforma móvel,
+--   assento, salto e knockback deixam de produzir falsos estados.
 --
 -- CUSTO POR TOOL:
 -- • Padrão: CONFIG.DEFAULT_COST
@@ -44,6 +46,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 repeat
 	task.wait()
@@ -61,8 +64,11 @@ local CONFIG = {
 	TICK = 0.25, -- intervalo do loop de regeneração
 	REFILL_ON_SPAWN = true, -- nasce com energia cheia
 
-	-- Bateria Fria e afins: velocidade abaixo disso conta como "parado"
-	IDLE_SPEED_THRESHOLD = 2,
+	-- Histerese: entra em repouso devagar e só sai ao superar o limite maior.
+	IDLE_ENTER_SPEED = 1.25,
+	IDLE_EXIT_SPEED = 2.75,
+	MOVE_DIRECTION_THRESHOLD = 0.05,
+	GROUND_PROBE_PADDING = 2,
 }
 
 -- =====================================
@@ -92,6 +98,7 @@ end
 
 local energyUpdate = ensureRemote("EnergyUpdate", "RemoteEvent") -- server -> client
 local energyDepleted = ensureRemote("EnergyDepleted", "RemoteEvent") -- aviso de "sem energia"
+local getEnergyState = ensureRemote("GetEnergyState", "RemoteFunction") -- snapshot inicial
 
 -- =====================================
 -- ESTADO
@@ -100,8 +107,10 @@ local energyDepleted = ensureRemote("EnergyDepleted", "RemoteEvent") -- aviso de
 -- [player] = {
 --   current, max, regen,
 --   modifiers = {costMult, regenMult, maxMult, idleOnlyRegen, idleBonus},
---   heldTools = { [tool] = connection },
+--   heldTools = { [tool] = {connection, restoreEnabled} },
 --   toolConnections = { [tool] = connection },
+--   containerConnections = { [container] = {connections...} },
+--   isIdle, grounded, relativeSpeed, regenerating, effectiveRegen,
 -- }
 local energyState = {}
 local customToolCost = {} -- [toolName] = custo
@@ -164,17 +173,31 @@ local function recalcLimits(player)
 	end
 end
 
+local function makePayload(state)
+	return {
+		current = math.floor(state.current),
+		max = state.max,
+		regen = state.regen,
+		level = state.level,
+		idle = state.isIdle == true,
+		grounded = state.grounded == true,
+		movementSpeed = state.relativeSpeed or 0,
+		regenerating = state.regenerating == true,
+		effectiveRegen = state.effectiveRegen or 0,
+	}
+end
+
 local function pushUpdate(player)
 	local state = energyState[player]
 	if not state then
 		return
 	end
-	energyUpdate:FireClient(player, {
-		current = math.floor(state.current),
-		max = state.max,
-		regen = state.regen,
-		level = state.level,
-	})
+	energyUpdate:FireClient(player, makePayload(state))
+end
+
+getEnergyState.OnServerInvoke = function(player)
+	local state = energyState[player]
+	return state and makePayload(state) or nil
 end
 
 -- =====================================
@@ -207,17 +230,19 @@ local function releaseTool(player, tool)
 		return
 	end
 
-	local held = state.heldTools[tool]
-	if not held then
+	local gate = state.heldTools[tool]
+	if not gate then
 		return
 	end
 
-	pcall(function()
-		held:Disconnect()
-	end)
+	if gate.connection then
+		gate.connection:Disconnect()
+	end
 	state.heldTools[tool] = nil
 
-	if tool.Parent then
+	-- Não reativa uma Tool que já chegou desabilitada. Se o cooldown tentou
+	-- habilitá-la durante a trava, a conexão acima registrou essa intenção.
+	if tool.Parent and gate.restoreEnabled then
 		tool.Enabled = true
 	end
 end
@@ -228,12 +253,20 @@ local function holdTool(player, tool)
 		return
 	end
 
+	local gate = {
+		connection = nil,
+		restoreEnabled = tool.Enabled,
+	}
+	state.heldTools[tool] = gate
 	tool.Enabled = false
 
 	-- Se a Tool tentar se reabilitar sozinha (debounce próprio dela),
-	-- força de volta enquanto a energia não voltar
-	state.heldTools[tool] = tool:GetPropertyChangedSignal("Enabled"):Connect(function()
-		if tool.Enabled and energyState[player] and energyState[player].heldTools[tool] then
+	-- registra que o cooldown terminou e força de volta até a energia voltar.
+	gate.connection = tool:GetPropertyChangedSignal("Enabled"):Connect(function()
+		local currentState = energyState[player]
+		local currentGate = currentState and currentState.heldTools[tool]
+		if tool.Enabled and currentGate then
+			currentGate.restoreEnabled = true
 			tool.Enabled = false
 		end
 	end)
@@ -369,19 +402,27 @@ local function unhookTool(player, tool)
 		state.toolConnections[tool] = nil
 	end
 
-	local held = state.heldTools[tool]
-	if held then
-		pcall(function()
-			held:Disconnect()
-		end)
-		state.heldTools[tool] = nil
+	releaseTool(player, tool)
+end
+
+local function isOwnedTool(player, tool)
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if backpack and tool:IsDescendantOf(backpack) then
+		return true
 	end
+
+	local character = player.Character
+	return character ~= nil and tool:IsDescendantOf(character)
 end
 
 local function watchContainer(player, container)
-	if not container then
+	local state = energyState[player]
+	if not container or not state or state.containerConnections[container] then
 		return
 	end
+
+	local record = {}
+	state.containerConnections[container] = record
 
 	for _, item in ipairs(container:GetChildren()) do
 		if item:IsA("Tool") then
@@ -389,9 +430,34 @@ local function watchContainer(player, container)
 		end
 	end
 
-	container.ChildAdded:Connect(function(item)
+	record.added = container.ChildAdded:Connect(function(item)
 		if item:IsA("Tool") then
 			hookTool(player, item)
+		end
+	end)
+
+	-- Equipar move a Tool entre Backpack e Character. O defer espera essa
+	-- troca terminar antes de decidir se ela realmente saiu do jogador.
+	record.removed = container.ChildRemoved:Connect(function(item)
+		if item:IsA("Tool") then
+			task.defer(function()
+				if energyState[player] and not isOwnedTool(player, item) then
+					unhookTool(player, item)
+				end
+			end)
+		end
+	end)
+
+	record.ancestry = container.AncestryChanged:Connect(function(_, parent)
+		if parent ~= nil then
+			return
+		end
+		local currentState = energyState[player]
+		if currentState then
+			currentState.containerConnections[container] = nil
+		end
+		for _, connection in pairs(record) do
+			connection:Disconnect()
 		end
 	end)
 end
@@ -400,13 +466,54 @@ end
 -- LOOP DE REGENERAÇÃO
 -- =====================================
 
-local function isIdle(player)
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not root then
-		return true
+local function getSupportVelocity(character, humanoid, root)
+	local seat = humanoid.SeatPart
+	if seat and seat:IsA("BasePart") then
+		return seat:GetVelocityAtPosition(root.Position), true
 	end
-	return root.AssemblyLinearVelocity.Magnitude < CONFIG.IDLE_SPEED_THRESHOLD
+
+	local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+	if not grounded then
+		return Vector3.new(0, 0, 0), false
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+
+	local probeLength = humanoid.HipHeight + root.Size.Y * 0.5 + CONFIG.GROUND_PROBE_PADDING
+	local hit = Workspace:Raycast(root.Position, Vector3.new(0, -probeLength, 0), params)
+	local support = hit and hit.Instance
+	if support and support:IsA("BasePart") then
+		-- Inclui a parcela angular em plataformas que giram.
+		return support:GetVelocityAtPosition(root.Position), true
+	end
+
+	return Vector3.new(0, 0, 0), true
+end
+
+local function measureIdle(player, state)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root or not root:IsA("BasePart") then
+		return true, false, 0
+	end
+
+	local supportVelocity, grounded = getSupportVelocity(character, humanoid, root)
+	local relativeVelocity = root.AssemblyLinearVelocity - supportVelocity
+	local planarSpeed = Vector3.new(relativeVelocity.X, 0, relativeVelocity.Z).Magnitude
+	local hasMoveIntent = humanoid.MoveDirection.Magnitude > CONFIG.MOVE_DIRECTION_THRESHOLD
+
+	if not grounded then
+		return false, false, planarSpeed
+	end
+
+	-- Limites diferentes impedem o estado de oscilar quando a velocidade fica
+	-- perto do corte por ruído da simulação ou pequenas correções de rede.
+	local threshold = state.isIdle and CONFIG.IDLE_EXIT_SPEED or CONFIG.IDLE_ENTER_SPEED
+	local idle = not hasMoveIntent and planarSpeed <= threshold
+	return idle, true, planarSpeed
 end
 
 task.spawn(function()
@@ -415,32 +522,52 @@ task.spawn(function()
 
 		for _, player in ipairs(Players:GetPlayers()) do
 			local state = energyState[player]
-			if state and state.current < state.max then
+			if state then
 				local character = player.Character
 				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+				local canRegenerate = humanoid ~= nil and humanoid.Health > 0
+				local previousIdle = state.isIdle
+				local previousRegenerating = state.regenerating
+				local previousEffectiveRegen = state.effectiveRegen
+				local before = state.current
 
-				-- Morto não regenera
-				if humanoid and humanoid.Health > 0 then
+				if canRegenerate then
+					state.isIdle, state.grounded, state.relativeSpeed = measureIdle(player, state)
+				else
+					state.isIdle = true
+					state.grounded = false
+					state.relativeSpeed = 0
+				end
+
+				local regen = 0
+				if canRegenerate and state.current < state.max then
 					local mods = state.modifiers
-					local idle = isIdle(player)
-					local regen = state.regen
+					regen = state.regen
 
-					if mods.idleOnlyRegen and not idle then
+					if mods.idleOnlyRegen and not state.isIdle then
 						regen = 0
-					elseif idle then
+					elseif state.isIdle then
 						regen = regen + mods.idleBonus
 					end
 
 					if regen > 0 then
-						local before = state.current
 						state.current = math.min(state.max, state.current + regen * CONFIG.TICK)
-
-						-- Só avisa o cliente quando cruza um ponto inteiro
-						if math.floor(state.current) ~= math.floor(before) then
-							pushUpdate(player)
-							refreshToolGates(player)
-						end
 					end
+				end
+
+				state.regenerating = regen > 0 and state.current < state.max
+				state.effectiveRegen = state.regenerating and regen or 0
+
+				local crossedInteger = math.floor(state.current) ~= math.floor(before)
+				local motionChanged = previousIdle ~= state.isIdle
+					or previousRegenerating ~= state.regenerating
+					or previousEffectiveRegen ~= state.effectiveRegen
+
+				if crossedInteger then
+					refreshToolGates(player)
+				end
+				if crossedInteger or motionChanged then
+					pushUpdate(player)
 				end
 			end
 		end
@@ -460,6 +587,13 @@ local function setupPlayer(player)
 		modifiers = copyModifiers(nil),
 		heldTools = {},
 		toolConnections = {},
+		containerConnections = {},
+		playerConnections = {},
+		isIdle = true,
+		grounded = false,
+		relativeSpeed = 0,
+		regenerating = false,
+		effectiveRegen = 0,
 	}
 
 	recalcLimits(player)
@@ -471,17 +605,22 @@ local function setupPlayer(player)
 		watchContainer(player, backpack)
 	end
 
-	player.ChildAdded:Connect(function(child)
+	local state = energyState[player]
+	state.playerConnections.childAdded = player.ChildAdded:Connect(function(child)
 		if child:IsA("Backpack") then
 			watchContainer(player, child)
 		end
 	end)
 
-	player.CharacterAdded:Connect(function(character)
+	state.playerConnections.characterAdded = player.CharacterAdded:Connect(function(character)
 		task.wait(1) -- deixa o GameManager entregar as Tools primeiro
+		local currentState = energyState[player]
+		if not currentState then
+			return
+		end
 		recalcLimits(player)
 		if CONFIG.REFILL_ON_SPAWN then
-			energyState[player].current = energyState[player].max
+			currentState.current = currentState.max
 		end
 		watchContainer(player, character)
 		watchContainer(player, player:FindFirstChildOfClass("Backpack"))
@@ -497,8 +636,20 @@ end
 local function cleanupPlayer(player)
 	local state = energyState[player]
 	if state then
+		local tools = {}
 		for tool in pairs(state.toolConnections) do
+			table.insert(tools, tool)
+		end
+		for _, tool in ipairs(tools) do
 			unhookTool(player, tool)
+		end
+		for _, record in pairs(state.containerConnections) do
+			for _, connection in pairs(record) do
+				connection:Disconnect()
+			end
+		end
+		for _, connection in pairs(state.playerConnections) do
+			connection:Disconnect()
 		end
 	end
 	energyState[player] = nil
@@ -523,12 +674,7 @@ _G.EnergySystem = {
 		if not state then
 			return nil
 		end
-		return {
-			current = math.floor(state.current),
-			max = state.max,
-			regen = state.regen,
-			level = state.level,
-		}
+		return makePayload(state)
 	end,
 
 	consume = consume,
@@ -598,9 +744,18 @@ _G.DebugEnergy = function(playerName)
 		return
 	end
 
-	print("\n========== DEBUG ENERGY V1 ==========")
+	print("\n========== DEBUG ENERGY V2 ==========")
 	print(string.format("Jogador: %s (nível do personagem: %d)", player.Name, state.level))
 	print(string.format("Energia: %.1f / %d | Regen: %.2f/s", state.current, state.max, state.regen))
+	print(
+		string.format(
+			"Fisica: %s | solo=%s | velocidade relativa=%.2f | regen efetivo=%.2f/s",
+			state.isIdle and "PARADO" or "MOVENDO",
+			tostring(state.grounded),
+			state.relativeSpeed,
+			state.effectiveRegen
+		)
+	)
 	print(
 		string.format(
 			"Modificadores: custo x%.2f | regen x%.2f | max x%.2f | soParado=%s",
@@ -626,14 +781,15 @@ end
 
 print([[
 ╔══════════════════════════════════════════════════════╗
-║  ENERGY SYSTEM SERVER V1 — CARREGADO                ║
+║  ENERGY SYSTEM SERVER V2 — CARREGADO                ║
 ╠══════════════════════════════════════════════════════╣
-║  SCRIPT NOVO (não substitui nada)                    ║
+║  SUBSTITUI: EnergySystemServer V1                    ║
 ║  DEPENDE DE: DataManager V7 + CharacterLevelServer   ║
 ╠══════════════════════════════════════════════════════╣
 ║  * Cada Tool.Activated consome energia               ║
 ║  * Sem energia -> Tool.Enabled = false (segurado)    ║
 ║  * Máximo/regen vêm do NÍVEL do personagem           ║
+║  * Repouso usa física relativa ao chão + histerese   ║
 ║  * Custo por Tool: NumberValue "EnergyCost" dentro   ║
 ║    da Tool, ou _G.EnergySystem.setToolCost(nome, n)  ║
 ║  * Nenhuma Tool precisa ser editada                  ║
