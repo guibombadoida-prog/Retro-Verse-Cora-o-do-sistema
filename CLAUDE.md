@@ -12,5 +12,10 @@ Os dois pontos que mais causam retrabalho quando são ignorados:
 2. **Rode `verificar` antes de `publicar` e leia as listas `+` e `?`.** Um script
    salvo na place com outro nome aparece como novo; publicar sem checar cria uma
    segunda cópia rodando junto com a original.
+3. **Consertar bug não é só fazer parar de quebrar.** O script volta com UI que se
+   adapta à tela, animação que cancela a anterior em vez de acumular, e física em
+   constraint. O projeto tem 58 tweens e nenhum `:Cancel()` — é daí que vem a
+   maior parte do que trava e treme na tela. Ver a seção *Padrão de qualidade* do
+   `AGENTS.md`.
 
 Procedimento completo para script novo: [`docs/ADICIONAR_SCRIPT.md`](docs/ADICIONAR_SCRIPT.md).
