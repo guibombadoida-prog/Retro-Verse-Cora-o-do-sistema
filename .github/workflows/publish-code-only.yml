@@ -1,0 +1,95 @@
+name: Publicar somente código
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "Primeiro verifique; publicar cria uma versão jogável"
+        required: true
+        default: verificar
+        type: choice
+        options:
+          - verificar
+          - publicar
+      confirmacao:
+        description: "Para publicar, digite PUBLICAR; na verificação pode ficar vazio"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publicar-codigo-${{ vars.ROBLOX_PUBLISH_UNIVERSE_ID }}-${{ vars.ROBLOX_PUBLISH_PLACE_ID }}
+  cancel-in-progress: false
+
+env:
+  ROJO_VERSION: "7.7.0"
+  ROJO_SHA256: "22503e5839864f9d7c2171c48b536fc229f2cc4d8774c9cc149f60941d864073"
+  ROBLOX_API_KEY: ${{ secrets.ROBLOX_PUBLISH_API_KEY }}
+  ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_PUBLISH_UNIVERSE_ID }}
+  ROBLOX_PLACE_ID: ${{ vars.ROBLOX_PUBLISH_PLACE_ID }}
+  MODO: ${{ inputs.modo }}
+  CONFIRMACAO: ${{ inputs.confirmacao }}
+
+jobs:
+  publicar:
+    name: Comparar e publicar Script.Source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Conferir configuração e trava de publicação
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$ROBLOX_API_KEY" || -z "$ROBLOX_UNIVERSE_ID" || -z "$ROBLOX_PLACE_ID" ]]; then
+            echo "Configure ROBLOX_PUBLISH_API_KEY e as variáveis ROBLOX_PUBLISH_UNIVERSE_ID/ROBLOX_PUBLISH_PLACE_ID." >&2
+            exit 1
+          fi
+          if [[ ! "$ROBLOX_UNIVERSE_ID" =~ ^[0-9]+$ || ! "$ROBLOX_PLACE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Universe ID e Place ID precisam conter somente números." >&2
+            exit 1
+          fi
+          if [[ "$MODO" == "publicar" && "$CONFIRMACAO" != "PUBLICAR" ]]; then
+            echo "Publicação cancelada: a confirmação precisa ser exatamente PUBLICAR." >&2
+            exit 1
+          fi
+
+      - name: Instalar Rojo verificado
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="$RUNNER_TEMP/retroverse-publish-tools"
+          mkdir -p "$tools_dir/rojo"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$tools_dir/rojo.zip" \
+            "https://github.com/rojo-rbx/rojo/releases/download/v${ROJO_VERSION}/rojo-${ROJO_VERSION}-linux-x86_64.zip"
+          echo "${ROJO_SHA256}  ${tools_dir}/rojo.zip" | sha256sum --check --strict
+          unzip -q "$tools_dir/rojo.zip" -d "$tools_dir/rojo"
+          chmod +x "$tools_dir/rojo/rojo"
+          echo "$tools_dir/rojo" >> "$GITHUB_PATH"
+
+      - name: Montar pacote que contém somente scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          rojo build code-payload.project.json --output build/RetroVerse-code-payload.rbxm
+
+      - name: Verificar ou publicar no place
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$MODO" == "publicar" ]]; then
+            api_mode="publish"
+          else
+            api_mode="check"
+          fi
+          python3 tools/run_code_publish.py \
+            --mode "$api_mode" \
+            --payload build/RetroVerse-code-payload.rbxm \
+            --task tasks/apply_code_payload.luau

@@ -1,0 +1,122 @@
+name: Validar código sem PC
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tasks/**"
+      - "tests/**"
+      - "tools/**"
+      - "default.project.json"
+      - "code-payload.project.json"
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tasks/**"
+      - "tests/**"
+      - "tools/**"
+      - "default.project.json"
+      - "code-payload.project.json"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validar-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LUAU_VERSION: "0.736"
+  LUAU_SHA256: "4e3d1660b044c0b7ed8b9ef3d97cbc4a1690cad98c3e71e37d86d5eb91975a61"
+  ROJO_VERSION: "7.7.0"
+  ROJO_SHA256: "22503e5839864f9d7c2171c48b536fc229f2cc4d8774c9cc149f60941d864073"
+
+jobs:
+  validar:
+    name: Sintaxe, lógica pura e build Rojo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Instalar Luau e Rojo verificados
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="$RUNNER_TEMP/retroverse-tools"
+          mkdir -p "$tools_dir/luau" "$tools_dir/rojo"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$tools_dir/luau.zip" \
+            "https://github.com/luau-lang/luau/releases/download/${LUAU_VERSION}/luau-ubuntu.zip"
+          echo "${LUAU_SHA256}  ${tools_dir}/luau.zip" | sha256sum --check --strict
+          unzip -q "$tools_dir/luau.zip" -d "$tools_dir/luau"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$tools_dir/rojo.zip" \
+            "https://github.com/rojo-rbx/rojo/releases/download/v${ROJO_VERSION}/rojo-${ROJO_VERSION}-linux-x86_64.zip"
+          echo "${ROJO_SHA256}  ${tools_dir}/rojo.zip" | sha256sum --check --strict
+          unzip -q "$tools_dir/rojo.zip" -d "$tools_dir/rojo"
+
+          chmod +x "$tools_dir"/luau/* "$tools_dir/rojo/rojo"
+          echo "$tools_dir/luau" >> "$GITHUB_PATH"
+          echo "$tools_dir/rojo" >> "$GITHUB_PATH"
+
+      - name: Verificar a sintaxe de todos os scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            echo "Analisando $file"
+            luau-compile --only-parse "$file" > /dev/null
+          done < <(find src tasks tests -type f \( -name '*.lua' -o -name '*.luau' \) -print0 | sort -z)
+
+      - name: Verificar o cliente Open Cloud
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/run_code_publish.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import tools.run_code_publish as publish
+
+          source = publish.build_task_source(
+              Path("tasks/apply_code_payload.luau"), "check", "123", "456"
+          )
+          assert 'local RETROVERSE_MODE = "check"' in source
+          assert 'local EXPECTED_UNIVERSE_ID = "123"' in source
+          assert publish.validate_numeric_id("teste", "456") == "456"
+          print(f"Cliente Open Cloud válido: tarefa com {len(source.encode('utf-8'))} bytes")
+          PY
+
+      - name: Rodar teste de lógica pura
+        run: luau tests/PassiveCatalog.spec.luau
+
+      - name: Montar o place e o pacote de código
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          rojo --version
+          rojo sourcemap default.project.json --output build/sourcemap.json
+          rojo build default.project.json --output build/RetroVerse.rbxl
+          rojo sourcemap code-payload.project.json --output build/code-payload-sourcemap.json
+          rojo build code-payload.project.json --output build/RetroVerse-code-payload.rbxm
+
+      - name: Guardar o place montado por 7 dias
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: retroverse-rbxl-${{ github.sha }}
+          path: |
+            build/RetroVerse.rbxl
+            build/RetroVerse-code-payload.rbxm
+            build/sourcemap.json
+            build/code-payload-sourcemap.json
+          if-no-files-found: error
+          retention-days: 7
