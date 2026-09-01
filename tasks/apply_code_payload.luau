@@ -71,6 +71,11 @@ local problems = {}
 -- que dois scripts irmãos não peçam a mesma pasta duas vezes.
 local plannedFolders = {}
 
+-- Cada contêiner tocado pelo pacote, com os nomes que o repositório reivindica
+-- ali. O que sobrar são scripts que só existem no place.
+local containers = {}
+local containerOrder = {}
+
 -- Resolve os contêineres do caminho (tudo menos a folha). Quando uma pasta não
 -- existe no place, ela é planejada aqui mesmo e só vai ao ar no modo publicar.
 -- Devolve o pai a usar, ou nil mais a explicação do que impede a resolução.
@@ -110,6 +115,15 @@ for _, sourceScript in scripts do
 		table.insert(problems, `{path}: {impedimento}`)
 		print(`! {path} — {impedimento}`)
 	else
+		local containerPath = table.concat(parts, " > ", 1, #parts - 1)
+		local container = containers[containerPath]
+		if not container then
+			container = { instance = parent, claimed = {} }
+			containers[containerPath] = container
+			table.insert(containerOrder, containerPath)
+		end
+		container.claimed[parts[#parts]] = true
+
 		local found = findChildrenByName(parent, parts[#parts])
 		if #found > 1 then
 			local detalhe = `há {#found} objetos chamados {parts[#parts]} em {path}`
@@ -146,9 +160,33 @@ for _ in plannedFolders do
 	plannedFolderCount += 1
 end
 
+-- Scripts que existem no place e não no repositório. Quase sempre são o mesmo
+-- sistema salvo com outro nome: cruzar esta lista com as linhas + revela se um
+-- "script novo" na verdade já está no jogo e seria duplicado.
+local orphans = {}
+for _, containerPath in containerOrder do
+	local container = containers[containerPath]
+	if not plannedFolders[containerPath] then
+		for _, child in container.instance:GetChildren() do
+			if SCRIPT_CLASSES[child.ClassName] and not container.claimed[child.Name] then
+				table.insert(orphans, `{containerPath} > {child.Name} ({child.ClassName})`)
+			end
+		end
+	end
+end
+table.sort(orphans)
+
+if #orphans > 0 then
+	print(`Scripts no place que não existem no repositório ({#orphans}):`)
+	for _, orphan in orphans do
+		print(`  ? {orphan}`)
+	end
+end
+
 print(
 	`Resumo: {#scripts} scripts; {unchanged} iguais; {#changes} diferentes; `
-		.. `{#creations} novos; {plannedFolderCount} pastas novas; {#problems} problemas`
+		.. `{#creations} novos; {plannedFolderCount} pastas novas; `
+		.. `{#orphans} só no place; {#problems} problemas`
 )
 
 if #problems > 0 then
