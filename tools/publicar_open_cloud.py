@@ -189,11 +189,12 @@ end
 -- Só salva se algo mudou de verdade: SavePlaceAsync cria uma versão nova
 -- da place a cada chamada, e versão sem mudança é só lixo no histórico.
 if criados + atualizados > 0 then
-    -- SavePlaceAsync e metodo do proprio DataModel, nao de um servico.
-    -- (Vem do par CreatePlaceAsync/SavePlaceAsync usado para places
-    -- dinamicas; o Open Cloud reaproveita o mesmo caminho.)
+    -- ⚠️ CORRECAO: eu tinha escrito game:SavePlaceAsync(), que NAO EXISTE.
+    -- SavePlaceAsync e do AssetService. Sem isto o script rodaria, trocaria
+    -- os Source e falharia justamente ao persistir — o pior tipo de falha,
+    -- porque tudo parece ter funcionado ate a ultima linha.
     local ok, err = pcall(function()
-        game:SavePlaceAsync()
+        game:GetService("AssetService"):SavePlaceAsync({ SaveWithoutPublish = false })
     end)
     if ok then
         print("[SYNC] place salva")
