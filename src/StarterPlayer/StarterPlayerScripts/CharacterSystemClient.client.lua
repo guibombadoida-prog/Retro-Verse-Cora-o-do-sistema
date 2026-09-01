@@ -1,5 +1,6 @@
 -- ============================================
 -- CHARACTER SYSTEM CLIENT V10 — CARD DO DESPERTAR COMPLETO
+-- Nome: "CharacterSystemClient"
 -- ============================================
 -- (V10) O botão VOLTOU, abrindo informação em vez de equipar.
 -- O V9 tirou o botão inteiro e deixou só um rótulo com o nome — longe
@@ -21,7 +22,6 @@
 -- ============================================
 -- (V8) DESPERTAR VISÍVEL E DESBLOQUEÁVEL (histórico)
 -- Coloque em StarterPlayer > StarterPlayerScripts
--- Nome: "CharacterSystemClient"
 -- SUBSTITUI: CharacterSystemClient V7
 -- REMOVER:   CharacterSystemClient V7
 -- ============================================
@@ -2343,4 +2343,3 @@ print([[
 ║  * Popups/venda 25%/Despertar/UI responsiva          ║
 ╚══════════════════════════════════════════════════════╝
 ]])
-

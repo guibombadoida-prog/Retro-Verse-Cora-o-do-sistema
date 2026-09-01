@@ -1,5 +1,6 @@
 -- ============================================================================
 -- LoadingScreenServer V2  ·  ServerScriptService
+-- Nome: "LoadingScreenServer"
 -- (V2) ALTERAÇÕES: :Destroy() -> .Parent = nil; estágios com texto RETRO ARCADE
 -- ============================================================================
 -- Parte SERVIDOR da tela de carregamento (arquitetura server + client).

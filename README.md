@@ -20,14 +20,14 @@ src/ServerScriptService/DataManager.server.lua
 
 | Pasta | Corresponde no Studio a | Conteúdo |
 |---|---|---|
-| `src/ServerScriptService/` | `ServerScriptService` | 32 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
+| `src/ServerScriptService/` | `ServerScriptService` | 34 `Script` de servidor + 1 `ModuleScript` (`PassiveCatalog`) |
 | `src/ServerScriptService/RetroVerse/` | `ServerScriptService > RetroVerse` | 1 `ModuleScript` (Núcleo de Combate) |
 | `src/StarterPlayer/StarterPlayerScripts/` | `StarterPlayer > StarterPlayerScripts` | 19 `LocalScript` de interface/cliente |
 | `src/StarterPlayer/StarterCharacterScripts/` | `StarterPlayer > StarterCharacterScripts` | 2 `Script` que acompanham o personagem |
 | `src/ReplicatedFirst/` | `ReplicatedFirst` | 1 `LocalScript` (tela de carregamento) |
 | `docs/` | — | Diretrizes formais e mapa da arquitetura |
 | `boss-place/` | **outra Place do Roblox** | Scripts exclusivos da Place do Chefão — ver `boss-place/LEIA-ME.md` |
-| `central/` | — | **Aguardando instalação no Studio.** Vazia = tudo sincronizado |
+| `central/` | — | Alterações estruturais aguardando instalação manual no Studio |
 | `tools/` | — | `promover.sh` (confirma instalação no Studio) e `validar.sh` (7 checagens) |
 
 ### Convenção de extensão
@@ -44,31 +44,37 @@ O sufixo do arquivo declara a **classe do objeto** no Studio:
 
 O nome do arquivo é o **nome exato do objeto no Studio**, sem o número de versão —
 a versão vive no cabeçalho do script e no histórico do Git. Assim o arquivo
-`DataManager.server.lua` acompanha o `DataManager` do Studio de V6 até V8 sem
+`DataManager.server.lua` acompanha o `DataManager` do Studio de V6 até V9 sem
 quebrar nenhuma referência.
 
 **Cinco exceções**, onde o próprio cabeçalho manda que o objeto no Studio se chame
 com sufixo de versão — o nome do arquivo respeita isso:
 
-- `MusicPlayerClient_V2.client.lua` (código na V5)
+- `MusicPlayerClient_V2.client.lua` (código na V6)
 - `TeamMenuClient_V2.client.lua` (código na V6)
-- `TutorialMenuClient_V2.client.lua` (código na V6)
+- `TutorialMenuClient_V2.client.lua` (código na V7)
 - `NPC_Server_V2.server.lua` (código na V2)
 - `RetroVerse/NucleoCombate_V2.lua` (exigido pelo `require`)
 
 ---
 
-## 🔄 Fluxo de atualização de script
+## 🔄 Fluxos de atualização de script
 
-**Duas regras, e é o que faz este repositório valer algo:**
+O repositório agora aceita dois caminhos, sem misturá-los:
 
-1. **`src/` espelha o que está rodando no Studio agora.** Não "o mais novo que
-   existe" — o que está *no ar*.
-2. **`central/` é o que falta subir.** Vazia = repositório e Studio em sincronia.
+1. **Mudança somente de código (`Source`)** — altere `src/` em uma branch, passe
+   pelo CI, mescle em `main`, rode **verificar** e só então **publicar**. Nesse
+   caminho, `src/` é o código aprovado para implantação; mesclar não significa que
+   ele já está no ar. O workflow e o histórico de versões do Creator Hub registram
+   qual commit foi realmente publicado.
+2. **Mudança estrutural que ainda exige Studio** — coloque a entrega versionada em
+   `central/`, instale manualmente e use `tools/promover.sh`. `central/` vazia
+   significa apenas que não há instalação manual pendente.
 
-Existe exatamente uma versão de cada script no repositório, em `central/` **ou** em
-`src/`, nunca nos dois. Nada de `_V6` ao lado de `_V8`. O histórico do Git faz o
-papel de arquivo morto.
+Em `src/` continua existindo exatamente um arquivo ativo por sistema. Nada de
+`_V6` ao lado de `_V8`: o histórico do Git guarda as versões anteriores.
+
+### Mudança estrutural/manual
 
 ```
    script alterado / novo
@@ -100,9 +106,8 @@ tools/promover.sh AwakeningSystemServer_V3.server.lua
 git add -A && git commit -m "AwakeningSystemServer V2 -> V3 instalado"
 ```
 
-⚠️ **`promover.sh` só depois de colar no Studio.** Antes disso o `src/` estaria
-mentindo sobre o que está no ar — e é justamente essa mentira que o fluxo existe
-para impedir.
+⚠️ **`promover.sh` só depois de colar no Studio.** Antes disso o repositório
+perderia a informação de que aquela instalação estrutural continua pendente.
 
 O `promover.sh` não adivinha nada: o destino sai do `-- Nome:` e do
 `-- Coloque em ...` do cabeçalho do próprio script. Ele também **se recusa** a
@@ -136,7 +141,7 @@ git show <commit>:src/ServerScriptService/DataManager.server.lua > recuperado.lu
 | 1 | Duplicata de família em `src/` | É a regra "nunca dois scripts da mesma família rodando ao mesmo tempo", virando checagem em vez de disciplina |
 | 2 | Barreiras `repeat ... until _G.X` | Se a dependência não existir, o script espera **para sempre sem erro no Output** — a falha mais difícil de achar no projeto |
 | 3 | APIs `_G` sem dono | Pega dependência quebrada antes de virar bug em jogo |
-| 4 | `central/` vazia | Lista o que falta colar no Studio, e qual versão substitui |
+| 4 | Pendências em `central/` | Lista o que ainda exige instalação manual e qual versão substitui |
 | 5 | `wait()` / `spawn()` / `:Destroy()` | As regras de código do projeto, ignorando comentário e bloco `--[[ ]]` |
 | 6 | Nome do arquivo × `-- Nome:` | O caminho do arquivo é a instrução de instalação; divergência faz colar no lugar errado |
 | 7 | Sintaxe (`src/` + `central/` + `boss-place/`) | Pega erro de estrutura antes de você colar no Studio |
@@ -192,12 +197,14 @@ Cada passiva do `PassiveCatalog` já declara seu `vfx` (`BRILHO_METALICO`,
 
 ### Fluxo sem Roblox Studio
 
-O projeto inclui projetos Rojo e três automações com travas de segurança:
+O projeto inclui projetos Rojo e quatro automações com travas de segurança:
 
 - validação de sintaxe, teste puro e build de um place sem 3D;
 - execução de uma tarefa Luau dentro do motor Roblox pela Open Cloud;
 - publicação manual somente do `Source` de scripts que já existam em um place,
   preservando o mapa e criando uma versão recuperável no histórico.
+- bootstrap separado que pode criar a árvore de scripts **somente** em uma
+  experience privada de teste, nunca na experience de produção.
 
 As chaves da Roblox ficam em GitHub Secrets e nunca fazem parte do repositório. Veja
 o guia acima antes de apontar qualquer workflow para um place.

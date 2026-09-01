@@ -1,3 +1,4 @@
+-- Nome: "PassiveCatalog"
 --[[
 ════════════════════════════════════════════════════════════════
 	PASSIVE CATALOG V1 — CATÁLOGO DE HABILIDADES PASSIVAS

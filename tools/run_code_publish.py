@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Envia um pacote RBXM de scripts para uma tarefa Luau Execution.
 
-A tarefa abre o place atual, compara caminhos/classes e, somente em ``publish``,
-altera ``Source`` e chama ``AssetService:SavePlaceAsync``. Este cliente usa apenas
-a biblioteca padrão e nunca imprime a chave ou a URI assinada de upload.
+As tarefas podem apenas comparar/publicar ``Source`` existente ou preparar uma
+place privada de código. Este cliente usa somente a biblioteca padrão e nunca
+imprime a chave ou a URI assinada de upload.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ API_ROOT = "https://apis.roblox.com/cloud/v2"
 MAX_PAYLOAD_BYTES = 20_000_000
 MAX_TASK_BYTES = 200_000
 TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED"}
+ALLOWED_MODES = {"check", "publish", "bootstrap-check", "bootstrap"}
 
 
 class PublishError(RuntimeError):
@@ -37,7 +38,7 @@ def required_environment(name: str) -> str:
 
 
 def validate_numeric_id(name: str, value: str) -> str:
-    if not value.isdecimal() or int(value) <= 0:
+    if not value.isascii() or not value.isdigit() or int(value) <= 0:
         raise PublishError(f"{name} precisa ser um número inteiro positivo")
     return value
 
@@ -56,8 +57,16 @@ def read_payload(path: Path) -> bytes:
     return payload
 
 
-def build_task_source(path: Path, mode: str, universe_id: str, place_id: str) -> str:
-    if mode not in {"check", "publish"}:
+def build_task_source(
+    path: Path,
+    mode: str,
+    universe_id: str,
+    place_id: str,
+    *,
+    forbidden_universe_id: str = "",
+    forbidden_place_id: str = "",
+) -> str:
+    if mode not in ALLOWED_MODES:
         raise PublishError(f"modo inválido: {mode}")
     try:
         body = path.read_text(encoding="utf-8")
@@ -71,6 +80,9 @@ def build_task_source(path: Path, mode: str, universe_id: str, place_id: str) ->
             f"local RETROVERSE_MODE = {json.dumps(mode)}",
             f"local EXPECTED_UNIVERSE_ID = {json.dumps(universe_id)}",
             f"local EXPECTED_PLACE_ID = {json.dumps(place_id)}",
+            "local FORBIDDEN_PRODUCTION_UNIVERSE_ID = "
+            f"{json.dumps(forbidden_universe_id)}",
+            f"local FORBIDDEN_PRODUCTION_PLACE_ID = {json.dumps(forbidden_place_id)}",
             "",
         )
     )
@@ -236,9 +248,37 @@ def run(args: argparse.Namespace) -> int:
         "ROBLOX_UNIVERSE_ID", required_environment("ROBLOX_UNIVERSE_ID")
     )
     place_id = validate_numeric_id("ROBLOX_PLACE_ID", required_environment("ROBLOX_PLACE_ID"))
+    forbidden_universe_id = os.environ.get("ROBLOX_FORBIDDEN_UNIVERSE_ID", "").strip()
+    forbidden_place_id = os.environ.get("ROBLOX_FORBIDDEN_PLACE_ID", "").strip()
+
+    if forbidden_universe_id:
+        forbidden_universe_id = validate_numeric_id(
+            "ROBLOX_FORBIDDEN_UNIVERSE_ID", forbidden_universe_id
+        )
+    if forbidden_place_id:
+        forbidden_place_id = validate_numeric_id(
+            "ROBLOX_FORBIDDEN_PLACE_ID", forbidden_place_id
+        )
+    if args.mode.startswith("bootstrap"):
+        if not forbidden_universe_id or not forbidden_place_id:
+            raise PublishError(
+                "bootstrap exige ROBLOX_FORBIDDEN_UNIVERSE_ID e "
+                "ROBLOX_FORBIDDEN_PLACE_ID"
+            )
+        if universe_id == forbidden_universe_id:
+            raise PublishError("bootstrap recusado na experiência de produção")
+        if place_id == forbidden_place_id:
+            raise PublishError("bootstrap recusado no place de produção")
 
     payload = read_payload(args.payload)
-    task_source = build_task_source(args.task, args.mode, universe_id, place_id)
+    task_source = build_task_source(
+        args.task,
+        args.mode,
+        universe_id,
+        place_id,
+        forbidden_universe_id=forbidden_universe_id,
+        forbidden_place_id=forbidden_place_id,
+    )
     client = OpenCloudClient(api_key)
 
     print(f"Modo: {args.mode}; pacote: {len(payload)} bytes")
@@ -294,9 +334,9 @@ def run(args: argparse.Namespace) -> int:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Verifica ou publica somente Source usando Open Cloud Luau Execution"
+        description="Executa uma tarefa de código usando Open Cloud Luau Execution"
     )
-    parser.add_argument("--mode", choices=("check", "publish"), default="check")
+    parser.add_argument("--mode", choices=tuple(sorted(ALLOWED_MODES)), default="check")
     parser.add_argument("--payload", type=Path, required=True)
     parser.add_argument("--task", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=330)

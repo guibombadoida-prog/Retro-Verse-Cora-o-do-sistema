@@ -2,6 +2,12 @@
 
 ⚠️ **Esta pasta NÃO vai na place principal.** É uma **Place separada** do Roblox.
 
+O CI analisa a sintaxe destes arquivos, mas os workflows de publicação e bootstrap
+atuais empacotam apenas `src/`. Isso é intencional: a Place do chefe precisa de uma
+seleção de scripts compartilhados e o `Boss_ModelController` mora dentro do Model
+3D. Ela só ganhará automação quando existir um manifesto de caminhos explícito;
+não aponte o pacote principal para a Place do chefe.
+
 A place principal é `133619220682618`. A place do chefe é outra, com seu próprio
 DataModel — os `_G.PlayerDataManager`, `_G.CharacterCatalog`, `_G.AdminRegistry`
 etc. **não existem lá automaticamente**.
@@ -125,7 +131,7 @@ gate, sem-PvP e saída com recompensa. O que falta é o **chefe em si**, que é
 trabalho de Model no Studio, não de script solto:
 
 - O `Model` do chefe com `Humanoid`, membros, `AnimSaves`
-- `Pathfinding` (IA de perseguição), `ChatScript` (falas)
+- `ChatScript` (falas); a perseguição fica no `Boss_ModelController`
 - `todamage` (contato), `AllDamage` (AOE), `gen*` (projéteis)
 - `BossWaypoints` + `BossTools`
 - `BossHp` (a GUI de barra de vida — única GUI permitida pela exceção)

@@ -1,4 +1,5 @@
 -- Client Sync Script APRIMORADO
+-- Nome: "ClientSync"
 -- Coloque este script em StarterPlayer > StarterPlayerScripts
 
 local Players = game:GetService("Players")

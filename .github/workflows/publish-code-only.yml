@@ -26,17 +26,42 @@ concurrency:
 env:
   ROJO_VERSION: "7.7.0"
   ROJO_SHA256: "22503e5839864f9d7c2171c48b536fc229f2cc4d8774c9cc149f60941d864073"
-  ROBLOX_API_KEY: ${{ secrets.ROBLOX_PUBLISH_API_KEY }}
-  ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_PUBLISH_UNIVERSE_ID }}
-  ROBLOX_PLACE_ID: ${{ vars.ROBLOX_PUBLISH_PLACE_ID }}
   MODO: ${{ inputs.modo }}
   CONFIRMACAO: ${{ inputs.confirmacao }}
 
 jobs:
+  exigir-main:
+    name: Recusar publicação fora da main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Conferir a referência escolhida
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Publicação recusada: execute este workflow somente na branch main." >&2
+            exit 1
+          fi
+
+  validar:
+    name: Validar exatamente o commit que será publicado
+    needs: exigir-main
+    permissions:
+      contents: read
+    uses: ./.github/workflows/validate-code.yml
+
   publicar:
     name: Comparar e publicar Script.Source
+    needs: validar
     runs-on: ubuntu-24.04
     timeout-minutes: 12
+    environment:
+      name: roblox-production
+    env:
+      ROBLOX_API_KEY: ${{ secrets.ROBLOX_PUBLISH_API_KEY }}
+      ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_PUBLISH_UNIVERSE_ID }}
+      ROBLOX_PLACE_ID: ${{ vars.ROBLOX_PUBLISH_PLACE_ID }}
 
     steps:
       - name: Baixar o código

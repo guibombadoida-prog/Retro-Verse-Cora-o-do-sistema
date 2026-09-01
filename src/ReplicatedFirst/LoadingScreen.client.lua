@@ -1,5 +1,6 @@
 -- ============================================
 -- TELA DE CARREGAMENTO RETRO ARCADE V2 (CLIENT)
+-- Nome: "LoadingScreen"
 -- ReplicatedFirst > LoadingScreen (LocalScript)
 -- SUBSTITUI: LoadingScreen V1 ("HIPER AVANÇADA")
 -- ============================================

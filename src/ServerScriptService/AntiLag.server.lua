@@ -1,4 +1,5 @@
 -- Anti-Lag V2 Script by GUIBOMBADOIDA
+-- Nome: "AntiLag"
 -- Optimized for performance without removing materials or VFX
 
 local RunService = game:GetService("RunService")
