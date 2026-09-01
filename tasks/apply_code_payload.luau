@@ -40,6 +40,24 @@ local function displayPath(parts)
 	return table.concat(parts, " > ")
 end
 
+-- Todo script do projeto começa com um cabeçalho `-- Nome: X`. Ler esse campo
+-- identifica um script do place com muito mais segurança do que o nome da
+-- instância, que já foi cortado e reescrito por versões antigas do promover.sh.
+local function headerName(source)
+	local line = 0
+	for text in string.gmatch(source, "[^\r\n]+") do
+		line += 1
+		if line > 25 then
+			break
+		end
+		local nome = string.match(text, "^%s*%-%-%s*Nome:%s*(.-)%s*$")
+		if nome and nome ~= "" then
+			return nome
+		end
+	end
+	return nil
+end
+
 local function findChildrenByName(parent, name)
 	local found = {}
 	for _, child in parent:GetChildren() do
@@ -169,7 +187,12 @@ for _, containerPath in containerOrder do
 	if not plannedFolders[containerPath] then
 		for _, child in container.instance:GetChildren() do
 			if SCRIPT_CLASSES[child.ClassName] and not container.claimed[child.Name] then
-				table.insert(orphans, `{containerPath} > {child.Name} ({child.ClassName})`)
+				local nome = headerName(child.Source)
+				local etiqueta = nome and `cabeçalho "{nome}"` or "sem cabeçalho"
+				table.insert(
+					orphans,
+					`{containerPath} > {child.Name} ({child.ClassName}) — {etiqueta}, {#child.Source} bytes`
+				)
 			end
 		end
 	end
