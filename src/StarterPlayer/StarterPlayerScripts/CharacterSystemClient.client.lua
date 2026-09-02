@@ -722,6 +722,288 @@ local function criarMolaPainel(context, frame, aoEsconder)
 end
 
 -- =====================================
+-- (V13) ANIMAÇÃO DE TEXTO E PAINEL MODAL
+-- =====================================
+-- Os painéis de lore e de Despertar eram os dois únicos do arquivo sem
+-- nenhuma animação: nasciam prontos com Parent = playerGui e sumiam com
+-- Parent = nil. E os dois liam texto longo com TextScaled, que encolhe a
+-- fonte até tudo caber — uma lore de cinco linhas virava letra miúda
+-- ilegível no celular.
+
+-- Máquina de escrever por MaxVisibleGraphemes.
+--
+-- A forma ingênua seria cortar a string e reatribuir Text a cada quadro.
+-- Isso remede o texto e recalcula a quebra de linha em toda letra: com
+-- TextWrapped a última palavra fica pulando de linha enquanto digita.
+-- MaxVisibleGraphemes esconde o final SEM mexer no Text, então a quebra
+-- de linha é a final desde o primeiro quadro e nada se move na tela.
+--
+-- Grafema, e não byte: "ç" e "ã" ocupam dois bytes, e emoji ocupa mais.
+-- Contar bytes cortaria um caractere no meio e mostraria lixo.
+local function maquinaDeEscrever(context, chave, label, texto, porSegundo, atraso)
+	label.Text = texto
+	local total = utf8.len(texto) or #texto
+	label.MaxVisibleGraphemes = 0
+
+	local estado = { visiveis = 0, espera = atraso or 0, completo = false }
+	local velocidade = porSegundo or 55
+
+	local function completar()
+		estado.completo = true
+		estado.visiveis = total
+		label.MaxVisibleGraphemes = -1
+	end
+
+	if total <= 0 then
+		completar()
+		return {
+			completar = completar,
+			terminou = function()
+				return true
+			end,
+		}
+	end
+
+	-- O atraso inicial mora aqui dentro, e não num task.wait antes de
+	-- chamar: assim ele vive no mesmo contexto do painel e morre junto
+	-- se o jogador fechar antes de a digitação começar.
+	local conexao
+	conexao = conectarContexto(context, RunService.Heartbeat, function(deltaTime)
+		if estado.completo or not label.Parent then
+			return
+		end
+
+		local passo = math.min(deltaTime, 1 / 20)
+		if estado.espera > 0 then
+			estado.espera -= passo
+			return
+		end
+
+		estado.visiveis += passo * velocidade
+		if estado.visiveis >= total then
+			completar()
+			if conexao then
+				conexao:Disconnect()
+			end
+		else
+			label.MaxVisibleGraphemes = math.floor(estado.visiveis)
+		end
+	end)
+
+	return {
+		completar = completar,
+		terminou = function()
+			return estado.completo
+		end,
+	}
+end
+
+-- Casca comum dos dois painéis: fundo escuro que entra em fade, moldura
+-- com mola, fechar por botão, por toque no fundo e por ESC, e saída
+-- animada em vez de sumiço seco.
+local function criarModal(largura, altura, corBorda)
+	local context = novoContexto()
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "CharModal"
+	gui.DisplayOrder = 100
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.Parent = playerGui
+
+	local fundo = Instance.new("TextButton")
+	fundo.Size = UDim2.new(1, 0, 1, 0)
+	fundo.BackgroundColor3 = Color3.new(0, 0, 0)
+	fundo.BackgroundTransparency = 1
+	fundo.AutoButtonColor = false
+	fundo.Text = ""
+	fundo.Parent = gui
+
+	local painel = Instance.new("Frame")
+	painel.AnchorPoint = Vector2.new(0.5, 0.5)
+	painel.Position = UDim2.new(0.5, 0, 0.5, 0)
+	painel.Size = UDim2.new(largura, 0, altura, 0)
+	painel.BackgroundColor3 = COLORS.panel
+	painel.BorderColor3 = corBorda
+	painel.BorderSizePixel = 3
+	painel.Visible = false
+	painel.Parent = gui
+
+	local canto = Instance.new("UICorner")
+	canto.CornerRadius = UDim.new(0.02, 0)
+	canto.Parent = painel
+
+	local fechando = false
+	local mola = criarMolaPainel(context, painel, function()
+		limparContexto(context)
+		gui.Parent = nil
+	end)
+
+	local function fechar()
+		if fechando then
+			return
+		end
+		fechando = true
+		playSound(sounds.close)
+		tocarTween(
+			context,
+			"fundoModal",
+			fundo,
+			TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ BackgroundTransparency = 1 }
+		)
+		mola.close()
+	end
+
+	tocarTween(
+		context,
+		"fundoModal",
+		fundo,
+		TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ BackgroundTransparency = 0.45 }
+	)
+	mola.open()
+
+	conectarContexto(context, fundo.MouseButton1Click, fechar)
+	conectarContexto(context, UserInputService.InputBegan, function(input, processado)
+		if not processado and input.KeyCode == Enum.KeyCode.Escape then
+			fechar()
+		end
+	end)
+
+	return {
+		context = context,
+		gui = gui,
+		painel = painel,
+		fechar = fechar,
+	}
+end
+
+-- Entrada escalonada de uma seção do painel. O atraso é DelayTime do
+-- próprio TweenInfo: nenhuma thread por seção, então as seções não
+-- disputam a UI entre si nem sobrevivem ao fechamento do painel.
+-- `alvos` diz quais transparências animar até 0 (texto, fundo, imagem).
+local function entrarEmSequencia(context, objeto, chave, ordem, alvos)
+	local posicaoFinal = objeto.Position
+	objeto.Position = posicaoFinal + UDim2.new(0, 0, 0.035, 0)
+	for propriedade in pairs(alvos) do
+		objeto[propriedade] = 1
+	end
+
+	local atraso = 0.06 + ordem * 0.05
+	tocarTween(
+		context,
+		chave .. "Pos",
+		objeto,
+		TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, atraso),
+		{ Position = posicaoFinal }
+	)
+	tocarTween(
+		context,
+		chave .. "Fade",
+		objeto,
+		TweenInfo.new(0.34, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, atraso),
+		alvos
+	)
+	return atraso
+end
+
+-- Cabeçalho padrão dos dois painéis, com botão de fechar já animado.
+local function criarCabecalhoModal(modal, texto, corFundo, corTexto)
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, 0, 0.12, 0)
+	header.BackgroundColor3 = corFundo
+	header.BorderSizePixel = 0
+	header.Parent = modal.painel
+
+	local headerCanto = Instance.new("UICorner")
+	headerCanto.CornerRadius = UDim.new(0.12, 0)
+	headerCanto.Parent = header
+
+	local titulo = Instance.new("TextLabel")
+	titulo.Size = UDim2.new(0.82, 0, 1, 0)
+	titulo.Position = UDim2.new(0.03, 0, 0, 0)
+	titulo.BackgroundTransparency = 1
+	titulo.Text = texto
+	titulo.TextColor3 = corTexto
+	titulo.TextScaled = true
+	titulo.TextXAlignment = Enum.TextXAlignment.Left
+	titulo.Font = Enum.Font.Arcade
+	titulo.Parent = header
+	limitarTexto(titulo, 12, 30)
+
+	local fecharBtn = Instance.new("TextButton")
+	fecharBtn.Size = UDim2.new(0.1, 0, 0.72, 0)
+	fecharBtn.Position = UDim2.new(0.87, 0, 0.14, 0)
+	fecharBtn.BackgroundColor3 = COLORS.red
+	fecharBtn.BorderSizePixel = 0
+	fecharBtn.Text = "X"
+	fecharBtn.TextColor3 = COLORS.white
+	fecharBtn.TextScaled = true
+	fecharBtn.Font = Enum.Font.Arcade
+	fecharBtn.Parent = header
+
+	local proporcao = Instance.new("UIAspectRatioConstraint")
+	proporcao.AspectRatio = 1
+	proporcao.DominantAxis = Enum.DominantAxis.Height
+	proporcao.Parent = fecharBtn
+
+	local fecharCanto = Instance.new("UICorner")
+	fecharCanto.CornerRadius = UDim.new(0.2, 0)
+	fecharCanto.Parent = fecharBtn
+
+	prepararBotaoAnimado(modal.context, fecharBtn)
+	conectarContexto(modal.context, fecharBtn.MouseButton1Click, modal.fechar)
+
+	return header, titulo
+end
+
+-- Área de texto longo com rolagem. Texto de lore NÃO pode usar
+-- TextScaled: ele encolhe a fonte até a última palavra caber, então
+-- quanto mais história o personagem tem, menor fica a letra. Aqui o
+-- tamanho é fixo e sobra rolagem, que é o contrário do que era.
+local function criarAreaDeTexto(pai, posicao, tamanho, corMoldura)
+	local moldura = Instance.new("Frame")
+	moldura.Position = posicao
+	moldura.Size = tamanho
+	moldura.BackgroundColor3 = COLORS.panelRaised
+	moldura.BorderColor3 = corMoldura
+	moldura.BorderSizePixel = 2
+	moldura.Parent = pai
+
+	local molduraCanto = Instance.new("UICorner")
+	molduraCanto.CornerRadius = UDim.new(0.06, 0)
+	molduraCanto.Parent = moldura
+
+	local rolagem = Instance.new("ScrollingFrame")
+	rolagem.Size = UDim2.new(1, -10, 1, -10)
+	rolagem.Position = UDim2.new(0, 5, 0, 5)
+	rolagem.BackgroundTransparency = 1
+	rolagem.BorderSizePixel = 0
+	rolagem.ScrollBarThickness = 5
+	rolagem.ScrollBarImageColor3 = corMoldura
+	rolagem.CanvasSize = UDim2.new()
+	rolagem.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	rolagem.Parent = moldura
+
+	local corpo = Instance.new("TextLabel")
+	corpo.Size = UDim2.new(1, -8, 0, 0)
+	corpo.AutomaticSize = Enum.AutomaticSize.Y
+	corpo.BackgroundTransparency = 1
+	corpo.TextColor3 = COLORS.ink
+	corpo.TextSize = math.clamp(math.floor(16 * uiScale), 12, 20)
+	corpo.TextWrapped = true
+	corpo.RichText = false
+	corpo.Font = Enum.Font.Code
+	corpo.TextXAlignment = Enum.TextXAlignment.Left
+	corpo.TextYAlignment = Enum.TextYAlignment.Top
+	corpo.Text = ""
+	corpo.Parent = rolagem
+
+	return moldura, corpo
+end
+
+-- =====================================
 -- NOTIFICAÇÃO
 -- (V6) CORREÇÃO: antes do menu existir, um Frame solto no PlayerGui
 -- não renderiza — usa ScreenGui temporário nesse caso.
@@ -1439,77 +1721,62 @@ local function createAbilitiesPopup(characterName)
 end
 
 -- =====================================
--- (V10) POPUP DO DESPERTAR
+-- (V13) PAINEL DO DESPERTAR
 -- =====================================
--- Imagem, nome, história e as Tools da forma desperta — o que o card
--- do personagem original abre ao clicar em VER DESPERTAR.
+-- Imagem, estado, HP, habilidades e história da forma desperta. Não tem
+-- botão de equipar de propósito: o Despertar é conquistado em combate
+-- pela barra, não escolhido no menu. Este painel mostra o que existe e
+-- o que falta para liberar.
 --
--- Não tem botão de equipar de propósito: o Despertar é conquistado em
--- combate pela barra, não escolhido no menu. O que este painel faz é
--- mostrar o que existe e o que falta para liberar.
+-- (V13) O V12 desenhava tudo de uma vez e lia a história com TextScaled.
+-- Agora as seções entram escalonadas, a história é digitada, a moldura
+-- pulsa em magenta enquanto está bloqueada e a lista de habilidades
+-- entra linha a linha.
 local function createAwakeningPopup(characterName, info)
 	playSound(sounds.info)
 
 	local aw = (info and info.awakening) or {}
 	local nomeDesperto = aw.displayName or (characterName .. " (Despertado)")
 	local _, toolsDespertas = collectCharacterTools(characterName)
+	local liberado = info and info.liberado
 
-	local infoGui = Instance.new("ScreenGui")
-	infoGui.Name = "AwakeningPopup"
-	infoGui.DisplayOrder = 100
-	infoGui.ResetOnSpawn = false
-	infoGui.Parent = playerGui
+	local modal = criarModal(isMobile and 0.94 or 0.6, isMobile and 0.9 or 0.84, COLORS.magenta)
+	local context = modal.context
+	local painel = modal.painel
 
-	local background = Instance.new("Frame")
-	background.Size = UDim2.new(1, 0, 1, 0)
-	background.BackgroundColor3 = Color3.new(0, 0, 0)
-	background.BackgroundTransparency = 0.5
-	background.Parent = infoGui
+	criarCabecalhoModal(modal, "⚡ " .. nomeDesperto:upper(), COLORS.magenta, COLORS.background)
 
-	local popup = Instance.new("Frame")
-	popup.Size = isMobile and UDim2.new(0.92, 0, 0.88, 0) or UDim2.new(0.55, 0, 0.8, 0)
-	popup.Position = UDim2.new(0.5, 0, 0.5, 0)
-	popup.AnchorPoint = Vector2.new(0.5, 0.5)
-	popup.BackgroundColor3 = Color3.fromRGB(18, 12, 26)
-	popup.BorderColor3 = Color3.fromRGB(255, 0, 255)
-	popup.BorderSizePixel = 4
-	popup.Parent = infoGui
+	-- A moldura respira enquanto o Despertar está trancado e fica parada
+	-- quando está liberado. É o estado do personagem virando movimento:
+	-- de longe já dá para saber sem ler o selo.
+	if not liberado then
+		local contorno = Instance.new("UIStroke")
+		contorno.Color = COLORS.magenta
+		contorno.Thickness = 3
+		contorno.Parent = painel
+		tocarTween(
+			context,
+			"contornoPainel",
+			contorno,
+			TweenInfo.new(1.3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Transparency = 0.7 }
+		)
+	end
 
-	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1, 0, 0.11, 0)
-	header.BackgroundColor3 = Color3.fromRGB(90, 0, 130)
-	header.BorderSizePixel = 0
-	header.Parent = popup
+	-- RETRATO DA FORMA DESPERTA
+	local retrato = Instance.new("Frame")
+	retrato.Size = UDim2.new(0.3, 0, 0.26, 0)
+	retrato.Position = UDim2.new(0.04, 0, 0.15, 0)
+	retrato.BackgroundColor3 = COLORS.panelRaised
+	retrato.BorderColor3 = COLORS.magenta
+	retrato.BorderSizePixel = 2
+	retrato.ClipsDescendants = true
+	retrato.Parent = painel
 
-	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Size = UDim2.new(0.85, 0, 1, 0)
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "⚡ " .. nomeDesperto:upper()
-	titleLabel.TextColor3 = Color3.fromRGB(255, 150, 255)
-	titleLabel.TextScaled = true
-	titleLabel.Font = Enum.Font.Arcade
-	titleLabel.Parent = header
-
-	local closeButton = Instance.new("TextButton")
-	closeButton.Size = UDim2.new(0.1, 0, 0.8, 0)
-	closeButton.Position = UDim2.new(0.88, 0, 0.1, 0)
-	closeButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-	closeButton.BorderColor3 = Color3.new(1, 1, 1)
-	closeButton.BorderSizePixel = 2
-	closeButton.Text = "X"
-	closeButton.TextColor3 = Color3.new(1, 1, 1)
-	closeButton.TextScaled = true
-	closeButton.Font = Enum.Font.Arcade
-	closeButton.Parent = header
-
-	-- IMAGEM
-	local imgFrame = Instance.new("Frame")
-	imgFrame.Size = UDim2.new(0.34, 0, 0.3, 0)
-	imgFrame.Position = UDim2.new(0.04, 0, 0.14, 0)
-	imgFrame.BackgroundColor3 = Color3.fromRGB(30, 20, 40)
-	imgFrame.BorderColor3 = Color3.fromRGB(255, 0, 255)
-	imgFrame.BorderSizePixel = 2
-	imgFrame.Parent = popup
+	local retratoProporcao = Instance.new("UIAspectRatioConstraint")
+	retratoProporcao.AspectRatio = 1
+	retratoProporcao.DominantAxis = Enum.DominantAxis.Height
+	retratoProporcao.Parent = retrato
 
 	local imageId = tonumber(aw.imageId) or 0
 	if imageId > 0 then
@@ -1518,235 +1785,338 @@ local function createAwakeningPopup(characterName, info)
 		img.BackgroundTransparency = 1
 		img.Image = "rbxassetid://" .. tostring(imageId)
 		img.ScaleType = Enum.ScaleType.Fit
-		img.Parent = imgFrame
+		img.ImageTransparency = 1
+		img.Parent = retrato
+		tocarTween(
+			context,
+			"retratoFade",
+			img,
+			TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.1),
+			{ ImageTransparency = liberado and 0 or 0.45 }
+		)
 	else
 		local semImg = Instance.new("TextLabel")
 		semImg.Size = UDim2.new(1, 0, 1, 0)
 		semImg.BackgroundTransparency = 1
 		semImg.Text = "SEM\nIMAGEM"
-		semImg.TextColor3 = Color3.fromRGB(120, 100, 140)
+		semImg.TextColor3 = COLORS.muted
 		semImg.TextScaled = true
 		semImg.Font = Enum.Font.Arcade
-		semImg.Parent = imgFrame
+		semImg.Parent = retrato
 	end
 
-	-- ESTADO + HP, ao lado da imagem
-	local estadoLabel = Instance.new("TextLabel")
-	estadoLabel.Size = UDim2.new(0.56, 0, 0.1, 0)
-	estadoLabel.Position = UDim2.new(0.4, 0, 0.15, 0)
-	estadoLabel.BackgroundTransparency = 1
-	estadoLabel.TextScaled = true
-	estadoLabel.TextWrapped = true
-	estadoLabel.Font = Enum.Font.Arcade
-	estadoLabel.TextXAlignment = Enum.TextXAlignment.Left
-	estadoLabel.Parent = popup
+	entrarEmSequencia(context, retrato, "retrato", 0, { BackgroundTransparency = 0 })
 
-	if info and info.liberado then
-		estadoLabel.Text = "✅ LIBERADO"
-		estadoLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+	-- ESTADO
+	local estado = Instance.new("TextLabel")
+	estado.Size = UDim2.new(0.54, 0, 0.07, 0)
+	estado.Position = UDim2.new(0.38, 0, 0.16, 0)
+	estado.BackgroundTransparency = 1
+	estado.TextScaled = true
+	estado.TextWrapped = true
+	estado.Font = Enum.Font.Arcade
+	estado.TextXAlignment = Enum.TextXAlignment.Left
+	estado.Parent = painel
+	limitarTexto(estado, 10, 22)
+
+	if liberado then
+		estado.Text = "✅ LIBERADO"
+		estado.TextColor3 = COLORS.green
 	elseif info and not info.hasOriginal then
-		estadoLabel.Text = "🔒 PRECISA DO ORIGINAL"
-		estadoLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+		estado.Text = "🔒 PRECISA DO ORIGINAL"
+		estado.TextColor3 = COLORS.red
 	else
-		estadoLabel.Text = "🔒 FALTA O EMBLEMA"
-		estadoLabel.TextColor3 = Color3.fromRGB(255, 200, 80)
+		estado.Text = "🔒 FALTA O EMBLEMA"
+		estado.TextColor3 = COLORS.yellow
 	end
+	entrarEmSequencia(context, estado, "estado", 1, { TextTransparency = 0 })
 
-	local hpLabel = Instance.new("TextLabel")
-	hpLabel.Size = UDim2.new(0.56, 0, 0.07, 0)
-	hpLabel.Position = UDim2.new(0.4, 0, 0.26, 0)
-	hpLabel.BackgroundTransparency = 1
-	hpLabel.Text = "❤️ HP: " .. tostring(aw.health or "—")
-	hpLabel.TextColor3 = Color3.new(1, 1, 1)
-	hpLabel.TextScaled = true
-	hpLabel.Font = Enum.Font.Code
-	hpLabel.TextXAlignment = Enum.TextXAlignment.Left
-	hpLabel.Parent = popup
+	local hp = Instance.new("TextLabel")
+	hp.Size = UDim2.new(0.54, 0, 0.06, 0)
+	hp.Position = UDim2.new(0.38, 0, 0.245, 0)
+	hp.BackgroundTransparency = 1
+	hp.Text = "❤️ HP: " .. tostring(aw.health or "—")
+	hp.TextColor3 = COLORS.ink
+	hp.TextScaled = true
+	hp.Font = Enum.Font.Code
+	hp.TextXAlignment = Enum.TextXAlignment.Left
+	hp.Parent = painel
+	limitarTexto(hp, 9, 18)
+	entrarEmSequencia(context, hp, "hp", 2, { TextTransparency = 0 })
 
-	local comoLabel = Instance.new("TextLabel")
-	comoLabel.Size = UDim2.new(0.56, 0, 0.1, 0)
-	comoLabel.Position = UDim2.new(0.4, 0, 0.34, 0)
-	comoLabel.BackgroundTransparency = 1
-	comoLabel.Text = aw.duracao
-			and string.format("Enche em combate • dura %ds", aw.duracao)
+	local como = Instance.new("TextLabel")
+	como.Size = UDim2.new(0.54, 0, 0.09, 0)
+	como.Position = UDim2.new(0.38, 0, 0.315, 0)
+	como.BackgroundTransparency = 1
+	como.Text = aw.duracao and string.format("Enche em combate • dura %ds", aw.duracao)
 		or "Enche em combate"
-	comoLabel.TextColor3 = Color3.fromRGB(180, 150, 220)
-	comoLabel.TextScaled = true
-	comoLabel.TextWrapped = true
-	comoLabel.Font = Enum.Font.Code
-	comoLabel.TextXAlignment = Enum.TextXAlignment.Left
-	comoLabel.Parent = popup
+	como.TextColor3 = COLORS.muted
+	como.TextScaled = true
+	como.TextWrapped = true
+	como.Font = Enum.Font.Code
+	como.TextXAlignment = Enum.TextXAlignment.Left
+	como.Parent = painel
+	limitarTexto(como, 8, 15)
+	entrarEmSequencia(context, como, "como", 3, { TextTransparency = 0 })
 
-	-- HABILIDADES (TOOLS)
+	-- HABILIDADES
 	local toolsTitulo = Instance.new("TextLabel")
-	toolsTitulo.Size = UDim2.new(0.92, 0, 0.06, 0)
-	toolsTitulo.Position = UDim2.new(0.04, 0, 0.47, 0)
+	toolsTitulo.Size = UDim2.new(0.92, 0, 0.055, 0)
+	toolsTitulo.Position = UDim2.new(0.04, 0, 0.44, 0)
 	toolsTitulo.BackgroundTransparency = 1
 	toolsTitulo.Text = string.format("⚔️ HABILIDADES DESPERTAS (%d)", #toolsDespertas)
-	toolsTitulo.TextColor3 = Color3.fromRGB(255, 210, 70)
+	toolsTitulo.TextColor3 = COLORS.yellow
 	toolsTitulo.TextScaled = true
 	toolsTitulo.Font = Enum.Font.Arcade
 	toolsTitulo.TextXAlignment = Enum.TextXAlignment.Left
-	toolsTitulo.Parent = popup
+	toolsTitulo.Parent = painel
+	limitarTexto(toolsTitulo, 10, 20)
+	entrarEmSequencia(context, toolsTitulo, "toolsTitulo", 4, { TextTransparency = 0 })
+
+	local toolsMoldura = Instance.new("Frame")
+	toolsMoldura.Size = UDim2.new(0.92, 0, 0.17, 0)
+	toolsMoldura.Position = UDim2.new(0.04, 0, 0.5, 0)
+	toolsMoldura.BackgroundColor3 = COLORS.panelRaised
+	toolsMoldura.BorderColor3 = Color3.fromRGB(120, 60, 160)
+	toolsMoldura.BorderSizePixel = 2
+	toolsMoldura.Parent = painel
+
+	local toolsCanto = Instance.new("UICorner")
+	toolsCanto.CornerRadius = UDim.new(0.08, 0)
+	toolsCanto.Parent = toolsMoldura
 
 	local toolsScroll = Instance.new("ScrollingFrame")
-	toolsScroll.Size = UDim2.new(0.92, 0, 0.2, 0)
-	toolsScroll.Position = UDim2.new(0.04, 0, 0.54, 0)
-	toolsScroll.BackgroundColor3 = Color3.fromRGB(28, 20, 38)
-	toolsScroll.BorderColor3 = Color3.fromRGB(120, 60, 160)
-	toolsScroll.BorderSizePixel = 2
-	toolsScroll.ScrollBarThickness = 6
-	toolsScroll.CanvasSize = UDim2.new(0, 0, 0, #toolsDespertas * 26 + 6)
-	toolsScroll.Parent = popup
+	toolsScroll.Size = UDim2.new(1, -10, 1, -10)
+	toolsScroll.Position = UDim2.new(0, 5, 0, 5)
+	toolsScroll.BackgroundTransparency = 1
+	toolsScroll.BorderSizePixel = 0
+	toolsScroll.ScrollBarThickness = 5
+	toolsScroll.ScrollBarImageColor3 = COLORS.magenta
+	-- O V12 calculava CanvasSize à mão com #tools * 26 + 6, número que
+	-- só valia para a altura de linha daquele momento. AutomaticCanvasSize
+	-- mede o conteúdo de verdade.
+	toolsScroll.CanvasSize = UDim2.new()
+	toolsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	toolsScroll.Parent = toolsMoldura
 
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 3)
-	layout.Parent = toolsScroll
+	local listaLayout = Instance.new("UIListLayout")
+	listaLayout.Padding = UDim.new(0, 3)
+	listaLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listaLayout.Parent = toolsScroll
+
+	entrarEmSequencia(context, toolsMoldura, "toolsMoldura", 5, { BackgroundTransparency = 0 })
+
+	local alturaLinha = math.clamp(math.floor(24 * uiScale), 18, 34)
 
 	if #toolsDespertas == 0 then
 		local vazio = Instance.new("TextLabel")
-		vazio.Size = UDim2.new(1, -8, 0, 24)
+		vazio.Size = UDim2.new(1, -8, 0, alturaLinha)
 		vazio.BackgroundTransparency = 1
 		vazio.Text = "Nenhuma Tool carregada nesta forma."
-		vazio.TextColor3 = Color3.fromRGB(150, 130, 170)
+		vazio.TextColor3 = COLORS.muted
 		vazio.TextScaled = true
 		vazio.Font = Enum.Font.Code
 		vazio.Parent = toolsScroll
+		limitarTexto(vazio, 9, 16)
 	else
 		for i, nome in ipairs(toolsDespertas) do
 			local linha = Instance.new("TextLabel")
-			linha.Size = UDim2.new(1, -8, 0, 23)
+			linha.Size = UDim2.new(1, -8, 0, alturaLinha)
+			linha.LayoutOrder = i
 			linha.BackgroundTransparency = 1
 			linha.Text = string.format("  %d. %s", i, nome)
 			linha.TextColor3 = Color3.fromRGB(230, 210, 255)
+			linha.TextTransparency = 1
 			linha.TextScaled = true
 			linha.Font = Enum.Font.Code
 			linha.TextXAlignment = Enum.TextXAlignment.Left
 			linha.Parent = toolsScroll
+			limitarTexto(linha, 9, 17)
+
+			-- Cada linha aparece um pouco depois da anterior. O atraso é
+			-- do TweenInfo; a lista pode ter 20 itens sem virar 20 threads.
+			tocarTween(
+				context,
+				"linhaTool" .. i,
+				linha,
+				TweenInfo.new(
+					0.3,
+					Enum.EasingStyle.Quad,
+					Enum.EasingDirection.Out,
+					0,
+					false,
+					0.36 + math.min(i * 0.05, 0.5)
+				),
+				{ TextTransparency = 0 }
+			)
 		end
 	end
 
-	-- HISTÓRIA
+	-- HISTÓRIA, digitada
 	local historiaTitulo = Instance.new("TextLabel")
-	historiaTitulo.Size = UDim2.new(0.92, 0, 0.055, 0)
-	historiaTitulo.Position = UDim2.new(0.04, 0, 0.76, 0)
+	historiaTitulo.Size = UDim2.new(0.92, 0, 0.05, 0)
+	historiaTitulo.Position = UDim2.new(0.04, 0, 0.69, 0)
 	historiaTitulo.BackgroundTransparency = 1
 	historiaTitulo.Text = "📖 HISTÓRIA"
-	historiaTitulo.TextColor3 = Color3.fromRGB(0, 220, 255)
+	historiaTitulo.TextColor3 = COLORS.cyan
 	historiaTitulo.TextScaled = true
 	historiaTitulo.Font = Enum.Font.Arcade
 	historiaTitulo.TextXAlignment = Enum.TextXAlignment.Left
-	historiaTitulo.Parent = popup
+	historiaTitulo.Parent = painel
+	limitarTexto(historiaTitulo, 10, 20)
+	entrarEmSequencia(context, historiaTitulo, "historiaTitulo", 6, { TextTransparency = 0 })
 
-	local historiaFrame = Instance.new("Frame")
-	historiaFrame.Size = UDim2.new(0.92, 0, 0.15, 0)
-	historiaFrame.Position = UDim2.new(0.04, 0, 0.82, 0)
-	historiaFrame.BackgroundColor3 = Color3.fromRGB(28, 20, 38)
-	historiaFrame.BorderColor3 = Color3.fromRGB(60, 120, 160)
-	historiaFrame.BorderSizePixel = 2
-	historiaFrame.Parent = popup
-
-	local historiaLabel = Instance.new("TextLabel")
-	historiaLabel.Size = UDim2.new(0.96, 0, 0.9, 0)
-	historiaLabel.Position = UDim2.new(0.02, 0, 0.05, 0)
-	historiaLabel.BackgroundTransparency = 1
-	historiaLabel.Text = (aw.lore ~= nil and aw.lore ~= "" and aw.lore)
+	local historiaTexto = (aw.lore ~= nil and aw.lore ~= "" and aw.lore)
 		or (aw.description ~= nil and aw.description ~= "" and aw.description)
 		or "Sem história cadastrada para esta forma."
-	historiaLabel.TextColor3 = Color3.new(1, 1, 1)
-	historiaLabel.TextScaled = true
-	historiaLabel.TextWrapped = true
-	historiaLabel.Font = Enum.Font.Code
-	historiaLabel.TextYAlignment = Enum.TextYAlignment.Top
-	historiaLabel.Parent = historiaFrame
 
-	closeButton.MouseButton1Click:Connect(function()
-		playSound(sounds.close)
-		infoGui.Parent = nil
-	end)
-	background.InputBegan:Connect(function(input)
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-		then
-			infoGui.Parent = nil
+	local historiaMoldura, historiaCorpo = criarAreaDeTexto(
+		painel,
+		UDim2.new(0.04, 0, 0.745, 0),
+		UDim2.new(0.92, 0, 0.2, 0),
+		COLORS.cyan
+	)
+	entrarEmSequencia(context, historiaMoldura, "historiaMoldura", 7, { BackgroundTransparency = 0 })
+
+	local maquina = maquinaDeEscrever(context, "historia", historiaCorpo, historiaTexto, 62, 0.5)
+
+	local pular = Instance.new("TextButton")
+	pular.Size = UDim2.new(1, 0, 1, 0)
+	pular.BackgroundTransparency = 1
+	pular.Text = ""
+	pular.ZIndex = 5
+	pular.Parent = historiaMoldura
+
+	conectarContexto(context, pular.MouseButton1Click, function()
+		if not maquina.terminou() then
+			maquina.completar()
 		end
 	end)
 end
 
+-- =====================================
+-- (V13) PAINEL DE LORE
+-- =====================================
+-- O que havia antes: uma caixa que nascia pronta, sem imagem do
+-- personagem, sem raridade, e com a lore inteira num TextLabel
+-- TextScaled — ou seja, quanto mais história o personagem tivesse,
+-- menor a fonte, até virar letra miúda. Nenhum tween, nenhum scroll.
 local function createLorePopup(characterName)
 	playSound(sounds.info)
+
 	local def = getCatalogDef(characterName)
 	local loreString = (def and def.lore ~= nil and def.lore ~= "" and def.lore)
+		or (def and def.description ~= nil and def.description ~= "" and def.description)
 		or "Sem lore cadastrada."
 
-	local infoGui = Instance.new("ScreenGui")
-	infoGui.Name = "LorePopup"
-	infoGui.DisplayOrder = 100
-	infoGui.Parent = playerGui
+	local raridade = def and def.rarity
+	local infoRaridade = raridade and rarities[raridade]
+	local corRaridade = (infoRaridade and infoRaridade.color) or COLORS.yellow
 
-	local background = Instance.new("Frame")
-	background.Size = UDim2.new(1, 0, 1, 0)
-	background.BackgroundColor3 = Color3.new(0, 0, 0)
-	background.BackgroundTransparency = 0.5
-	background.Parent = infoGui
+	local modal = criarModal(isMobile and 0.94 or 0.62, isMobile and 0.82 or 0.74, corRaridade)
+	local context = modal.context
+	local painel = modal.painel
 
-	local popup = Instance.new("Frame")
-	popup.Size = isMobile and UDim2.new(0.9, 0, 0.5, 0) or UDim2.new(0.5, 0, 0.4, 0)
-	popup.Position = UDim2.new(0.5, 0, 0.5, 0)
-	popup.AnchorPoint = Vector2.new(0.5, 0.5)
-	popup.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	popup.BorderColor3 = Color3.fromRGB(200, 150, 0)
-	popup.BorderSizePixel = 4
-	popup.Parent = infoGui
+	criarCabecalhoModal(modal, "📖 " .. characterName:upper(), corRaridade, COLORS.background)
 
-	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1, 0, 0.2, 0)
-	header.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
-	header.BorderSizePixel = 0
-	header.Parent = popup
+	-- RETRATO. A lore ganhou a cara do personagem: ler a história de
+	-- alguém sem ver quem é foi sempre o pior detalhe deste painel.
+	local retrato = Instance.new("Frame")
+	retrato.Size = UDim2.new(0.3, 0, 0.3, 0)
+	retrato.Position = UDim2.new(0.04, 0, 0.16, 0)
+	retrato.BackgroundColor3 = COLORS.panelRaised
+	retrato.BorderColor3 = corRaridade
+	retrato.BorderSizePixel = 2
+	retrato.Parent = painel
 
-	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Size = UDim2.new(0.85, 0, 1, 0)
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.Text = "📖 " .. characterName:upper()
-	titleLabel.TextColor3 = Color3.new(1, 1, 1)
-	titleLabel.TextScaled = true
-	titleLabel.Font = Enum.Font.Arcade
-	titleLabel.Parent = header
+	local retratoProporcao = Instance.new("UIAspectRatioConstraint")
+	retratoProporcao.AspectRatio = 1
+	retratoProporcao.DominantAxis = Enum.DominantAxis.Height
+	retratoProporcao.Parent = retrato
 
-	local closeButton = Instance.new("TextButton")
-	closeButton.Size = UDim2.new(0.12, 0, 0.75, 0)
-	closeButton.Position = UDim2.new(0.86, 0, 0.125, 0)
-	closeButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-	closeButton.BorderSizePixel = 0
-	closeButton.Text = "X"
-	closeButton.TextColor3 = Color3.new(1, 1, 1)
-	closeButton.TextScaled = true
-	closeButton.Font = Enum.Font.Arcade
-	closeButton.Parent = header
+	createCharacterImage(characterName, retrato)
+	entrarEmSequencia(context, retrato, "retrato", 0, { BackgroundTransparency = 0 })
 
-	local loreText = Instance.new("TextLabel")
-	loreText.Size = UDim2.new(0.9, 0, 0.7, 0)
-	loreText.Position = UDim2.new(0.05, 0, 0.25, 0)
-	loreText.BackgroundTransparency = 1
-	loreText.Text = loreString
-	loreText.TextColor3 = Color3.new(1, 1, 1)
-	loreText.TextScaled = true
-	loreText.Font = Enum.Font.Code
-	loreText.TextWrapped = true
-	loreText.Parent = popup
+	-- SELO DE RARIDADE, pulsando devagar num tween só.
+	local selo = Instance.new("TextLabel")
+	selo.Size = UDim2.new(0.5, 0, 0.07, 0)
+	selo.Position = UDim2.new(0.4, 0, 0.17, 0)
+	selo.BackgroundColor3 = corRaridade
+	selo.BorderSizePixel = 0
+	selo.Text = string.format(
+		"%s  %s",
+		RARITY_EMBLEMS[raridade or ""] or "•",
+		raridade or "SEM RARIDADE"
+	)
+	selo.TextColor3 = COLORS.background
+	selo.TextScaled = true
+	selo.Font = Enum.Font.Arcade
+	selo.Parent = painel
+	limitarTexto(selo, 10, 20)
 
-	closeButton.MouseButton1Click:Connect(function()
-		playSound(sounds.close)
-		infoGui.Parent = nil
-	end)
-	background.InputBegan:Connect(function(input)
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-		then
-			infoGui.Parent = nil
+	local seloCanto = Instance.new("UICorner")
+	seloCanto.CornerRadius = UDim.new(0.3, 0)
+	seloCanto.Parent = selo
+
+	entrarEmSequencia(context, selo, "selo", 1, { TextTransparency = 0 })
+
+	if infoRaridade and infoRaridade.glow then
+		local seloBrilho = Instance.new("UIStroke")
+		seloBrilho.Color = corRaridade
+		seloBrilho.Thickness = 2
+		seloBrilho.Parent = selo
+		tocarTween(
+			context,
+			"brilhoSelo",
+			seloBrilho,
+			TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Transparency = 0.75 }
+		)
+	end
+
+	local dica = Instance.new("TextLabel")
+	dica.Size = UDim2.new(0.5, 0, 0.055, 0)
+	dica.Position = UDim2.new(0.4, 0, 0.27, 0)
+	dica.BackgroundTransparency = 1
+	dica.Text = "toque no texto para revelar tudo"
+	dica.TextColor3 = COLORS.muted
+	dica.TextScaled = true
+	dica.Font = Enum.Font.Code
+	dica.TextXAlignment = Enum.TextXAlignment.Left
+	dica.Parent = painel
+	limitarTexto(dica, 8, 14)
+	entrarEmSequencia(context, dica, "dica", 2, { TextTransparency = 0 })
+
+	-- CORPO DA LORE
+	local moldura, corpo = criarAreaDeTexto(
+		painel,
+		UDim2.new(0.04, 0, 0.5, 0),
+		UDim2.new(0.92, 0, 0.44, 0),
+		corRaridade
+	)
+	entrarEmSequencia(context, moldura, "moldura", 3, { BackgroundTransparency = 0 })
+
+	-- A digitação começa depois de a moldura assentar; a espera é
+	-- contada dentro da própria máquina, no mesmo contexto do painel.
+	local maquina = maquinaDeEscrever(context, "lore", corpo, loreString, 60, 0.34)
+
+	-- Tocar no texto pula a digitação. Quem já leu não fica esperando a
+	-- máquina terminar, e quem só quer conferir a raridade também não.
+	local pular = Instance.new("TextButton")
+	pular.Size = UDim2.new(1, 0, 1, 0)
+	pular.BackgroundTransparency = 1
+	pular.Text = ""
+	pular.ZIndex = 5
+	pular.Parent = moldura
+
+	conectarContexto(context, pular.MouseButton1Click, function()
+		if not maquina.terminou() then
+			maquina.completar()
+			dica.Text = ""
+		else
+			-- Segundo toque fecha: o painel de lore é de leitura, então
+			-- depois de revelado não há mais nada para fazer nele.
+			modal.fechar()
 		end
 	end)
 end
