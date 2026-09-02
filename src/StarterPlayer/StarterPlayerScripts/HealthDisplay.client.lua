@@ -1,5 +1,5 @@
 -- ============================================
--- HEALTH DISPLAY V8.1 - HUD RESPONSIVO E ANIMADO
+-- HEALTH DISPLAY V8.2 - HUD RESPONSIVO E ANIMADO
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "HealthDisplay"
 -- SUBSTITUI: HealthDisplay V7
@@ -46,6 +46,26 @@ local MAIN_HEIGHT = 118
 local AWAKEN_HEIGHT = 28
 local HUD_GAP = 8
 local HUD_HEIGHT = MAIN_HEIGHT + HUD_GAP + AWAKEN_HEIGHT
+
+-- (V8.2) O tamanho do HUD virou constante com nome, porque é a coisa que
+-- mais se ajusta neste arquivo e estava enterrada numa conta lá embaixo.
+--
+-- FRACAO_LARGURA e FRACAO_ALTURA são quanto da tela o HUD pode ocupar em
+-- cada eixo. Quem manda é o menor dos dois, então o HUD encolhe pelo eixo
+-- mais apertado em vez de estourar num deles.
+--
+-- Com estes valores ele fica entre 19% e 25% da largura, do celular
+-- pequeno ao desktop. O V8.1 deixava entre 26% e 30%, que ainda era
+-- grande demais para uma barra de vida: HUD é canto de tela, não painel.
+--
+-- Para deixar menor, baixe FRACAO_ALTURA — é ela que costuma limitar em
+-- celular deitado. Não desça o piso de ESCALA_MIN muito abaixo de 0.46:
+-- o texto tem UITextSizeConstraint com mínimo de 8 a 9 px e para de
+-- caber.
+local FRACAO_LARGURA = 0.23
+local FRACAO_ALTURA = 0.16
+local ESCALA_MIN = 0.46
+local ESCALA_MAX = 0.85
 
 -- Evita HUD duplicado quando o script é recarregado durante um teste.
 local previousGui = PlayerGui:FindFirstChild("RetroHealthDisplay")
@@ -339,20 +359,17 @@ local function applyResponsiveLayout()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
 
-	-- (V8.1) O HUD saía gigante em qualquer tela larga.
+	-- Cada eixo recebe uma fração da tela e vale a menor das duas escalas,
+	-- para o HUD encolher pelo eixo mais apertado em vez de estourar nele.
 	--
-	-- A conta antiga era `viewport.X - 24`, ou seja, tratava a tela INTEIRA
-	-- como espaço disponível para o HUD. Num celular em paisagem isso dá
-	-- algo perto de 4.7 para 420 px de largura, então a largura nunca era
-	-- a restrição: o min() caía sempre na altura, batia no teto de 1.15 e
-	-- o HUD ficava no tamanho máximo em todo aparelho grande.
-	--
-	-- Agora cada eixo recebe uma FRAÇÃO da tela — o HUD é um canto da
-	-- interface, não a interface — e o teto é 1.0, o tamanho de projeto.
-	-- Acima disso ele só cresceria para ocupar espaço que não é dele.
-	local widthScale = math.max(1, viewport.X * 0.34) / HUD_WIDTH
-	local heightScale = math.max(1, viewport.Y * 0.22) / HUD_HEIGHT
-	ResponsiveScale.Scale = math.clamp(math.min(widthScale, heightScale), 0.58, 1)
+	-- A conta original era `viewport.X - 24`, que tratava a tela INTEIRA
+	-- como espaço do HUD: em celular deitado isso nunca limitava nada, o
+	-- min() caía sempre na altura e o resultado batia no teto, saindo no
+	-- tamanho máximo em todo aparelho grande.
+	local widthScale = math.max(1, viewport.X * FRACAO_LARGURA) / HUD_WIDTH
+	local heightScale = math.max(1, viewport.Y * FRACAO_ALTURA) / HUD_HEIGHT
+	ResponsiveScale.Scale =
+		math.clamp(math.min(widthScale, heightScale), ESCALA_MIN, ESCALA_MAX)
 	HudRoot.Position = UDim2.new(0.5, 0, 0, getTopInset() + 8)
 end
 
