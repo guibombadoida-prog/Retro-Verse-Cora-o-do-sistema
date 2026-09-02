@@ -338,6 +338,25 @@ end
 
 local uiScale = getUIScale()
 
+-- (V13.1) ARMADILHA: `uiScale` NÃO é um número.
+--
+-- O nome engana. Desde a V12 getUIScale() devolve uma TABELA de
+-- configuração responsiva — { menu, panelAspect, portrait, card } — e não
+-- o fator de escala que o nome sugere. Escrever `16 * uiScale` compila,
+-- passa no Rojo e no luau-compile, e só quebra quando o jogador abre o
+-- painel: "attempt to perform arithmetic (mul) on number and table".
+--
+-- Foi exatamente esse o erro que derrubou a Lore na publicação das 20:08.
+-- Quem precisa de um ESCALAR de tela usa esta função, não a tabela.
+local function escalaPorTela(base, minimo, maximo)
+	local viewport = getViewportSize()
+	local ladoCurto = math.min(viewport.X, viewport.Y)
+	-- 640 é o lado curto de referência: perto de um celular deitado
+	-- grande. Acima disso o texto cresce até o teto, abaixo encolhe até
+	-- o piso, e o clamp garante que nenhum aparelho saia da faixa legível.
+	return math.clamp(math.floor(base * ladoCurto / 640), minimo, maximo)
+end
+
 -- =====================================
 -- RARIDADES
 -- =====================================
@@ -991,7 +1010,7 @@ local function criarAreaDeTexto(pai, posicao, tamanho, corMoldura)
 	corpo.AutomaticSize = Enum.AutomaticSize.Y
 	corpo.BackgroundTransparency = 1
 	corpo.TextColor3 = COLORS.ink
-	corpo.TextSize = math.clamp(math.floor(16 * uiScale), 12, 20)
+	corpo.TextSize = escalaPorTela(16, 13, 19)
 	corpo.TextWrapped = true
 	corpo.RichText = false
 	corpo.Font = Enum.Font.Code
@@ -1906,7 +1925,7 @@ local function createAwakeningPopup(characterName, info)
 
 	entrarEmSequencia(context, toolsMoldura, "toolsMoldura", 5, { BackgroundTransparency = 0 })
 
-	local alturaLinha = math.clamp(math.floor(24 * uiScale), 18, 34)
+	local alturaLinha = escalaPorTela(24, 18, 32)
 
 	if #toolsDespertas == 0 then
 		local vazio = Instance.new("TextLabel")
