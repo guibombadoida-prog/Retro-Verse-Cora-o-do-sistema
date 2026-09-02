@@ -15,6 +15,17 @@ O caminho do repositório até o jogo é o workflow **Publicar somente código**
 (`.github/workflows/publish-code-only.yml`), que compara, renomeia e cria scripts
 direto na place de produção pela Open Cloud.
 
+## Antes de tudo: veja quem está mexendo em quê
+
+[`docs/EM_ANDAMENTO.md`](docs/EM_ANDAMENTO.md) lista o arquivo que cada agente
+está editando agora. Consulte antes de abrir qualquer script e atualize ao
+começar e ao terminar.
+
+Isso não é burocracia: Claude e Codex já reescreveram o mesmo
+`HealthDisplay.client.lua` ao mesmo tempo, sem saber um do outro, e um dos dois
+trabalhos foi descartado. O arquivo também lista o que está livre e precisa de
+alguém.
+
 ## Adicionar ou alterar script
 
 O procedimento completo está em [`docs/ADICIONAR_SCRIPT.md`](docs/ADICIONAR_SCRIPT.md).
