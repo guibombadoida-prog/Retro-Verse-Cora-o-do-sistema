@@ -7,7 +7,11 @@ Existe porque já houve colisão: Claude e Codex reescreveram
 `HealthDisplay.client.lua` ao mesmo tempo, cada um sem saber do outro, e um
 dos dois trabalhos teve de ser descartado.
 
-## Regra
+## Regras
+
+**Publicou, avisou.** Toda publicação na produção vai para o chat e para
+[`PUBLICACOES.md`](PUBLICACOES.md). Detalhe em *Avisar sempre que o jogo for
+atualizado*, no [`AGENTS.md`](../AGENTS.md).
 
 Antes de editar um arquivo listado abaixo como ocupado, escolha outro ou
 combine com o dono. Ao terminar, tire a linha.

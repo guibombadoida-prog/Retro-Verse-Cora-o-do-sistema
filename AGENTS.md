@@ -149,6 +149,28 @@ devem voltar por conveniência.
 - [ ] Conexões e constraints criadas têm ponto de saída
 - [ ] `tools/validar.sh` sem erro
 
+## Avisar sempre que o jogo for atualizado
+
+**Toda publicação bem-sucedida tem que ser avisada. Sem exceção.**
+
+Publicar muda o jogo para todos os jogadores agora. O dono precisa saber que
+mudou, e o outro agente precisa saber que a base de comparação do `verificar`
+mudou — quem rodar o workflow depois vai comparar o repositório contra um jogo
+que alguém alterou, e sem aviso não tem como saber disso.
+
+Ao terminar um `publicar` com sucesso, faça as duas coisas:
+
+1. **Avise no chat**, com os números reais da linha `[PUBLICAÇÃO]` do log e o
+   que cada script mudou no jogo. Não basta dizer "publicado".
+2. **Registre em [`docs/PUBLICACOES.md`](docs/PUBLICACOES.md)**, entrada nova no
+   topo, e comite.
+
+Vale também quando a publicação foi pequena, quando não mudou nada
+(`[PUBLICAÇÃO] nada mudou`) e quando falhou no meio — nesse caso diga o que já
+tinha sido escrito antes da falha e se o rollback rodou.
+
+Nunca encerre um turno em que uma publicação aconteceu sem ter avisado.
+
 ## Regras de código
 
 - `task.wait()` / `task.spawn()` — nunca `wait()` / `spawn()`

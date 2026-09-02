@@ -18,4 +18,9 @@ Os dois pontos que mais causam retrabalho quando são ignorados:
    maior parte do que trava e treme na tela. Ver a seção *Padrão de qualidade* do
    `AGENTS.md`.
 
+4. **Publicou, avisou.** Toda publicação bem-sucedida vai para o chat com os
+   números do log e é registrada em [`docs/PUBLICACOES.md`](docs/PUBLICACOES.md).
+   O jogo mudou para todo mundo, e a base de comparação do próximo `verificar`
+   mudou junto.
+
 Procedimento completo para script novo: [`docs/ADICIONAR_SCRIPT.md`](docs/ADICIONAR_SCRIPT.md).
