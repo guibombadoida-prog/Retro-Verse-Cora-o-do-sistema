@@ -11,6 +11,53 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 19:54 UTC — animação nos dois menus
+
+`[PUBLICAÇÃO] 2 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 56, 2, 0, 0, 0]` — execução #22, `main` em `f16ea09`
+
+O dono perguntou onde estavam as animações dinâmicas. A resposta honesta é que
+no menu unificado não havia nenhuma que ele conseguisse ver, e as do menu de
+personagens estavam em branch não mesclada.
+
+**`CharacterSystemClient` V11 → V12** (merge da branch `codex/redesign-character-menus`).
+Contexto dono das conexões e dos tweens, abrir/fechar por mola amortecida no
+Heartbeat, `UIAspectRatioConstraint` de 1 para 8. O arquivo tinha 4 tweens e
+nenhum `:Cancel()`. A busca, as seções por raridade e a grade responsiva do
+V11 continuam inteiras.
+
+**`UnifiedMenuClient` V3 → V4.** Este era o pior caso do repositório, e o
+motivo de o dono não ver nada:
+
+- Dos 5 tweens, **2 eram `MouseEnter`/`MouseLeave`**, que não disparam em
+  toque. No celular dele nunca rodaram.
+- **2 viviam num `while ... task.wait(1.5)`** pulsando a borda do botão ☰,
+  criando tween novo a cada volta pela sessão inteira.
+- O hub abria e fechava com `Visible = true/false` **em seis pontos
+  diferentes do arquivo** — que é justamente por que nunca ganhou transição:
+  animar exigiria repetir o efeito seis vezes.
+
+Agora: `abrirHub()`/`fecharHub()` como caminho único com a mesma mola do V12,
+cards entrando escalonados pelo `DelayTime` do `TweenInfo` (sem `task.spawn`,
+sem thread por card), `InputBegan`/`InputEnded` cobrindo toque e mouse pelo
+mesmo caminho, `UIAspectRatioConstraint` nos cards e no ponto de notificação,
+e a grade reconstruída ao girar o celular.
+
+Os dois menus passam a usar o mesmo idioma de animação, então quem mexer num
+reconhece o outro.
+
+| | Unified | CharSys |
+| --- | --- | --- |
+| `TweenService:Create` | 5 → 1 | 4 → 1 |
+| `:Cancel()` | 0 → 2 | 0 → 2 |
+| laços `while` | 1 → 0 | 4 → 2 |
+| `UIAspectRatioConstraint` | 0 → 4 | 1 → 8 |
+
+> Armadilha que quase passou: no card, a entrada e o toque animam o `Scale` do
+> **mesmo** `UIScale`. Com chaves de tween diferentes eles não se cancelariam e
+> brigariam pela propriedade se o jogador tocasse antes de a entrada terminar.
+> Compartilham a chave `"escala"..i` de propósito.
+
 ## 2026-09-02 15:45 UTC — arquibancada de duelo acessível
 
 `[PUBLICAÇÃO] 5 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
