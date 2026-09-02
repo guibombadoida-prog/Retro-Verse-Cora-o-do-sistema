@@ -1,9 +1,32 @@
 -- ============================================
--- UNIFIED MENU CLIENT V3 — MENU UNIFICADO
--- (V3) ALTERAÇÕES: fontes unificadas em estilo retro (Arcade)
+-- UNIFIED MENU CLIENT V4 — MENU UNIFICADO ANIMADO
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "UnifiedMenuClient"
--- SUBSTITUI: UnifiedMenu_Client_V1
+-- SUBSTITUI: UnifiedMenuClient V3
+-- ============================================
+-- (V4) O menu não animava nada que desse para ver no celular.
+--
+--   1. HUB APARECIA SECO. Abrir e fechar era Visible = true/false, em
+--      seis pontos diferentes do arquivo. Agora passa por abrirHub() e
+--      fecharHub(), com mola amortecida integrada no Heartbeat.
+--   2. REAÇÃO SÓ DE MOUSE. O único retorno visual dos cards era
+--      MouseEnter/MouseLeave, que não dispara em toque. Em celular o
+--      menu era completamente inerte. Trocado por InputBegan/InputEnded,
+--      que cobrem toque e mouse, com o hover mantido por cima no desktop.
+--   3. TWEEN EM LAÇO. A pulsação do botão ☰ rodava dentro de um
+--      `while ... task.wait(1.5)` criando dois tweens por volta, para
+--      sempre. Virou um tween só com RepeatCount = -1 e Reverses = true.
+--   4. CARDS DEFORMAVAM. Nenhum UIAspectRatioConstraint no arquivo
+--      inteiro; a célula mudava de proporção a cada tela. Agora é fixa.
+--
+-- Os cards entram escalonados pelo DelayTime do próprio TweenInfo, sem
+-- task.spawn e sem task.wait — nada de thread por card disputando a UI.
+--
+-- Mesmo idioma de animação do CharacterSystemClient V12: contexto dono
+-- das conexões e dos tweens, um tween por chave com o anterior
+-- cancelado. Os dois menus se comportam igual.
+-- ============================================
+-- (V3) fontes unificadas em estilo retro (Arcade)
 -- ============================================
 -- V2: Categorias usam _G functions dos sistemas reais.
 -- MÚSICA adicionada. ÚNICO botão na tela.
@@ -39,6 +62,207 @@ local function playSound(id)
 end
 
 -- =====================================
+-- (V4) CAMADA DE ANIMAÇÃO
+-- =====================================
+-- O V3 não animava nada que o dono conseguisse ver. Dos cinco tweens do
+-- arquivo, dois eram MouseEnter/MouseLeave — que NÃO disparam em toque,
+-- então em celular nunca rodavam — e dois viviam dentro de um
+-- `while ... task.wait(1.5)`, criando um tween novo a cada volta pela
+-- sessão inteira. O hub abria e fechava com Visible = true/false, seco.
+--
+-- Aqui entra o mesmo idioma do CharacterSystemClient V12, para os dois
+-- menus se comportarem igual: um contexto dono das conexões e dos
+-- tweens, um tween por chave com o anterior cancelado, e mola amortecida
+-- integrada no Heartbeat para abrir e fechar.
+
+local RunService = game:GetService("RunService")
+
+local animContext = nil
+
+local function novoContexto()
+	return { alive = true, connections = {}, tweens = {} }
+end
+
+local function limparContexto(context)
+	if not context then
+		return
+	end
+	context.alive = false
+	for _, connection in ipairs(context.connections) do
+		connection:Disconnect()
+	end
+	for _, tween in pairs(context.tweens) do
+		tween:Cancel()
+	end
+	table.clear(context.connections)
+	table.clear(context.tweens)
+end
+
+local function conectarContexto(context, signal, callback)
+	local connection = signal:Connect(callback)
+	if context and context.alive then
+		table.insert(context.connections, connection)
+	end
+	return connection
+end
+
+-- Um tween por chave. O anterior é cancelado antes do novo nascer, que é
+-- o que impede dois tweens de brigarem pela mesma propriedade e deixarem
+-- a cor ou o tamanho presos num valor de meio de caminho.
+local function tocarTween(context, key, instance, tweenInfo, properties)
+	if not context or not context.alive or not instance or not instance.Parent then
+		return nil
+	end
+	local previous = context.tweens[key]
+	if previous then
+		previous:Cancel()
+	end
+	local tween = TweenService:Create(instance, tweenInfo, properties)
+	context.tweens[key] = tween
+	tween:Play()
+	return tween
+end
+
+-- Mola amortecida para abrir e fechar. É física visual: aceleração,
+-- velocidade e posição integradas por quadro. Nenhuma força toca o
+-- personagem — nada de BodyVelocity aqui.
+local function criarMolaPainel(context, frame, aoEsconder)
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.86
+	scale.Parent = frame
+
+	local state = {
+		position = 0.86,
+		velocity = 0,
+		target = 0.86,
+		active = false,
+		closing = false,
+	}
+
+	local controller = {}
+
+	function controller.open()
+		if not frame.Parent then
+			return
+		end
+		frame.Visible = true
+		state.position = math.min(state.position, 0.9)
+		state.velocity = 0
+		state.target = 1
+		state.closing = false
+		state.active = true
+	end
+
+	function controller.close()
+		if not frame.Visible then
+			return
+		end
+		state.target = 0.86
+		state.closing = true
+		state.active = true
+	end
+
+	function controller.hide()
+		state.position = 0.86
+		state.velocity = 0
+		state.target = 0.86
+		state.active = false
+		state.closing = false
+		scale.Scale = 0.86
+		frame.Rotation = 0
+		frame.Visible = false
+	end
+
+	conectarContexto(context, RunService.Heartbeat, function(deltaTime)
+		if not state.active or not frame.Parent then
+			return
+		end
+
+		-- dt limitado: numa queda de FPS um passo grande faria a mola
+		-- estourar em vez de assentar.
+		local dt = math.min(deltaTime, 1 / 30)
+		local stiffness = 230
+		local damping = 25
+		local acceleration = (state.target - state.position) * stiffness - state.velocity * damping
+		state.velocity += acceleration * dt
+		state.position += state.velocity * dt
+		state.position = math.clamp(state.position, 0.82, 1.06)
+
+		scale.Scale = state.position
+		frame.Rotation = math.clamp((1 - state.position) * -8, -2.2, 1.2)
+
+		if math.abs(state.target - state.position) < 0.002 and math.abs(state.velocity) < 0.02 then
+			state.position = state.target
+			state.velocity = 0
+			scale.Scale = state.target
+			frame.Rotation = 0
+			state.active = false
+			if state.closing then
+				state.closing = false
+				frame.Visible = false
+				if aoEsconder then
+					aoEsconder()
+				end
+			end
+		end
+	end)
+
+	return controller
+end
+
+-- Reação de toque. MouseEnter/MouseLeave não existem no celular, então
+-- o afundar do card é ligado em InputBegan/InputEnded, que cobrem toque
+-- e mouse pelo mesmo caminho.
+local function reagirAoToque(context, button, chave, escalaNormal, escalaPress)
+	local uiScale = button:FindFirstChildOfClass("UIScale")
+	if not uiScale then
+		uiScale = Instance.new("UIScale")
+		uiScale.Scale = escalaNormal
+		uiScale.Parent = button
+	end
+
+	local function pressionar()
+		tocarTween(
+			context,
+			chave,
+			uiScale,
+			TweenInfo.new(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Scale = escalaPress }
+		)
+	end
+
+	local function soltar()
+		tocarTween(
+			context,
+			chave,
+			uiScale,
+			TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+			{ Scale = escalaNormal }
+		)
+	end
+
+	conectarContexto(context, button.InputBegan, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			pressionar()
+		end
+	end)
+
+	conectarContexto(context, button.InputEnded, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			soltar()
+		end
+	end)
+
+	return uiScale
+end
+
+-- =====================================
 -- TAMANHOS
 -- =====================================
 
@@ -66,6 +290,28 @@ local hubFrame = nil
 local mainButton = nil
 local notifDot = nil
 local activeSubmenu = nil -- Nome do submenu ativo
+local hubMotion = nil -- controlador da mola do hub (V4)
+
+-- (V4) Caminho único para mostrar e esconder o hub. Enquanto isso era
+-- Visible = true/false solto em seis lugares, qualquer animação teria de
+-- ser repetida em seis lugares — e foi por isso que nunca teve nenhuma.
+local function abrirHub()
+	hubOpen = true
+	if hubMotion then
+		hubMotion.open()
+	elseif hubFrame then
+		hubFrame.Visible = true
+	end
+end
+
+local function fecharHub()
+	hubOpen = false
+	if hubMotion then
+		hubMotion.close()
+	elseif hubFrame then
+		hubFrame.Visible = false
+	end
+end
 
 -- Estrutura de cada categoria:
 -- {name, icon, openFunc, closeFunc, hasNotification, order}
@@ -371,6 +617,13 @@ local function buildMenu()
 		menuGui.Parent = nil
 	end
 
+	-- (V4) buildMenu() é chamado de novo no respawn e pelo _G.UnifiedMenu.
+	-- Sem desfazer o contexto anterior, cada reconstrução deixaria para
+	-- trás as conexões de Heartbeat e os tweens da versão antiga.
+	limparContexto(animContext)
+	animContext = novoContexto()
+	hubMotion = nil
+
 	menuGui = Instance.new("ScreenGui")
 	menuGui.Name = "UnifiedMenuV1"
 	menuGui.ResetOnSpawn = false
@@ -407,19 +660,43 @@ local function buildMenu()
 	notifCorner.CornerRadius = UDim.new(1, 0)
 	notifCorner.Parent = notifDot
 
-	-- Pulsação do botão principal
-	task.spawn(function()
-		while mainButton and mainButton.Parent do
-			TweenService:Create(mainButton, TweenInfo.new(1.5, Enum.EasingStyle.Sine), {
-				BorderColor3 = Color3.fromRGB(0, 150, 200),
-			}):Play()
-			task.wait(1.5)
-			TweenService:Create(mainButton, TweenInfo.new(1.5, Enum.EasingStyle.Sine), {
-				BorderColor3 = Color3.fromRGB(0, 200, 255),
-			}):Play()
-			task.wait(1.5)
-		end
-	end)
+	-- (V4) O ponto vermelho aparecia e ficava parado. Um aviso que não se
+	-- mexe some no meio do resto da tela. Um tween repetido resolve, e o
+	-- ponto é redondo por UICorner: precisa continuar quadrado para não
+	-- virar elipse quando o botão muda de proporção.
+	local notifRatio = Instance.new("UIAspectRatioConstraint")
+	notifRatio.AspectRatio = 1
+	notifRatio.DominantAxis = Enum.DominantAxis.Height
+	notifRatio.Parent = notifDot
+
+	local notifScale = Instance.new("UIScale")
+	notifScale.Scale = 1
+	notifScale.Parent = notifDot
+
+	tocarTween(
+		animContext,
+		"pulsoNotif",
+		notifScale,
+		TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Scale = 1.35 }
+	)
+
+	-- (V4) Pulsação do botão principal em UM tween.
+	-- O laço antigo criava dois tweens a cada 3s e nunca parava: o
+	-- ScreenGui tem ResetOnSpawn = false, então rodava a sessão inteira,
+	-- deixando cerca de 40 objetos de tween abandonados por minuto.
+	-- RepeatCount = -1 com Reverses = true dá o mesmo vai-e-volta com um
+	-- objeto só, e ele morre junto do contexto.
+	tocarTween(
+		animContext,
+		"pulsoBotao",
+		mainButton,
+		TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ BorderColor3 = Color3.fromRGB(0, 150, 200) }
+	)
+
+	-- O botão também afunda ao toque, não só no mouse.
+	reagirAoToque(animContext, mainButton, "pressBotao", 1, 0.9)
 
 	-- ===== HUB FRAME =====
 	local gc = getGridConfig()
@@ -434,6 +711,11 @@ local function buildMenu()
 	hubFrame.BorderSizePixel = 4
 	hubFrame.Visible = false
 	hubFrame.Parent = menuGui
+
+	-- (V4) A mola vive no hubFrame. abrirHub()/fecharHub() são os únicos
+	-- caminhos daqui em diante; antes havia seis atribuições soltas de
+	-- Visible espalhadas pelo arquivo, e por isso nenhuma delas animava.
+	hubMotion = criarMolaPainel(animContext, hubFrame)
 
 	local hubCorner = Instance.new("UICorner")
 	hubCorner.CornerRadius = UDim.new(0.02, 0)
@@ -483,9 +765,15 @@ local function buildMenu()
 		buildGrid()
 		-- Resize hub
 		local newGc = getGridConfig()
-		TweenService:Create(hubFrame, TweenInfo.new(0.3), {
-			Size = UDim2.new(newGc.hubScale, 0, newGc.hubScale, 0),
-		}):Play()
+		-- (V4) Pelo gerenciador: apertar P/M/G rápido cancelava mal o
+		-- tween anterior e o hub podia parar num tamanho intermediário.
+		tocarTween(
+			animContext,
+			"tamanhoHub",
+			hubFrame,
+			TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+			{ Size = UDim2.new(newGc.hubScale, 0, newGc.hubScale, 0) }
+		)
 	end)
 
 	-- Botão fechar
@@ -502,8 +790,7 @@ local function buildMenu()
 
 	closeBtn.MouseButton1Click:Connect(function()
 		playSound("rbxassetid://157167205")
-		hubOpen = false
-		hubFrame.Visible = false
+		fecharHub()
 	end)
 
 	-- ===== GRID DE CATEGORIAS =====
@@ -546,6 +833,15 @@ local function buildMenu()
 			catCorner.CornerRadius = UDim.new(0.08, 0)
 			catCorner.Parent = catBtn
 
+			-- (V4) A célula é ícone em cima e nome embaixo: proporção
+			-- importa. Sem isto ela virava um retângulo diferente em cada
+			-- tela, e o ícone esticava junto. Não havia um único
+			-- UIAspectRatioConstraint no arquivo.
+			local catRatio = Instance.new("UIAspectRatioConstraint")
+			catRatio.AspectRatio = 1.15
+			catRatio.DominantAxis = Enum.DominantAxis.Width
+			catRatio.Parent = catBtn
+
 			-- Ícone
 			local iconLbl = Instance.new("TextLabel")
 			iconLbl.Size = UDim2.new(1, 0, 0.55, 0)
@@ -579,18 +875,77 @@ local function buildMenu()
 				dc.Parent = catDot
 			end
 
-			-- Hover effect
-			catBtn.MouseEnter:Connect(function()
-				TweenService:Create(catBtn, TweenInfo.new(0.15), {
+			-- (V4) ENTRADA ESCALONADA. Cada card nasce menor e
+			-- transparente e assenta no lugar com um atraso proporcional
+			-- à sua posição na grade, o que dá a sensação de a grade se
+			-- montar em vez de piscar pronta. O atraso é o DelayTime do
+			-- próprio TweenInfo — sem task.spawn e sem task.wait, então
+			-- não existe uma thread por card acordando para disputar a UI.
+			local entradaScale = Instance.new("UIScale")
+			entradaScale.Scale = 0.7
+			entradaScale.Parent = catBtn
+			catBtn.BackgroundTransparency = 1
+			iconLbl.TextTransparency = 1
+			nameLbl.TextTransparency = 1
+
+			local atraso = math.min(i * 0.035, 0.32)
+			local infoEntrada =
+				TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, atraso)
+			local infoFade =
+				TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, atraso)
+
+			-- A chave é "escala"..i, a MESMA que reagirAoToque usa logo
+			-- abaixo, e isso é de propósito: os dois animam o Scale deste
+			-- mesmo UIScale. Com chaves diferentes eles não se cancelariam
+			-- e ficariam brigando pela propriedade se o jogador tocasse no
+			-- card antes de a entrada terminar. Compartilhando a chave, o
+			-- toque cancela a entrada e assume — que é o que se espera.
+			tocarTween(animContext, "escala" .. i, entradaScale, infoEntrada, { Scale = 1 })
+			tocarTween(animContext, "fundo" .. i, catBtn, infoFade, { BackgroundTransparency = 0 })
+			tocarTween(animContext, "icone" .. i, iconLbl, infoFade, { TextTransparency = 0 })
+			tocarTween(animContext, "nome" .. i, nameLbl, infoFade, { TextTransparency = 0 })
+
+			-- (V4) REAÇÃO QUE FUNCIONA NO CELULAR. MouseEnter/MouseLeave
+			-- não disparam em toque: no aparelho do dono o card era
+			-- inerte. InputBegan/InputEnded cobrem toque e mouse pelo
+			-- mesmo caminho, então o card afunda ao encostar o dedo.
+			reagirAoToque(animContext, catBtn, "escala" .. i, 1, 0.93)
+
+			-- Realce por cor: no desktop segue o cursor, no celular
+			-- acompanha o toque. Mesma chave de tween nos dois, então um
+			-- estado cancela o outro em vez de empilhar.
+			local function realcar()
+				tocarTween(animContext, "realce" .. i, catBtn, TweenInfo.new(0.15), {
 					BackgroundColor3 = Color3.fromRGB(40, 50, 70),
 					BorderColor3 = Color3.fromRGB(0, 200, 255),
-				}):Play()
-			end)
-			catBtn.MouseLeave:Connect(function()
-				TweenService:Create(catBtn, TweenInfo.new(0.15), {
+				})
+			end
+
+			local function apagar()
+				tocarTween(animContext, "realce" .. i, catBtn, TweenInfo.new(0.15), {
 					BackgroundColor3 = Color3.fromRGB(25, 30, 40),
 					BorderColor3 = Color3.fromRGB(80, 80, 120),
-				}):Play()
+				})
+			end
+
+			conectarContexto(animContext, catBtn.InputBegan, function(input)
+				if
+					input.UserInputType == Enum.UserInputType.Touch
+					or input.UserInputType == Enum.UserInputType.MouseMovement
+					or input.UserInputType == Enum.UserInputType.MouseButton1
+				then
+					realcar()
+				end
+			end)
+
+			conectarContexto(animContext, catBtn.InputEnded, function(input)
+				if
+					input.UserInputType == Enum.UserInputType.Touch
+					or input.UserInputType == Enum.UserInputType.MouseMovement
+					or input.UserInputType == Enum.UserInputType.MouseButton1
+				then
+					apagar()
+				end
 			end)
 
 			-- Click → abre submenu
@@ -598,8 +953,7 @@ local function buildMenu()
 				playSound("rbxassetid://157167203")
 
 				-- Fechar hub
-				hubOpen = false
-				hubFrame.Visible = false
+				fecharHub()
 
 				-- Fechar submenu anterior
 				closeActiveSubmenu()
@@ -616,13 +970,34 @@ local function buildMenu()
 	buildGrid()
 	updateNotifDot()
 
+	-- (V4) Girar o celular não refazia a grade. As células são medidas em
+	-- Scale, então a proporção da tela muda e a grade fica com coluna
+	-- sobrando ou faltando até alguém apertar P/M/G. Reconstrói na virada,
+	-- com task.defer para o sinal disparar uma vez só na rotação em vez de
+	-- uma vez por quadro da animação de giro.
+	local camera = workspace.CurrentCamera
+	if camera then
+		local reconstruindo = false
+		conectarContexto(animContext, camera:GetPropertyChangedSignal("ViewportSize"), function()
+			if reconstruindo or not hubFrame or not hubFrame.Parent then
+				return
+			end
+			reconstruindo = true
+			task.defer(function()
+				reconstruindo = false
+				if hubFrame and hubFrame.Parent then
+					buildGrid()
+				end
+			end)
+		end)
+	end
+
 	-- ===== CONEXÃO DO BOTÃO PRINCIPAL =====
 	mainButton.MouseButton1Click:Connect(function()
 		if hubOpen then
 			-- Fechar tudo
 			playSound("rbxassetid://157167205")
-			hubOpen = false
-			hubFrame.Visible = false
+			fecharHub()
 			closeActiveSubmenu()
 		else
 			-- Fechar submenu se aberto, senão abrir hub
@@ -630,13 +1005,11 @@ local function buildMenu()
 				closeActiveSubmenu()
 				-- Reabrir hub
 				playSound("rbxassetid://157167203")
-				hubOpen = true
-				hubFrame.Visible = true
+				abrirHub()
 				buildGrid() -- Refresh
 			else
 				playSound("rbxassetid://157167203")
-				hubOpen = true
-				hubFrame.Visible = true
+				abrirHub()
 				buildGrid() -- Refresh
 			end
 		end
@@ -673,10 +1046,7 @@ _G.UnifiedMenu = {
 		return hubOpen
 	end,
 	close = function()
-		hubOpen = false
-		if hubFrame then
-			hubFrame.Visible = false
-		end
+		fecharHub()
 		closeActiveSubmenu()
 	end,
 	openCategory = function(categoryName)
