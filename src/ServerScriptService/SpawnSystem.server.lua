@@ -599,6 +599,9 @@ local function createLobbyStructure()
 	-- Modelo principal
 	lobbyModel = Instance.new("Model")
 	lobbyModel.Name = "LobbyStructure"
+	lobbyModel:SetAttribute("StructureVersion", 9)
+	lobbyModel:SetAttribute("SafeZoneCenter", LOBBY.POSITION)
+	lobbyModel:SetAttribute("SafeZoneSize", LOBBY.SIZE)
 	lobbyModel.Parent = workspace
 
 	-- 1. PISO
@@ -635,18 +638,9 @@ local function createLobbyStructure()
 	platformLight.Color = Color3.fromRGB(255, 255, 0)
 	platformLight.Parent = spawnPlatform
 
-	task.spawn(function()
-		while spawnPlatform.Parent do
-			TweenService:Create(
-				spawnPlatform,
-				TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-				{
-					Transparency = 0.3,
-				}
-			):Play()
-			task.wait(1)
-		end
-	end)
+	-- Um único tween repetido. O código antigo criava outro tween infinito
+	-- a cada segundo e acumulava animações na mesma plataforma.
+	pulsar("plataformaSpawn", spawnPlatform, 1, { Transparency = 0.3 })
 
 	-- 3. SPAWN LOCATION DO LOBBY (único)
 	lobbySpawnLocation = Instance.new("SpawnLocation")
@@ -752,6 +746,9 @@ local function createLobbyStructure()
 	-- Referência SafeZone para compatibilidade com outros sistemas
 	local safeZoneRef = Instance.new("Model")
 	safeZoneRef.Name = "SafeZone"
+	safeZoneRef:SetAttribute("Version", 9)
+	safeZoneRef:SetAttribute("Center", LOBBY.POSITION)
+	safeZoneRef:SetAttribute("Size", LOBBY.SIZE)
 	safeZoneRef.Parent = workspace
 
 	local refPart = Instance.new("Part")
@@ -761,9 +758,12 @@ local function createLobbyStructure()
 	refPart.Anchored = true
 	refPart.Transparency = 1
 	refPart.CanCollide = false
+	refPart.CanTouch = false
+	refPart.CanQuery = false
 	refPart.Parent = safeZoneRef
+	safeZoneRef.PrimaryPart = refPart
 
-	print("[SPAWN V8] ✓ Estrutura do lobby completa")
+	print("[SPAWN V9] ✓ Estrutura detalhada do lobby completa")
 end
 
 -- =====================================

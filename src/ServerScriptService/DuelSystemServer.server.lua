@@ -10,8 +10,9 @@
 --      o espectador não pisa no piso, não empurra ninguém e não entra em
 --      raycast de golpe — o isolamento de dano continua valendo sem
 --      precisar de regra nova.
--- (V3) Remotes novos: DuelSpectate (RemoteFunction, entra e sai) e
---      DuelSpectators (RemoteEvent, avisa os lutadores quantos assistem).
+-- (V3) Remotes de arquibancada: DuelSpectate (entra e sai),
+--      DuelSpectators (contagem para lutadores), GetDuelArenaStatus
+--      (estado para o menu) e DuelSpectatorState (overlay do espectador).
 --      A volta do espectador é automática no fim do duelo, ao sair da
 --      arquibancada e ao sair do jogo — sem isso ele ficaria preso a
 --      2000 studs de altura.
@@ -106,6 +107,8 @@ local duelResultRemote = ensureRemote("DuelResult", "RemoteEvent")
 -- (V3) Espectadores
 local spectateRemote = ensureRemote("DuelSpectate", "RemoteFunction")
 local spectatorsRemote = ensureRemote("DuelSpectators", "RemoteEvent")
+local getArenaStatusRemote = ensureRemote("GetDuelArenaStatus", "RemoteFunction")
+local spectatorStateRemote = ensureRemote("DuelSpectatorState", "RemoteEvent")
 
 -- =====================================
 -- ARENA (construída 1x)
@@ -249,6 +252,29 @@ local function buildArena()
 		end
 	end
 
+	-- Guarda-corpo externo: fecha o último degrau dos quatro lados para a
+	-- torcida não cair da estrutura, que fica a 2000 studs de altura.
+	local limiteExterno = half + CONFIG.ARQ_FOLGA + CONFIG.ARQ_DEGRAUS * CONFIG.ARQ_PROF
+	local comprimentoExterno = limiteExterno * 2
+	local railDefs = {
+		{ size = Vector3.new(comprimentoExterno, 6, 1), pos = Vector3.new(0, CONFIG.ARQ_DEGRAUS * CONFIG.ARQ_ALTURA + 3, limiteExterno) },
+		{ size = Vector3.new(comprimentoExterno, 6, 1), pos = Vector3.new(0, CONFIG.ARQ_DEGRAUS * CONFIG.ARQ_ALTURA + 3, -limiteExterno) },
+		{ size = Vector3.new(1, 6, comprimentoExterno), pos = Vector3.new(limiteExterno, CONFIG.ARQ_DEGRAUS * CONFIG.ARQ_ALTURA + 3, 0) },
+		{ size = Vector3.new(1, 6, comprimentoExterno), pos = Vector3.new(-limiteExterno, CONFIG.ARQ_DEGRAUS * CONFIG.ARQ_ALTURA + 3, 0) },
+	}
+	for index, def in ipairs(railDefs) do
+		local rail = Instance.new("Part")
+		rail.Name = "GuardaCorpoExterno" .. index
+		rail.Size = def.size
+		rail.Position = center + def.pos
+		rail.Anchored = true
+		rail.CanCollide = true
+		rail.Material = Enum.Material.ForceField
+		rail.Color = index % 2 == 0 and Color3.fromRGB(255, 80, 0) or Color3.fromRGB(0, 200, 255)
+		rail.Transparency = 0.35
+		rail.Parent = arq
+	end
+
 	-- Luz de arena vinda de cima, para a arquibancada não ficar preta.
 	local refletor = Instance.new("Part")
 	refletor.Name = "Refletor"
@@ -262,7 +288,7 @@ local function buildArena()
 
 	local luzArena = Instance.new("PointLight")
 	luzArena.Brightness = 3
-	luzArena.Range = 120
+	luzArena.Range = 60
 	luzArena.Color = Color3.fromRGB(255, 200, 140)
 	luzArena.Parent = refletor
 
@@ -293,6 +319,7 @@ local pendingRequests = {} -- [id]     = { from, to, expires, bet }
 local activeDuels = {} -- [player] = session
 local duelCooldown = {} -- [player] = os.time()
 local devolverEspectadores -- (V3) definida abaixo, usada por clearDuel
+local arenaSession = nil -- uma arena física só pode receber uma sessão
 
 -- =====================================
 -- HELPERS
@@ -335,7 +362,7 @@ end
 -- morrer, ou se sair do jogo, a volta tem que acontecer sozinha — senão
 -- ele fica preso a 2000 studs de altura, longe do mapa.
 
-local espectadores = {} -- [player] = { session = ..., volta = CFrame }
+local espectadores = {} -- [player] = { session, volta, assento, conexões... }
 
 local function contarEspectadores(session)
 	local total = 0
@@ -359,14 +386,104 @@ local function avisarPlateia(session)
 			end)
 		end
 	end
+
+	local status = {
+		busy = arenaSession ~= nil and not arenaSession.finished,
+		playerA = session.a.Name,
+		playerB = session.b.Name,
+		phase = session.active and "LUTANDO" or "PREPARANDO",
+		spectators = total,
+		capacity = math.min(CONFIG.MAX_ESPECTADORES, #assentos),
+	}
+	for espectador, dados in pairs(espectadores) do
+		if dados.session == session and espectador.Parent then
+			spectatorStateRemote:FireClient(espectador, true, status)
+		end
+	end
 end
 
-local function tirarEspectador(player, teleportarDeVolta)
+local function statusArena()
+	local session = arenaSession
+	local busy = session ~= nil and not session.finished
+	return {
+		busy = busy,
+		playerA = busy and session.a.Name or "",
+		playerB = busy and session.b.Name or "",
+		phase = busy and (session.active and "LUTANDO" or "PREPARANDO") or "LIVRE",
+		spectators = busy and contarEspectadores(session) or 0,
+		capacity = math.min(CONFIG.MAX_ESPECTADORES, #assentos),
+	}
+end
+
+local function removerProtecaoEspectador(character)
+	if not character then
+		return
+	end
+	for _, child in ipairs(character:GetChildren()) do
+		if child.Name == "DuelSpectator" or child.Name == "DuelSpectatorProtection" then
+			child.Parent = nil
+		end
+	end
+end
+
+local function prepararPersonagemEspectador(dados, character)
+	if not dados or espectadores[dados.player] ~= dados or dados.session.finished then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 10)
+	local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 10)
+	if not humanoid or not humanoid:IsA("Humanoid") or not hrp or not hrp:IsA("BasePart") then
+		return
+	end
+	if espectadores[dados.player] ~= dados or dados.session.finished then
+		return
+	end
+
+	removerProtecaoEspectador(character)
+	humanoid:UnequipTools()
+
+	local tag = Instance.new("BoolValue")
+	tag.Name = "DuelSpectator"
+	tag.Value = true
+	tag.Parent = character
+
+	local forceField = Instance.new("ForceField")
+	forceField.Name = "DuelSpectatorProtection"
+	forceField.Visible = false
+	forceField.Parent = character
+
+	if dados.childConn then
+		dados.childConn:Disconnect()
+	end
+	dados.childConn = character.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and espectadores[dados.player] == dados then
+			task.defer(function()
+				if humanoid.Parent then
+					humanoid:UnequipTools()
+				end
+			end)
+		end
+	end)
+
+	hrp.CFrame = assentos[dados.assento]
+	hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+	hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+end
+
+local function tirarEspectador(player, teleportarDeVolta, mensagem)
 	local dados = espectadores[player]
 	if not dados then
 		return false
 	end
 	espectadores[player] = nil
+	player:SetAttribute("SpectatingDuel", nil)
+	if dados.characterConn then
+		dados.characterConn:Disconnect()
+	end
+	if dados.childConn then
+		dados.childConn:Disconnect()
+	end
+	removerProtecaoEspectador(player.Character)
 
 	if teleportarDeVolta and dados.volta then
 		local char = player.Character
@@ -374,20 +491,33 @@ local function tirarEspectador(player, teleportarDeVolta)
 		if hrp then
 			pcall(function()
 				hrp.CFrame = dados.volta
+				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+				hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 			end)
 		end
 	end
 
 	avisarPlateia(dados.session)
+	if player.Parent then
+		spectatorStateRemote:FireClient(player, false, mensagem or "Você saiu da arquibancada.")
+	end
 	return true
 end
 
 function devolverEspectadores(session)
+	local paraDevolver = {}
 	for player, dados in pairs(espectadores) do
 		if dados.session == session then
-			tirarEspectador(player, true)
+			table.insert(paraDevolver, player)
 		end
 	end
+	for _, player in ipairs(paraDevolver) do
+		tirarEspectador(player, true, "O duelo terminou — você voltou ao ponto anterior.")
+	end
+end
+
+getArenaStatusRemote.OnServerInvoke = function(_player)
+	return statusArena()
 end
 
 local function disconnectSession(session)
@@ -408,6 +538,9 @@ local function clearDuel(session)
 	session.active = false
 	session.aborted = true
 	devolverEspectadores(session)
+	if arenaSession == session then
+		arenaSession = nil
+	end
 end
 
 -- Aposta: liquida (vencedor leva o pote) ou reembolsa (winner = nil)
@@ -468,7 +601,7 @@ local function finishDuel(session, winner, loser, reason)
 				duelResultRemote:FireClient(p, "draw", otherDuelist(session, p).Name, msg)
 			end
 		end
-		print(string.format("[DUEL V2] Empate: %s vs %s (%s)", session.a.Name, session.b.Name, reason or ""))
+		print(string.format("[DUEL V3] Empate: %s vs %s (%s)", session.a.Name, session.b.Name, reason or ""))
 		return
 	end
 
@@ -495,7 +628,7 @@ local function finishDuel(session, winner, loser, reason)
 		duelResultRemote:FireClient(loser, "lose", winner.Name, msg)
 	end
 
-	print(string.format("[DUEL V2] %s venceu %s (%s)", winner.Name, loser and loser.Name or "?", reason or ""))
+	print(string.format("[DUEL V3] %s venceu %s (%s)", winner.Name, loser and loser.Name or "?", reason or ""))
 end
 
 local function cancelDuel(session, message)
@@ -511,7 +644,7 @@ local function cancelDuel(session, message)
 			duelResultRemote:FireClient(p, "cancel", "", message)
 		end
 	end
-	print("[DUEL V2] Duelo cancelado: " .. tostring(message))
+	print("[DUEL V3] Duelo cancelado: " .. tostring(message))
 end
 
 -- =====================================
@@ -673,6 +806,15 @@ local function requestDuel(player, targetName, betAmount)
 	if target == player then
 		return false, "Você não pode duelar consigo mesmo!"
 	end
+	if arenaSession and not arenaSession.finished then
+		return false, "A arena está ocupada. Você pode assistir pela arquibancada!"
+	end
+	if espectadores[player] then
+		return false, "Saia da arquibancada antes de desafiar alguém."
+	end
+	if espectadores[target] then
+		return false, target.Name .. " está assistindo ao duelo atual."
+	end
 	if activeDuels[player] then
 		return false, "Você já está em um duelo!"
 	end
@@ -733,7 +875,7 @@ local function requestDuel(player, targetName, betAmount)
 	end)
 
 	local betTxt = bet > 0 and (" (aposta " .. bet .. " 💰)") or ""
-	print(string.format("[DUEL V2] Desafio: %s -> %s%s", player.Name, target.Name, betTxt))
+	print(string.format("[DUEL V3] Desafio: %s -> %s%s", player.Name, target.Name, betTxt))
 	return true, "Desafio enviado para " .. target.Name .. "!" .. betTxt
 end
 
@@ -743,44 +885,40 @@ end
 -- valida e move. Recusa quem está duelando: o lutador ir para a
 -- arquibancada abandonaria a luta pela porta dos fundos.
 spectateRemote.OnServerInvoke = function(player, alvo)
+	if alvo == false then
+		local saiu = tirarEspectador(player, true, "Você saiu da arquibancada.")
+		return saiu, saiu and "Você voltou ao ponto anterior." or "Você não está assistindo.", statusArena()
+	end
+
 	if espectadores[player] then
-		tirarEspectador(player, true)
-		return true, "Você saiu da arquibancada."
+		return true, "Você já está assistindo.", statusArena()
 	end
 
 	if activeDuels[player] then
-		return false, "Você está em um duelo."
+		return false, "Você está em um duelo.", statusArena()
 	end
 
-	local session
+	local session = arenaSession
 	if typeof(alvo) == "Instance" and alvo:IsA("Player") then
 		session = activeDuels[alvo]
-	else
-		-- Sem alvo: pega qualquer duelo em andamento.
-		for _, s in pairs(activeDuels) do
-			if s.active then
-				session = s
-				break
-			end
-		end
 	end
 
-	if not session or not session.active then
-		return false, "Nenhum duelo em andamento."
+	if not session or session.finished or session ~= arenaSession then
+		return false, "Nenhum duelo em andamento.", statusArena()
 	end
 
 	if contarEspectadores(session) >= CONFIG.MAX_ESPECTADORES then
-		return false, "Arquibancada lotada."
+		return false, "Arquibancada lotada.", statusArena()
 	end
 
 	local char = player.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if not hrp then
-		return false, "Personagem não encontrado."
+	if not hrp or not getLivingHumanoid(player) then
+		return false, "Personagem não encontrado ou sem vida.", statusArena()
 	end
 
 	if #assentos == 0 then
-		return false, "Arquibancada indisponível."
+		return false, "Arquibancada indisponível.", statusArena()
 	end
 
 	-- Assento livre: percorre a lista e pula os já ocupados, para dois
@@ -800,21 +938,26 @@ spectateRemote.OnServerInvoke = function(player, alvo)
 		end
 	end
 	if not escolhido then
-		return false, "Arquibancada lotada."
+		return false, "Arquibancada lotada.", statusArena()
 	end
 
-	espectadores[player] = {
+	local dados = {
+		player = player,
 		session = session,
 		volta = hrp.CFrame,
 		assento = escolhido,
 	}
-
-	pcall(function()
-		hrp.CFrame = assentos[escolhido]
+	espectadores[player] = dados
+	player:SetAttribute("SpectatingDuel", true)
+	dados.characterConn = player.CharacterAdded:Connect(function(character)
+		task.spawn(function()
+			prepararPersonagemEspectador(dados, character)
+		end)
 	end)
+	prepararPersonagemEspectador(dados, char)
 
 	avisarPlateia(session)
-	return true, "Assistindo ao duelo."
+	return true, "Assistindo ao duelo.", statusArena()
 end
 
 requestDuelRemote.OnServerInvoke = requestDuel
@@ -843,8 +986,15 @@ respondToDuelRemote.OnServerEvent:Connect(function(player, accepted)
 		return
 	end
 
-	if not from.Parent or activeDuels[from] or activeDuels[player] then
+	if not from.Parent or activeDuels[from] or activeDuels[player] or espectadores[from] or espectadores[player] then
 		duelResultRemote:FireClient(player, "cancel", "", "O duelo não está mais disponível.")
+		return
+	end
+	if arenaSession and not arenaSession.finished then
+		duelResultRemote:FireClient(player, "cancel", "", "A arena foi ocupada por outro duelo.")
+		if from.Parent then
+			duelResultRemote:FireClient(from, "cancel", "", "A arena foi ocupada por outro duelo.")
+		end
 		return
 	end
 
@@ -877,6 +1027,7 @@ respondToDuelRemote.OnServerEvent:Connect(function(player, accepted)
 	}
 	activeDuels[from] = session
 	activeDuels[player] = session
+	arenaSession = session
 
 	-- (V2) ESCROW: tira a aposta dos dois agora
 	if bet > 0 then
@@ -886,7 +1037,7 @@ respondToDuelRemote.OnServerEvent:Connect(function(player, accepted)
 		PDM.savePlayerData(player)
 	end
 
-	print(string.format("[DUEL V2] Duelo aceito: %s vs %s (pote %d)", from.Name, player.Name, session.pot))
+	print(string.format("[DUEL V3] Duelo aceito: %s vs %s (pote %d)", from.Name, player.Name, session.pot))
 	startDuel(session)
 end)
 

@@ -1,14 +1,15 @@
 -- ============================================================================
--- LoadingScreenServer V2  ·  ServerScriptService
--- (V2) ALTERAÇÕES: :Destroy() -> .Parent = nil; estágios com texto RETRO ARCADE
+-- LoadingScreenServer V3  ·  ServerScriptService
+-- Nome: "LoadingScreenServer"
+-- (V3) Só confirma READY depois de dados e personagem realmente existirem.
 -- ============================================================================
 -- Parte SERVIDOR da tela de carregamento (arquitetura server + client).
 -- Avisa o cliente quando o jogador está 100% PRONTO de verdade:
 --   • dados carregados (_G.PlayerDataManager.getPlayerData)
 --   • personagem existente
 -- O cliente (ReplicatedFirst/LoadingScreen) só some quando recebe esse sinal
--- (ou quando estoura o limite anti-trava). Assim a tela cobre o carregamento
--- REAL, não só um timer.
+-- Se alguma dependência não responder, o cliente permanece na tela e oferece
+-- o botão PULAR como saída manual. Nenhum timeout é tratado como sucesso.
 -- ============================================================================
 
 local Players = game:GetService("Players")
@@ -57,26 +58,55 @@ local function markReady(player)
 	loadingReady:FireClient(player)
 end
 
--- Sequência de "prontidão" do jogador, com limites anti-trava.
+local function isConnected(player)
+	return player.Parent == Players
+end
+
+local function failStage(player, message, fraction)
+	if isConnected(player) then
+		setStage(player, message .. " — USE PULAR", fraction)
+	end
+	warn(string.format("[LOADING SERVER V3] %s: %s", player.Name, message))
+end
+
+-- Sequência de prontidão com limites que reportam falha, nunca sucesso falso.
 local function prepare(player)
 	-- 1) Espera o gerenciador de dados existir
 	setStage(player, "CONECTANDO AO SERVIDOR...", 0.15)
 	local t = 0
-	while not _G.PlayerDataManager and t < 30 do
+	while isConnected(player) and not _G.PlayerDataManager and t < 30 do
 		task.wait(0.2)
 		t += 0.2
+	end
+	if not isConnected(player) then
+		return
+	end
+	if not _G.PlayerDataManager then
+		failStage(player, "SERVIDOR DE DADOS NÃO RESPONDEU", 0.15)
+		return
 	end
 
 	-- 2) Espera os dados do jogador carregarem
 	setStage(player, "CARREGANDO SAVE DO PLAYER...", 0.45)
 	t = 0
-	while t < 30 do
-		local okData = _G.PlayerDataManager and _G.PlayerDataManager.getPlayerData(player)
-		if okData then
+	local dataLoaded = false
+	while isConnected(player) and t < 30 do
+		local ok, data = pcall(function()
+			return _G.PlayerDataManager.getPlayerData(player)
+		end)
+		if ok and data then
+			dataLoaded = true
 			break
 		end
 		task.wait(0.2)
 		t += 0.2
+	end
+	if not isConnected(player) then
+		return
+	end
+	if not dataLoaded then
+		failStage(player, "SAVE DO PLAYER NÃO CARREGOU", 0.45)
+		return
 	end
 
 	-- 3) Espera o personagem aparecer
@@ -87,7 +117,7 @@ local function prepare(player)
 			done = true
 		end)
 		local t2 = 0
-		while not done and not player.Character and t2 < 20 do
+		while isConnected(player) and not done and not player.Character and t2 < 20 do
 			task.wait(0.2)
 			t2 += 0.2
 		end
@@ -95,11 +125,18 @@ local function prepare(player)
 			conn:Disconnect()
 		end
 	end
+	if not isConnected(player) then
+		return
+	end
+	if not player.Character then
+		failStage(player, "PERSONAGEM NÃO APARECEU", 0.8)
+		return
+	end
 
 	-- 4) Pronto!
 	setStage(player, "READY!", 1)
 	markReady(player)
-	print(string.format("[LOADING SERVER V2] %s pronto", player.Name))
+	print(string.format("[LOADING SERVER V3] %s pronto", player.Name))
 end
 
 Players.PlayerAdded:Connect(function(player)
@@ -118,4 +155,4 @@ Players.PlayerRemoving:Connect(function(p)
 	ready[p] = nil
 end)
 
-print("[LOADING SERVER V2] carregado")
+print("[LOADING SERVER V3] carregado")

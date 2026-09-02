@@ -30,19 +30,7 @@ combine com o dono. Ao terminar, tire a linha.
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
 
-> ⚠️ Um handoff no PR #5 (2026-09-02) passou LoadingScreen, SpawnSystem e a
-> arena de duelo para o Codex. Os três **já estavam prontos e enviados** nos
-> commits `918ca91` e `1bf1a8f`, antes do handoff chegar. Refazer os três seria
-> a mesma colisão do HealthDisplay outra vez. O que sobrou desses sistemas está
-> na lista abaixo.
-
 ## Livre e com trabalho pendente
-
-**Botão de assistir duelo** — `DuelSystemServer` V3 já expõe os remotes
-`DuelSpectate` (RemoteFunction, entra e sai da arquibancada) e `DuelSpectators`
-(RemoteEvent, número de espectadores). Nenhum cliente chama nenhum dos dois: a
-arquibancada existe no jogo e ninguém consegue subir nela. O botão vai no
-`DuelMenuClient.client.lua`, que está livre.
 
 Os cinco menus abaixo
 
