@@ -1,5 +1,5 @@
 -- ============================================
--- HEALTH DISPLAY V8.2 - HUD RESPONSIVO E ANIMADO
+-- HEALTH DISPLAY V8.3 - HUD NO CANTO SUPERIOR DIREITO
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "HealthDisplay"
 -- SUBSTITUI: HealthDisplay V7
@@ -67,6 +67,9 @@ local FRACAO_ALTURA = 0.16
 local ESCALA_MIN = 0.46
 local ESCALA_MAX = 0.85
 
+-- (V8.3) Distância do HUD até as bordas de cima e da direita.
+local MARGEM = 12
+
 -- Evita HUD duplicado quando o script é recarregado durante um teste.
 local previousGui = PlayerGui:FindFirstChild("RetroHealthDisplay")
 if previousGui then
@@ -85,7 +88,16 @@ HealthGui.Parent = PlayerGui
 -- alinhamento e espaçamento idênticos em qualquer proporção de tela.
 local HudRoot = Instance.new("Frame")
 HudRoot.Name = "HudRoot"
-HudRoot.AnchorPoint = Vector2.new(0.5, 0)
+-- (V8.3) Ancorado pelo canto SUPERIOR DIREITO.
+--
+-- O HUD ficava no topo centralizado, e centralizado no topo é o meio da
+-- tela em celular deitado: caía por cima do personagem e disputava espaço
+-- com o aviso de alvo, que também é centralizado.
+--
+-- A âncora em (1, 0) faz o UIScale encolher o HUD EM DIREÇÃO ao canto —
+-- o canto superior direito fica parado em qualquer escala, em vez de a
+-- caixa deslizar quando o tamanho muda.
+HudRoot.AnchorPoint = Vector2.new(1, 0)
 HudRoot.Size = UDim2.fromOffset(HUD_WIDTH, HUD_HEIGHT)
 HudRoot.BackgroundTransparency = 1
 HudRoot.Parent = HealthGui
@@ -370,7 +382,7 @@ local function applyResponsiveLayout()
 	local heightScale = math.max(1, viewport.Y * FRACAO_ALTURA) / HUD_HEIGHT
 	ResponsiveScale.Scale =
 		math.clamp(math.min(widthScale, heightScale), ESCALA_MIN, ESCALA_MAX)
-	HudRoot.Position = UDim2.new(0.5, 0, 0, getTopInset() + 8)
+	HudRoot.Position = UDim2.new(1, -MARGEM, 0, getTopInset() + MARGEM)
 end
 
 local function bindViewport()
