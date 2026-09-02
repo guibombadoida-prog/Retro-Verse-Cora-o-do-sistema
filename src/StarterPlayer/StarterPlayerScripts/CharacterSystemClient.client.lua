@@ -1,5 +1,31 @@
 -- ============================================
--- CHARACTER SYSTEM CLIENT V10 — CARD DO DESPERTAR COMPLETO
+-- CHARACTER SYSTEM CLIENT V11 — BUSCA E GRADE RESPONSIVA
+-- Coloque em StarterPlayer > StarterPlayerScripts
+-- Nome: "CharacterSystemClient"
+-- SUBSTITUI: CharacterSystemClient V10
+-- ============================================
+-- (V11) Três problemas do mesmo lugar: o layout da grade.
+--
+--   1. TAMANHO ERRADO. Cada card era posicionado por conta de col/row em
+--      PIXELS ABSOLUTOS, e getUIScale() rodava UMA VEZ na carga do
+--      script. Girar o celular não refazia nada — a grade continuava com
+--      a largura da orientação anterior, com coluna sobrando ou faltando.
+--      Agora quem posiciona é UIGridLayout, a altura do conteúdo é
+--      AutomaticCanvasSize, e a escala é recalculada no evento de
+--      ViewportSize (adiado com task.defer, porque a rotação dispara
+--      várias mudanças seguidas e remontar em cada uma faria piscar).
+--
+--   2. SEM BUSCA. Achar um personagem era rolar até encontrar. Loja e
+--      inventário ganharam barra de pesquisa que filtra a cada tecla —
+--      esperar o Enter faz a busca parecer quebrada.
+--
+--   3. TUDO NUM MONTE SÓ. Os cards saíam numa grade única sem divisão.
+--      Agora vêm em seções por raridade, na ordem declarada em
+--      `rarities`, com cabeçalho colorido.
+--
+-- O aviso de lista vazia passou a distinguir "não tem nada nesta
+-- categoria" de "sua busca não achou nada" — são situações diferentes e
+-- pedem ações diferentes de quem está lendo.
 -- ============================================
 -- (V10) O botão VOLTOU, abrindo informação em vez de equipar.
 -- O V9 tirou o botão inteiro e deixou só um rótulo com o nome — longe
@@ -1888,6 +1914,156 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 end
 
 -- =====================================
+-- (V11) BUSCA, GRADE RESPONSIVA E SEÇÕES
+-- =====================================
+-- Até o V10 os dois grids posicionavam cada card com conta de col/row em
+-- PIXELS ABSOLUTOS, e o uiScale era calculado UMA VEZ no carregamento do
+-- script. Duas consequências: em cada aparelho o card saía de um tamanho
+-- diferente do pretendido, e girar o celular não refazia nada — a grade
+-- continuava com a largura da orientação anterior.
+--
+-- Agora quem posiciona é UIGridLayout, quem limita a forma do card é
+-- UIAspectRatioConstraint, e a escala é recalculada quando a ViewportSize
+-- muda. Ninguém mais faz conta de posição à mão.
+
+local buscaLoja = ""
+local buscaInventario = ""
+
+local function combinaBusca(nome, termo)
+	if termo == "" then
+		return true
+	end
+	return string.find(string.lower(nome), string.lower(termo), 1, true) ~= nil
+end
+
+-- Barra de pesquisa no padrão retro do menu.
+local function criarBarraPesquisa(pai, posicao, tamanho, aoMudar)
+	local moldura = Instance.new("Frame")
+	moldura.Name = "BarraPesquisa"
+	moldura.Position = posicao
+	moldura.Size = tamanho
+	moldura.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	moldura.BorderColor3 = Color3.fromRGB(120, 120, 120)
+	moldura.BorderSizePixel = 2
+	moldura.Parent = pai
+
+	local lupa = Instance.new("TextLabel")
+	lupa.Size = UDim2.fromScale(0.07, 1)
+	lupa.BackgroundTransparency = 1
+	lupa.Text = "🔍"
+	lupa.TextScaled = true
+	lupa.Parent = moldura
+
+	local caixa = Instance.new("TextBox")
+	caixa.Name = "Campo"
+	caixa.Position = UDim2.fromScale(0.08, 0.1)
+	caixa.Size = UDim2.fromScale(0.78, 0.8)
+	caixa.BackgroundTransparency = 1
+	caixa.Text = ""
+	caixa.PlaceholderText = "Pesquisar personagem..."
+	caixa.PlaceholderColor3 = Color3.fromRGB(130, 130, 130)
+	caixa.TextColor3 = Color3.fromRGB(240, 240, 240)
+	caixa.TextScaled = true
+	caixa.Font = Enum.Font.Code
+	caixa.TextXAlignment = Enum.TextXAlignment.Left
+	caixa.ClearTextOnFocus = false
+	caixa.Parent = moldura
+
+	local limpar = Instance.new("TextButton")
+	limpar.Name = "Limpar"
+	limpar.Position = UDim2.fromScale(0.88, 0.15)
+	limpar.Size = UDim2.fromScale(0.1, 0.7)
+	limpar.BackgroundColor3 = Color3.fromRGB(70, 30, 30)
+	limpar.BorderSizePixel = 0
+	limpar.Text = "X"
+	limpar.TextColor3 = Color3.fromRGB(230, 230, 230)
+	limpar.TextScaled = true
+	limpar.Font = Enum.Font.Arcade
+	limpar.Visible = false
+	limpar.Parent = moldura
+
+	-- Filtra a cada tecla: esperar o Enter faria a busca parecer quebrada.
+	caixa:GetPropertyChangedSignal("Text"):Connect(function()
+		limpar.Visible = caixa.Text ~= ""
+		aoMudar(caixa.Text)
+	end)
+
+	limpar.MouseButton1Click:Connect(function()
+		caixa.Text = ""
+	end)
+
+	return caixa
+end
+
+-- Prepara um ScrollingFrame para receber seções empilhadas.
+local function prepararLista(scroll)
+	local lista = scroll:FindFirstChildOfClass("UIListLayout")
+	if not lista then
+		lista = Instance.new("UIListLayout")
+		lista.SortOrder = Enum.SortOrder.LayoutOrder
+		lista.Padding = UDim.new(0, 10)
+		lista.Parent = scroll
+
+		local respiro = Instance.new("UIPadding")
+		respiro.PaddingTop = UDim.new(0, 8)
+		respiro.PaddingBottom = UDim.new(0, 8)
+		respiro.PaddingLeft = UDim.new(0, 8)
+		respiro.PaddingRight = UDim.new(0, 8)
+		respiro.Parent = scroll
+	end
+	-- A altura do conteúdo passa a ser do próprio layout: sem isso seria
+	-- preciso recalcular CanvasSize a cada filtro da busca.
+	scroll.CanvasSize = UDim2.new()
+	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	return lista
+end
+
+-- Uma seção = cabeçalho de raridade + grade daquela raridade, como no
+-- layout de referência ("Starter", "Intermediate").
+local function criarSecao(scroll, titulo, cor, ordem, cardConfig)
+	local secao = Instance.new("Frame")
+	secao.Name = "Secao_" .. titulo
+	secao.BackgroundTransparency = 1
+	secao.Size = UDim2.new(1, 0, 0, 0)
+	secao.AutomaticSize = Enum.AutomaticSize.Y
+	secao.LayoutOrder = ordem
+	secao.Parent = scroll
+
+	local pilha = Instance.new("UIListLayout")
+	pilha.SortOrder = Enum.SortOrder.LayoutOrder
+	pilha.Padding = UDim.new(0, 6)
+	pilha.Parent = secao
+
+	local cabecalho = Instance.new("TextLabel")
+	cabecalho.Name = "Cabecalho"
+	cabecalho.Size = UDim2.new(1, 0, 0, 26)
+	cabecalho.BackgroundTransparency = 1
+	cabecalho.Text = titulo
+	cabecalho.TextColor3 = cor
+	cabecalho.TextScaled = true
+	cabecalho.Font = Enum.Font.Arcade
+	cabecalho.TextXAlignment = Enum.TextXAlignment.Left
+	cabecalho.LayoutOrder = 1
+	cabecalho.Parent = secao
+
+	local grade = Instance.new("Frame")
+	grade.Name = "Grade"
+	grade.BackgroundTransparency = 1
+	grade.Size = UDim2.new(1, 0, 0, 0)
+	grade.AutomaticSize = Enum.AutomaticSize.Y
+	grade.LayoutOrder = 2
+	grade.Parent = secao
+
+	local layout = Instance.new("UIGridLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.CellSize = UDim2.new(0, cardConfig.width, 0, cardConfig.height)
+	layout.CellPadding = UDim2.new(0, cardConfig.spacing, 0, cardConfig.spacing)
+	layout.Parent = grade
+
+	return grade
+end
+
+-- =====================================
 -- CRIAR SISTEMA UNIFICADO (V6)
 -- =====================================
 
@@ -1965,9 +2141,20 @@ createSystem = function()
 
 	local tabWidth = 1 / #SHOP_TABS
 
+	-- (V11) Barra de pesquisa da loja, entre as abas e a grade.
+	criarBarraPesquisa(
+		mainFrame,
+		UDim2.new(0.01, 0, 0.145, 0),
+		UDim2.new(0.98, 0, 0.052, 0),
+		function(texto)
+			buscaLoja = texto
+			refreshOpenFrames()
+		end
+	)
+
 	contentFrame = Instance.new("ScrollingFrame")
-	contentFrame.Size = UDim2.new(0.98, 0, 0.84, 0)
-	contentFrame.Position = UDim2.new(0.01, 0, 0.15, 0)
+	contentFrame.Size = UDim2.new(0.98, 0, 0.79, 0)
+	contentFrame.Position = UDim2.new(0.01, 0, 0.203, 0)
 	contentFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 	contentFrame.BorderColor3 = Color3.fromRGB(100, 100, 100)
 	contentFrame.BorderSizePixel = 2
@@ -2024,33 +2211,63 @@ createSystem = function()
 		coinsLabel.Text = "💰 " .. playerData.coins
 
 		-- (V6) Personagens vêm SÓ do catálogo, filtrados pela aba
+		-- (V11) e pelo texto da busca, agrupados por raridade em seções.
 		local chars = getCharactersForCategory(selectedCategory)
 		local cardConfig = uiScale.card
-		local spacing = cardConfig.spacing
-		local index = 0
+		prepararLista(contentFrame)
 
+		local porRaridade = {}
+		local index = 0
 		for _, charDef in ipairs(chars) do
-			if not playerOwnsCharacter(charDef.name) then
-				local col = index % cardConfig.columns
-				local row = math.floor(index / cardConfig.columns)
-				local card = createCharacterCard(charDef, contentFrame, cardConfig, false)
-				card.Position = UDim2.new(
-					0,
-					spacing + col * (cardConfig.width + spacing),
-					0,
-					spacing + row * (cardConfig.height + spacing)
-				)
+			if not playerOwnsCharacter(charDef.name) and combinaBusca(charDef.name, buscaLoja) then
+				local chave = charDef.rarity or "ROBLOXIANOS"
+				porRaridade[chave] = porRaridade[chave] or {}
+				table.insert(porRaridade[chave], charDef)
 				index = index + 1
 			end
 		end
 
+		-- Ordem das seções segue a ordem declarada das raridades, para o
+		-- comum vir antes do raro em vez de sair na ordem do dicionário.
+		local chaves = {}
+		for chave in pairs(porRaridade) do
+			table.insert(chaves, chave)
+		end
+		table.sort(chaves, function(a, b)
+			local ra = rarities[a] and rarities[a].order or 99
+			local rb = rarities[b] and rarities[b].order or 99
+			if ra == rb then
+				return a < b
+			end
+			return ra < rb
+		end)
+
+		for ordem, chave in ipairs(chaves) do
+			local info = rarities[chave]
+			local grade = criarSecao(
+				contentFrame,
+				chave,
+				info and info.color or Color3.fromRGB(200, 200, 200),
+				ordem,
+				cardConfig
+			)
+			for i, charDef in ipairs(porRaridade[chave]) do
+				local card = createCharacterCard(charDef, grade, cardConfig, false)
+				card.LayoutOrder = i
+			end
+		end
+
 		-- (V6) Categoria vazia → aviso em vez de tela em branco
+		-- (V11) A mensagem distingue categoria vazia de busca sem resultado:
+		-- "não tem nada aqui" e "sua busca não achou nada" pedem ações
+		-- diferentes do jogador.
 		if index == 0 then
 			local emptyLabel = Instance.new("TextLabel")
-			emptyLabel.Size = UDim2.new(0.9, 0, 0.2, 0)
-			emptyLabel.Position = UDim2.new(0.05, 0, 0.1, 0)
+			emptyLabel.Size = UDim2.new(1, 0, 0, 60)
 			emptyLabel.BackgroundTransparency = 1
-			emptyLabel.Text = "Nenhum personagem disponível nesta categoria no momento."
+			emptyLabel.Text = buscaLoja ~= ""
+					and ('Nenhum personagem encontrado para "' .. buscaLoja .. '".')
+				or "Nenhum personagem disponível nesta categoria no momento."
 			emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
 			emptyLabel.TextScaled = true
 			emptyLabel.TextWrapped = true
@@ -2058,8 +2275,9 @@ createSystem = function()
 			emptyLabel.Parent = contentFrame
 		end
 
-		local rows = math.ceil(index / cardConfig.columns)
-		contentFrame.CanvasSize = UDim2.new(0, 0, 0, rows * (cardConfig.height + spacing) + spacing)
+		-- (V11) A altura do conteúdo é do UIListLayout via
+		-- AutomaticCanvasSize. O cálculo manual antigo dependia de `rows` e
+		-- `spacing`, que a grade por seções aposentou.
 	end
 
 	-- ─────────────────────────────────────
@@ -2103,9 +2321,21 @@ createSystem = function()
 	invClose.Font = Enum.Font.Arcade
 	invClose.Parent = invHeader
 
+	-- (V11) Mesma barra no inventário: com muitos personagens, rolar até
+	-- achar o certo era o gargalo.
+	criarBarraPesquisa(
+		invFrame,
+		UDim2.new(0.01, 0, 0.095, 0),
+		UDim2.new(0.98, 0, 0.055, 0),
+		function(texto)
+			buscaInventario = texto
+			refreshOpenFrames()
+		end
+	)
+
 	invScroll = Instance.new("ScrollingFrame")
-	invScroll.Size = UDim2.new(0.98, 0, 0.9, 0)
-	invScroll.Position = UDim2.new(0.01, 0, 0.09, 0)
+	invScroll.Size = UDim2.new(0.98, 0, 0.84, 0)
+	invScroll.Position = UDim2.new(0.01, 0, 0.155, 0)
 	invScroll.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 	invScroll.BorderColor3 = Color3.fromRGB(100, 100, 100)
 	invScroll.BorderSizePixel = 2
@@ -2127,7 +2357,8 @@ createSystem = function()
 		updatePlayerData()
 
 		local cardConfig = uiScale.card
-		local spacing = cardConfig.spacing
+		prepararLista(invScroll)
+		local porRaridadeInv = {}
 		local index = 0
 
 		for _, characterName in ipairs(playerData.ownedCharacters) do
@@ -2144,16 +2375,56 @@ createSystem = function()
 				}
 			end
 
-			local col = index % cardConfig.columns
-			local row = math.floor(index / cardConfig.columns)
-			local card = createCharacterCard(charInfo, invScroll, cardConfig, true)
-			card.Position = UDim2.new(
-				0,
-				spacing + col * (cardConfig.width + spacing),
-				0,
-				spacing + row * (cardConfig.height + spacing)
+			-- (V11) Busca também no inventário: com muitos personagens,
+			-- rolar até achar o certo era o gargalo.
+			if combinaBusca(charInfo.name, buscaInventario) then
+				local chave = charInfo.rarity or "ROBLOXIANOS"
+				porRaridadeInv[chave] = porRaridadeInv[chave] or {}
+				table.insert(porRaridadeInv[chave], charInfo)
+				index = index + 1
+			end
+		end
+
+		local chavesInv = {}
+		for chave in pairs(porRaridadeInv) do
+			table.insert(chavesInv, chave)
+		end
+		table.sort(chavesInv, function(a, b)
+			local ra = rarities[a] and rarities[a].order or 99
+			local rb = rarities[b] and rarities[b].order or 99
+			if ra == rb then
+				return a < b
+			end
+			return ra < rb
+		end)
+
+		for ordem, chave in ipairs(chavesInv) do
+			local info = rarities[chave]
+			local grade = criarSecao(
+				invScroll,
+				chave,
+				info and info.color or Color3.fromRGB(200, 200, 200),
+				ordem,
+				cardConfig
 			)
-			index = index + 1
+			for i, charInfo in ipairs(porRaridadeInv[chave]) do
+				local card = createCharacterCard(charInfo, grade, cardConfig, true)
+				card.LayoutOrder = i
+			end
+		end
+
+		if index == 0 then
+			local vazio = Instance.new("TextLabel")
+			vazio.Size = UDim2.new(1, 0, 0, 60)
+			vazio.BackgroundTransparency = 1
+			vazio.Text = buscaInventario ~= ""
+					and ('Nenhum personagem seu combina com "' .. buscaInventario .. '".')
+				or "Seu inventário está vazio. Personagens GRÁTIS chegam aqui automaticamente!"
+			vazio.TextColor3 = Color3.fromRGB(150, 150, 150)
+			vazio.TextScaled = true
+			vazio.TextWrapped = true
+			vazio.Font = Enum.Font.Code
+			vazio.Parent = invScroll
 		end
 		-- (V9) OS CARDS DE FORMA DESPERTA FORAM REMOVIDOS.
 		--
@@ -2173,22 +2444,10 @@ createSystem = function()
 		-- A lista data.awakenedCharacters de quem jogou no sistema antigo
 		-- é limpa no login pelo AwakeningSystemServer V5.
 
-		-- Inventário vazio → aviso
-		if index == 0 then
-			local emptyLabel = Instance.new("TextLabel")
-			emptyLabel.Size = UDim2.new(0.9, 0, 0.2, 0)
-			emptyLabel.Position = UDim2.new(0.05, 0, 0.1, 0)
-			emptyLabel.BackgroundTransparency = 1
-			emptyLabel.Text = "Seu inventário está vazio. Personagens GRÁTIS chegam aqui automaticamente!"
-			emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-			emptyLabel.TextScaled = true
-			emptyLabel.TextWrapped = true
-			emptyLabel.Font = Enum.Font.Code
-			emptyLabel.Parent = invScroll
-		end
-
-		local rows = math.ceil(index / cardConfig.columns)
-		invScroll.CanvasSize = UDim2.new(0, 0, 0, rows * (cardConfig.height + spacing) + spacing)
+		-- (V11) O aviso de vazio agora é emitido logo após montar as seções,
+		-- distinguindo inventário vazio de busca sem resultado. O bloco que
+		-- ficava aqui dizia sempre "inventário vazio", o que seria mentira
+		-- quando o jogador tem personagens e só filtrou por um nome.
 	end
 
 	-- ─────────────────────────────────────
@@ -2255,6 +2514,53 @@ end
 -- =====================================
 -- INICIALIZAÇÃO
 -- =====================================
+
+-- =====================================
+-- (V11) RESPONSIVO DE VERDADE
+-- =====================================
+-- getUIScale() lê a ViewportSize, mas o V10 chamava a função uma vez só,
+-- na carga do script. Quem entrasse em retrato e girasse para paisagem
+-- continuava com a grade calculada para a orientação antiga: cards
+-- estreitos demais, colunas sobrando ou faltando.
+--
+-- Aqui a escala é recalculada quando a ViewportSize muda, e as telas
+-- abertas se remontam. O refresh é adiado para o fim do quadro porque a
+-- rotação dispara várias mudanças seguidas — remontar em cada uma
+-- deixaria o menu piscando.
+do
+	local remontagemAgendada = false
+
+	local function aoMudarViewport()
+		if remontagemAgendada then
+			return
+		end
+		remontagemAgendada = true
+
+		task.defer(function()
+			remontagemAgendada = false
+			uiScale = getUIScale()
+
+			if mainFrame then
+				mainFrame.Size = uiScale.menu
+			end
+			if invFrame then
+				invFrame.Size = uiScale.menu
+			end
+
+			refreshOpenFrames()
+		end)
+	end
+
+	local function ligarCamera()
+		local camera = workspace.CurrentCamera
+		if camera then
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(aoMudarViewport)
+		end
+	end
+
+	ligarCamera()
+	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(ligarCamera)
+end
 
 task.spawn(refreshCatalogCharacters)
 
