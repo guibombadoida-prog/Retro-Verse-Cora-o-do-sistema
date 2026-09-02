@@ -1,9 +1,12 @@
 -- ============================================
--- DUEL MENU CLIENT V2 — ARENA + APOSTA (RETRO)
+-- DUEL MENU CLIENT V3 — ARENA AO VIVO + ESPECTADORES
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "DuelMenuClient"
--- SUBSTITUI: DuelMenuClient V1
+-- SUBSTITUI: DuelMenuClient V2
 -- ============================================
+-- (V3) Card de arena ao vivo, entrada/saída da arquibancada em desktop,
+-- controle e mobile, e overlay animado com fase e lotação.
+--
 -- (V2) EVOLUÇÕES sobre o V1:
 -- • Campo de APOSTA na lista (caixa + atalhos 0/50/100); o
 --   DESAFIAR envia o valor apostado.
@@ -36,9 +39,12 @@ local duelInviteRemote = remotes:WaitForChild("DuelInvite", 15)
 local respondToDuelRemote = remotes:WaitForChild("RespondToDuel", 15)
 local duelCountdownRemote = remotes:WaitForChild("DuelCountdown", 15)
 local duelResultRemote = remotes:WaitForChild("DuelResult", 15)
+local spectateRemote = remotes:WaitForChild("DuelSpectate", 15)
+local getArenaStatusRemote = remotes:WaitForChild("GetDuelArenaStatus", 15)
+local spectatorStateRemote = remotes:WaitForChild("DuelSpectatorState", 15)
 
 if not requestDuelRemote then
-	warn("[DUEL CLIENT V2] Remotes de duelo ausentes — DuelSystemServer está no ServerScriptService?")
+	warn("[DUEL CLIENT V3] Remotes de duelo ausentes — DuelSystemServer está no ServerScriptService?")
 	return
 end
 
@@ -124,7 +130,7 @@ local function makeButton(parent, text, color, size, pos)
 	btn.TextScaled = true
 	btn.Font = Enum.Font.Arcade
 	btn.Parent = parent
-	btn.MouseButton1Click:Connect(function()
+	btn.Activated:Connect(function()
 		playSound(sounds.click)
 	end)
 	return btn
@@ -142,6 +148,165 @@ local function makeLabel(parent, text, size, pos, color, font)
 	lbl.Font = font or Enum.Font.Code
 	lbl.Parent = parent
 	return lbl
+end
+
+-- =====================================
+-- OVERLAY DA ARQUIBANCADA (V3)
+-- =====================================
+
+local spectatorGui = nil
+local spectatorInfo = nil
+local isSpectating = false
+local spectatorStrokeTween = nil
+local spectatorViewportConn = nil
+
+local function spectatorText(status)
+	if type(status) ~= "table" then
+		return "ARENA AO VIVO"
+	end
+	return string.format(
+		"%s  VS  %s   •   %s   •   TORCIDA %d/%d",
+		status.playerA ~= "" and status.playerA or "?",
+		status.playerB ~= "" and status.playerB or "?",
+		status.phase or "AO VIVO",
+		tonumber(status.spectators) or 0,
+		tonumber(status.capacity) or 0
+	)
+end
+
+local function closeSpectatorOverlay()
+	isSpectating = false
+	if spectatorStrokeTween then
+		spectatorStrokeTween:Cancel()
+		spectatorStrokeTween = nil
+	end
+	if spectatorViewportConn then
+		spectatorViewportConn:Disconnect()
+		spectatorViewportConn = nil
+	end
+	if spectatorGui then
+		spectatorGui.Parent = nil
+		spectatorGui = nil
+		spectatorInfo = nil
+	end
+end
+
+local function showSpectatorOverlay(status)
+	closeSpectatorOverlay()
+	isSpectating = true
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "DuelSpectatorGui"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 125
+	gui.Parent = playerGui
+	spectatorGui = gui
+
+	local frame = Instance.new("Frame")
+	frame.AnchorPoint = Vector2.new(0.5, 0)
+	frame.Position = isMobile and UDim2.fromScale(0.5, 0.025) or UDim2.fromScale(0.5, 0.035)
+	frame.Size = isMobile and UDim2.fromScale(0.92, 0.14) or UDim2.fromScale(0.58, 0.105)
+	frame.BackgroundColor3 = COLORS.background
+	frame.BackgroundTransparency = 0.08
+	frame.BorderSizePixel = 0
+	frame.Parent = gui
+
+	local frameRatio = Instance.new("UIAspectRatioConstraint")
+	frameRatio.Parent = frame
+	local camera = workspace.CurrentCamera
+	local function updateOverlayAspect()
+		local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+		local portrait = viewport.Y > viewport.X
+		frameRatio.AspectRatio = portrait and 4.2 or 7.5
+		frameRatio.DominantAxis = portrait and Enum.DominantAxis.Width or Enum.DominantAxis.Height
+	end
+	updateOverlayAspect()
+	if camera then
+		spectatorViewportConn = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateOverlayAspect)
+	end
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = COLORS.duel
+	stroke.Thickness = 3
+	stroke.Parent = frame
+	spectatorStrokeTween = TweenService:Create(
+		stroke,
+		TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Transparency = 0.55, Color = COLORS.warning }
+	)
+	spectatorStrokeTween:Play()
+
+	makeLabel(
+		frame,
+		"👁 ARQUIBANCADA AO VIVO",
+		UDim2.new(0.96, 0, 0.34, 0),
+		UDim2.new(0.02, 0, 0.04, 0),
+		COLORS.duel,
+		Enum.Font.Arcade
+	)
+	spectatorInfo = makeLabel(
+		frame,
+		spectatorText(status),
+		UDim2.new(0.68, 0, 0.48, 0),
+		UDim2.new(0.02, 0, 0.43, 0),
+		Color3.new(1, 1, 1),
+		Enum.Font.Code
+	)
+
+	local exitBtn = makeButton(
+		frame,
+		"SAIR",
+		COLORS.error,
+		UDim2.new(0.25, 0, 0.42, 0),
+		UDim2.new(0.73, 0, 0.47, 0)
+	)
+	local exitRatio = Instance.new("UIAspectRatioConstraint")
+	exitRatio.AspectRatio = 3
+	exitRatio.DominantAxis = Enum.DominantAxis.Height
+	exitRatio.Parent = exitBtn
+	exitBtn.Activated:Connect(function()
+		exitBtn.Active = false
+		exitBtn.Text = "VOLTANDO..."
+		local ok, success, message = pcall(function()
+			return spectateRemote:InvokeServer(false)
+		end)
+		if not ok or success ~= true then
+			exitBtn.Active = true
+			exitBtn.Text = "SAIR"
+			showNotification(message or "Não foi possível sair da arquibancada.", false)
+		end
+	end)
+
+	-- Backup do RemoteEvent: atualiza fase/lotação enquanto o overlay existe.
+	task.spawn(function()
+		while spectatorGui == gui and gui.Parent and isSpectating do
+			local ok, current = pcall(function()
+				return getArenaStatusRemote:InvokeServer()
+			end)
+			if ok and type(current) == "table" and current.busy and spectatorInfo then
+				spectatorInfo.Text = spectatorText(current)
+			end
+			task.wait(1.5)
+		end
+	end)
+end
+
+if spectatorStateRemote then
+	spectatorStateRemote.OnClientEvent:Connect(function(active, payload)
+		if active == true then
+			if isSpectating and spectatorInfo then
+				spectatorInfo.Text = spectatorText(payload)
+			else
+				showSpectatorOverlay(payload)
+			end
+		else
+			closeSpectatorOverlay()
+			if type(payload) == "string" and payload ~= "" then
+				showNotification(payload, true)
+			end
+		end
+	end)
 end
 
 -- =====================================
@@ -243,7 +408,7 @@ local function openDuelPlayerList()
 	end)
 
 	local listScroll = Instance.new("ScrollingFrame")
-	listScroll.Size = UDim2.new(0.96, 0, 0.56, 0)
+	listScroll.Size = UDim2.new(0.96, 0, 0.47, 0)
 	listScroll.Position = UDim2.new(0.02, 0, 0.29, 0)
 	listScroll.BackgroundColor3 = COLORS.panel
 	listScroll.BorderColor3 = COLORS.border
@@ -301,10 +466,91 @@ local function openDuelPlayerList()
 		end
 	end
 
-	local refreshBtn = makeButton(mainFrame, "↻ ATUALIZAR LISTA", COLORS.header, UDim2.new(0.96, 0, 0.08, 0), UDim2.new(0.02, 0, 0.88, 0))
+	local latestArenaStatus = nil
+	local arenaBtn = makeButton(
+		mainFrame,
+		"⌛ CONSULTANDO ARENA...",
+		COLORS.disabled,
+		UDim2.new(0.96, 0, 0.075, 0),
+		UDim2.new(0.02, 0, 0.79, 0)
+	)
+	local arenaButtonRatio = Instance.new("UIAspectRatioConstraint")
+	arenaButtonRatio.AspectRatio = isMobile and 7 or 10
+	arenaButtonRatio.DominantAxis = Enum.DominantAxis.Height
+	arenaButtonRatio.Parent = arenaBtn
+	arenaBtn.Active = false
+
+	local function refreshArenaStatus()
+		if not getArenaStatusRemote or not spectateRemote then
+			arenaBtn.Text = "MODO ESPECTADOR INDISPONÍVEL"
+			arenaBtn.BackgroundColor3 = COLORS.disabled
+			arenaBtn.Active = false
+			return
+		end
+		local ok, status = pcall(function()
+			return getArenaStatusRemote:InvokeServer()
+		end)
+		if not gui.Parent then
+			return
+		end
+		if not ok or type(status) ~= "table" then
+			arenaBtn.Text = "⚠ FALHA AO CONSULTAR ARENA"
+			arenaBtn.BackgroundColor3 = COLORS.error
+			arenaBtn.Active = false
+			return
+		end
+
+		latestArenaStatus = status
+		if status.busy then
+			arenaBtn.Text = string.format(
+				"👁 ASSISTIR %s VS %s  [%d/%d]",
+				status.playerA or "?",
+				status.playerB or "?",
+				tonumber(status.spectators) or 0,
+				tonumber(status.capacity) or 0
+			)
+			arenaBtn.BackgroundColor3 = COLORS.duel
+			arenaBtn.Active = true
+		else
+			arenaBtn.Text = "ARENA LIVRE — INICIE UM DESAFIO"
+			arenaBtn.BackgroundColor3 = COLORS.success
+			arenaBtn.Active = false
+		end
+	end
+
+	arenaBtn.Activated:Connect(function()
+		if not latestArenaStatus or not latestArenaStatus.busy or not arenaBtn.Active then
+			return
+		end
+		arenaBtn.Active = false
+		arenaBtn.Text = "ENTRANDO NA ARQUIBANCADA..."
+		local ok, success, message, status = pcall(function()
+			return spectateRemote:InvokeServer(true)
+		end)
+		if not ok or success ~= true then
+			showNotification(message or "Não foi possível entrar na arquibancada.", false)
+			refreshArenaStatus()
+			return
+		end
+		gui.Parent = nil
+		if not isSpectating and type(status) == "table" then
+			showSpectatorOverlay(status)
+		end
+	end)
+
+	local refreshBtn = makeButton(mainFrame, "↻ ATUALIZAR LISTA", COLORS.header, UDim2.new(0.96, 0, 0.075, 0), UDim2.new(0.02, 0, 0.89, 0))
 	refreshBtn.MouseButton1Click:Connect(refreshList)
 
 	refreshList()
+	refreshArenaStatus()
+	task.spawn(function()
+		while gui.Parent do
+			task.wait(2)
+			if gui.Parent then
+				refreshArenaStatus()
+			end
+		end
+	end)
 end
 
 _G.OpenDuelPlayerList = openDuelPlayerList
@@ -548,8 +794,8 @@ task.spawn(function()
 				g.Parent = nil
 			end
 		end, 4.5)
-		print("[DUEL CLIENT V2] Categoria DUELO registrada no menu")
+		print("[DUEL CLIENT V3] Categoria DUELO registrada no menu")
 	end
 end)
 
-print("[DUEL CLIENT V2] ⚔️ Cliente de duelo (arena + aposta) carregado")
+print("[DUEL CLIENT V3] ⚔️ Cliente de duelo (arena ao vivo + torcida) carregado")

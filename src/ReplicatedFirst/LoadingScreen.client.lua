@@ -30,8 +30,8 @@
 -- • Limpeza final sem :Destroy() (desconecta conexões e
 --   usa gui.Parent = nil — conformidade do projeto)
 -- REUTILIZADO da LoadingScreen V1: handshake server+client
--- (LoadingStage/LoadingReady/QueryLoadingReady), anti-trava
--- MIN_DISPLAY/MAX_WAIT, suavização da barra e fade de saída.
+-- (LoadingStage/LoadingReady/QueryLoadingReady), tempo mínimo,
+-- suavização da barra e fade de saída.
 -- REUTILIZADO do HealthDisplay V2: paleta neon retro.
 -- ============================================
 
@@ -42,23 +42,19 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local ContentProvider = game:GetService("ContentProvider")
 
-print("[LOADING V2] script iniciado")
+print("[LOADING V3] script iniciado")
 
 pcall(function()
 	ReplicatedFirst:RemoveDefaultLoadingScreen()
 end)
 
 local MIN_DISPLAY = 4 -- segundos mínimos visíveis
--- (V3) O V2 parava em 30s. Preload de verdade passa disso em rede de
--- celular, e cortar no meio devolve o problema que este V3 resolve. O
--- limite subiu, e quem não quer esperar tem o botão de pular.
-local MAX_WAIT = 120 -- limite anti-trava
 local SEGMENTOS = 20 -- blocos da barra pixelada
 
 -- (V3) Preload
 local SKIP_APOS = 5 -- segundos até o botão de pular aparecer
-local LOTE_ASSETS = 20 -- itens por chamada de PreloadAsync
-local MAX_ASSETS = 1200 -- teto de itens; mapa grande não trava a entrada
+local LOTE_ASSETS = 32 -- itens por chamada de PreloadAsync
+local VARREDURAS_ESTAVEIS = 2 -- alcança conteúdo inserido durante o boot
 
 -- LocalPlayer (sem travar)
 local player = Players.LocalPlayer
@@ -436,8 +432,10 @@ print("[LOADING V3] tela retro criada e exibida")
 
 -- ===================== ESTADO =====================
 local rodando = true
+local gameLoaded = game:IsLoaded()
 local serverReady = false
 local serverFraction = 0 -- progresso reportado pelo servidor (0..1)
+local serverStatus = "CONECTANDO AO SERVIDOR..."
 local mostrado = 0 -- progresso exibido (suavizado)
 
 -- (V3) Preload e pulo
@@ -445,6 +443,8 @@ local pulou = false -- jogador apertou PULAR
 local assetsProntos = false -- PreloadAsync terminou (ou não havia o que baixar)
 local assetsFeitos = 0
 local assetsTotal = 0
+local falhasAssets = 0
+local preloadIniciado = false
 
 local statusAlvo = "INICIALIZANDO SISTEMA..."
 local statusDigitado = ""
@@ -477,102 +477,144 @@ task.delay(SKIP_APOS, function()
 end)
 
 -- ===================== (V3) PRELOAD DOS ASSETS =====================
--- game:IsLoaded() só garante que a árvore replicou. O que faz o jogador
--- ver mapa cinza e ouvir silêncio é o conteúdo — textura, som, malha —
--- que só baixa quando alguém pede. ContentProvider:PreloadAsync é esse
--- pedido.
+-- Não existe teto artificial: o caminho normal só termina depois de todos
+-- os portadores replicados terem retornado Success. Falhas são repetidas;
+-- um asset inválido deixa PULAR disponível, mas nunca vira sucesso falso.
+local COM_CONTEUDO = {
+	Animation = true,
+	AudioPlayer = true,
+	Beam = true,
+	CharacterMesh = true,
+	Decal = true,
+	ImageButton = true,
+	ImageLabel = true,
+	MaterialVariant = true,
+	MeshPart = true,
+	Pants = true,
+	ParticleEmitter = true,
+	Shirt = true,
+	ShirtGraphic = true,
+	Sky = true,
+	Sound = true,
+	SpecialMesh = true,
+	SurfaceAppearance = true,
+	Texture = true,
+	Trail = true,
+	VideoFrame = true,
+	WrapLayer = true,
+}
+
+local function coletarNovosAssets(vistos)
+	local novos = {}
+	for _, item in ipairs(game:GetDescendants()) do
+		if COM_CONTEUDO[item.ClassName] and not vistos[item] then
+			vistos[item] = true
+			table.insert(novos, item)
+		end
+	end
+	return novos
+end
+
+local function carregarLote(lote)
+	local falhasFinais = 0
+	for tentativa = 1, 2 do
+		local falhas = 0
+		local ok = pcall(function()
+			ContentProvider:PreloadAsync(lote, function(_, fetchStatus)
+				if fetchStatus ~= Enum.AssetFetchStatus.Success then
+					falhas += 1
+				end
+			end)
+		end)
+		if not ok then
+			falhas = math.max(falhas, #lote)
+		end
+		falhasFinais = falhas
+		if ok and falhas == 0 then
+			break
+		end
+		if tentativa < 2 then
+			task.wait(0.2)
+		end
+	end
+	return falhasFinais
+end
+
 task.spawn(function()
-	-- Só varre depois que a árvore existe, senão metade do jogo ainda
-	-- não chegou e a varredura sai curta.
-	if not game:IsLoaded() then
+	if not gameLoaded then
 		game.Loaded:Wait()
+		gameLoaded = true
 	end
 	if not rodando then
 		return
 	end
 
-	local COM_CONTEUDO = {
-		Decal = true,
-		Texture = true,
-		ImageLabel = true,
-		ImageButton = true,
-		Sound = true,
-		MeshPart = true,
-		SpecialMesh = true,
-		ParticleEmitter = true,
-		Beam = true,
-		Trail = true,
-		Sky = true,
-		Animation = true,
-		Shirt = true,
-		Pants = true,
-		ShirtGraphic = true,
-	}
+	preloadIniciado = true
+	local vistos = {}
+	local lotesParaRepetir = {}
+	local varredurasVazias = 0
 
-	-- Ordem proposital: o que o jogador vê no primeiro segundo vem antes.
-	-- Se o teto de MAX_ASSETS cortar, corta no cenário distante, não na
-	-- interface nem nas ferramentas de combate.
-	local raizes = {
-		game:GetService("StarterGui"),
-		ReplicatedStorage,
-		game:GetService("StarterPack"),
-		game:GetService("Lighting"),
-		game:GetService("Workspace"),
-	}
+	while rodando and not pulou do
+		local novos = coletarNovosAssets(vistos)
+		if #novos > 0 then
+			varredurasVazias = 0
+			assetsTotal += #novos
 
-	local fila = {}
-	for _, raiz in raizes do
-		if #fila >= MAX_ASSETS then
-			break
-		end
-		local ok, filhos = pcall(function()
-			return raiz:GetDescendants()
-		end)
-		if ok then
-			for _, item in filhos do
-				if COM_CONTEUDO[item.ClassName] then
-					table.insert(fila, item)
-					if #fila >= MAX_ASSETS then
-						break
+			for primeiro = 1, #novos, LOTE_ASSETS do
+				if not rodando or pulou then
+					return
+				end
+				local lote = {}
+				local ultimo = math.min(primeiro + LOTE_ASSETS - 1, #novos)
+				for indice = primeiro, ultimo do
+					table.insert(lote, novos[indice])
+				end
+
+				statusAlvo = string.format("BAIXANDO ASSETS... %d/%d", assetsFeitos, assetsTotal)
+				local falhas = carregarLote(lote)
+				if falhas > 0 then
+					falhasAssets += falhas
+					table.insert(lotesParaRepetir, lote)
+				end
+				assetsFeitos += #lote
+			end
+		elseif serverReady and ContentProvider.RequestQueueSize <= 0 then
+			varredurasVazias += 1
+			if varredurasVazias >= VARREDURAS_ESTAVEIS then
+				if #lotesParaRepetir == 0 then
+					break
+				end
+
+				statusAlvo = string.format(
+					"REPETINDO %d LOTE(S) COM FALHA — OU USE PULAR...",
+					#lotesParaRepetir
+				)
+				task.wait(1)
+				local aindaFalhando = {}
+				local falhasRestantes = 0
+				for _, lote in ipairs(lotesParaRepetir) do
+					if not rodando or pulou then
+						return
+					end
+					local falhas = carregarLote(lote)
+					if falhas > 0 then
+						falhasRestantes += falhas
+						table.insert(aindaFalhando, lote)
 					end
 				end
+				lotesParaRepetir = aindaFalhando
+				falhasAssets = falhasRestantes
+				varredurasVazias = 0
 			end
 		end
+		task.wait(0.5)
 	end
 
-	assetsTotal = #fila
-	if assetsTotal == 0 then
+	if rodando and not pulou then
 		assetsProntos = true
-		return
+		falhasAssets = 0
+		statusAlvo = "TODOS OS ASSETS CARREGADOS!"
 	end
-
-	statusAlvo = "BAIXANDO ASSETS..."
-
-	-- Em lotes: PreloadAsync de uma lista enorme só devolve o controle no
-	-- fim, e aí a barra ficaria parada até acabar. Lote pequeno mantém a
-	-- barra andando e o botão de pular respondendo.
-	local indice = 1
-	while indice <= assetsTotal and rodando and not pulou do
-		local lote = {}
-		for _ = 1, LOTE_ASSETS do
-			if indice > assetsTotal then
-				break
-			end
-			table.insert(lote, fila[indice])
-			indice += 1
-		end
-
-		-- Um asset podre (id removido, sem permissão) não pode derrubar a
-		-- entrada no jogo inteiro.
-		pcall(function()
-			ContentProvider:PreloadAsync(lote)
-		end)
-
-		assetsFeitos = math.min(indice - 1, assetsTotal)
-		task.wait()
-	end
-
-	assetsProntos = true
 end)
 
 -- ===================== ANIMAÇÕES (todas determinísticas) =====================
@@ -680,30 +722,41 @@ end)
 
 -- Atualização por frame: barra pixelada + status + flicker
 local heartbeatConn
-heartbeatConn = RunService.Heartbeat:Connect(function()
+heartbeatConn = RunService.Heartbeat:Connect(function(deltaTime)
 	if not rodando then
 		return
 	end
 	local agora = os.clock()
 
-	-- Progresso suavizado: tempo + servidor + (V3) download real
-	--
-	-- O tempo decorrido é só um piso, para a barra não ficar imóvel nos
-	-- primeiros instantes. Quem manda é o que já baixou de verdade: uma
-	-- barra que anda sozinha enquanto nada carrega é a mentira que este
-	-- V3 existe para acabar.
-	local porTempo = (agora - startTime) / MIN_DISPLAY
-	local alvo = math.max(serverFraction, math.min(porTempo, 0.95))
-
-	if assetsTotal > 0 then
-		local porAsset = assetsFeitos / assetsTotal
-		-- Enquanto baixa, a barra é o download. Só chega a 1.0 quando
-		-- termina de verdade.
-		alvo = assetsProntos and 1 or math.min(porAsset, 0.98)
+	-- Progresso real: replicação (8%), servidor (22%) e assets (70%).
+	-- Nunca chega a 100% sem as três condições ou o pedido manual de pulo.
+	local fracaoAssets = assetsProntos and 1
+		or (assetsTotal > 0 and math.clamp(assetsFeitos / assetsTotal, 0, 1) or 0)
+	local alvo = (gameLoaded and 0.08 or 0) + serverFraction * 0.22 + fracaoAssets * 0.7
+	local prontoTudo = gameLoaded and serverReady and assetsProntos
+	if prontoTudo or pulou then
+		alvo = 1
+	else
+		alvo = math.min(alvo, 0.99)
 	end
-
-	mostrado = mostrado + (alvo - mostrado) * 0.08
+	local suavizacao = 1 - math.exp(-8 * math.max(deltaTime, 0))
+	-- Assets que aparecem durante o boot aumentam o total; a barra não volta.
+	mostrado += math.max(0, alvo - mostrado) * suavizacao
 	local f = math.clamp(mostrado, 0, 1)
+
+	if pulou then
+		statusAlvo = "PULANDO — ASSETS RESTANTES CARREGARÃO DEPOIS..."
+	elseif preloadIniciado and assetsFeitos < assetsTotal then
+		statusAlvo = string.format("BAIXANDO ASSETS... %d/%d", assetsFeitos, assetsTotal)
+	elseif not serverReady then
+		statusAlvo = serverStatus
+	elseif falhasAssets > 0 then
+		-- A tarefa de preload escreve a quantidade de lotes em repetição.
+	elseif not assetsProntos then
+		statusAlvo = "VERIFICANDO NOVOS ASSETS..."
+	else
+		statusAlvo = "TODOS OS ASSETS CARREGADOS!"
+	end
 
 	-- Blocos pixelados
 	local acesos = math.floor(f * SEGMENTOS)
@@ -732,13 +785,14 @@ heartbeatConn = RunService.Heartbeat:Connect(function()
 end)
 
 -- ===================== HANDSHAKE COM O SERVIDOR =====================
--- (REUTILIZADO da V1 — agora guardando conexões para limpeza)
+-- Falha do servidor mantém a tela aberta; PULAR é a saída manual.
 local stageConn, readyConn
 
 task.spawn(function()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes", 12)
 	if not remotes then
-		print("[LOADING V2] Remotes nao encontrado; seguindo no modo tempo")
+		serverStatus = "SERVIDOR NÃO RESPONDEU — USE PULAR"
+		warn("[LOADING V3] Remotes não encontrado; aguardando PULAR")
 		return
 	end
 
@@ -746,7 +800,7 @@ task.spawn(function()
 	if stageEvent and stageEvent:IsA("RemoteEvent") then
 		stageConn = stageEvent.OnClientEvent:Connect(function(texto, fracao)
 			if type(texto) == "string" then
-				statusAlvo = texto
+				serverStatus = texto
 			end
 			if type(fracao) == "number" then
 				serverFraction = math.clamp(fracao, 0, 1)
@@ -758,6 +812,8 @@ task.spawn(function()
 	if readyEvent and readyEvent:IsA("RemoteEvent") then
 		readyConn = readyEvent.OnClientEvent:Connect(function()
 			serverReady = true
+			serverFraction = 1
+			serverStatus = "SERVIDOR PRONTO!"
 		end)
 	end
 
@@ -770,6 +826,8 @@ task.spawn(function()
 			end)
 			if ok and res == true then
 				serverReady = true
+				serverFraction = 1
+				serverStatus = "SERVIDOR PRONTO!"
 				break
 			end
 			task.wait(0.3)
@@ -778,22 +836,12 @@ task.spawn(function()
 end)
 
 -- ===================== ESPERA PRINCIPAL =====================
--- Jogo carregado (sem travar)
-local gameLoaded = game:IsLoaded()
-if not gameLoaded then
-	task.spawn(function()
-		game.Loaded:Wait()
-		gameLoaded = true
-	end)
-end
-
--- Espera: jogo carregado E servidor pronto E (V3) assets baixados E
--- tempo mínimo — com três saídas de emergência: o botão de pular, o
--- limite anti-trava, e o próprio fim do preload.
+-- Só o caminho completo ou a escolha explícita PULAR fecham a tela.
+local concluiuNormalmente = false
 while rodando do
 	local elapsed = os.clock() - startTime
-	local prontoTudo = gameLoaded and serverReady and assetsProntos and elapsed >= MIN_DISPLAY
-	if prontoTudo or pulou or elapsed >= MAX_WAIT then
+	concluiuNormalmente = gameLoaded and serverReady and assetsProntos and elapsed >= MIN_DISPLAY
+	if concluiuNormalmente or pulou then
 		break
 	end
 	task.wait(0.1)
@@ -801,8 +849,8 @@ end
 
 -- ===================== FINAL =====================
 serverFraction = 1
-assetsProntos = true
-statusAlvo = pulou and "PULANDO..." or "READY!"
+mostrado = 1
+statusAlvo = concluiuNormalmente and "TODOS OS ASSETS CARREGADOS — READY!" or "PULANDO..."
 
 -- O botão some junto com a tela; deixá-lo clicável durante o fade só
 -- geraria clique sem efeito.
@@ -850,6 +898,11 @@ local fade = TweenService:Create(fundo, TweenInfo.new(0.8, Enum.EasingStyle.Quad
 for _, item in fundo:GetDescendants() do
 	if item:IsA("TextLabel") then
 		TweenService:Create(item, TweenInfo.new(0.8), { TextTransparency = 1 }):Play()
+	elseif item:IsA("TextButton") then
+		TweenService:Create(item, TweenInfo.new(0.8), {
+			TextTransparency = 1,
+			BackgroundTransparency = 1,
+		}):Play()
 	elseif item:IsA("Frame") then
 		TweenService:Create(item, TweenInfo.new(0.8), { BackgroundTransparency = 1 }):Play()
 	elseif item:IsA("UIStroke") then
