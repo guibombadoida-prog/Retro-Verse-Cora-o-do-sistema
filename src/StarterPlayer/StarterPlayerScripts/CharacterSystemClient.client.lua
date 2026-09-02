@@ -1,8 +1,18 @@
 -- ============================================
--- CHARACTER SYSTEM CLIENT V12 — LOJA + INVENTÁRIO RETRO RESPONSIVOS
+-- CHARACTER SYSTEM CLIENT V13 — DETALHES, LORE E DESPERTAR ANIMADOS
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "CharacterSystemClient"
--- SUBSTITUI: CharacterSystemClient V11
+-- SUBSTITUI: CharacterSystemClient V12
+-- ============================================
+-- (V13) Informações, Lore e Despertar agora dividem um modal único,
+-- responsivo e navegável por abas. A entrada usa mola amortecida, cada
+-- seção entra em cascata e os textos são revelados progressivamente com
+-- opção de mostrar tudo. A aba de Despertar exibe requisitos, forma,
+-- métricas, habilidades e história sem alterar a regra de combate.
+--
+-- O conteúdo usa alturas em pixels calculadas pelo viewport para não
+-- criar realimentação entre Size.Scale e AutomaticCanvasSize no celular.
+-- Ao girar a tela, a aba aberta é reconstruída e mantém sua seleção.
 -- ============================================
 -- (V12) Redesign completo da loja e do inventário, inspirado no HUD
 -- retro-neon do próprio jogo: painéis escuros, contornos brancos/ciano,
@@ -204,7 +214,7 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-print("[CHAR SYSTEM V12] Inicializando loja e inventário retro responsivos...")
+print("[CHAR SYSTEM V13] Inicializando menus e detalhes animados...")
 
 -- =====================================
 -- DETECÇÃO DE PLATAFORMA
@@ -236,7 +246,7 @@ local catalogAnnouncementRemote = remotes:WaitForChild("CatalogAnnouncement", 15
 local getCharacterStatsInfo = remotes:WaitForChild("GetCharacterStatsInfo", 10)
 
 if not getCatalogCharactersRemote then
-	warn("[CHAR SYSTEM V12] GetCatalogCharacters não encontrado — o CharacterCatalogServer_V4 está no ServerScriptService?")
+	warn("[CHAR SYSTEM V13] GetCatalogCharacters não encontrado — o CharacterCatalogServer_V4 está no ServerScriptService?")
 end
 
 -- =====================================
@@ -2122,6 +2132,1008 @@ local function createLorePopup(characterName)
 end
 
 -- =====================================
+-- (V13) DETALHES UNIFICADOS E ANIMADOS
+-- =====================================
+-- As implementações V12 acima ficam como histórico da evolução do arquivo.
+-- A partir daqui, os três botões abrem o MESMO modal com abas. Assim Lore,
+-- Informações e Despertar compartilham tamanho, mola, navegação, limpeza de
+-- conexões e linguagem visual.
+
+local activeDetailsGui = nil
+local activeDetailsContext = nil
+local activeDetailsRenderContext = nil
+
+local DETAIL_TABS = {
+	{ key = "INFO", icon = "⚔️", label = "INFORMAÇÕES", color = COLORS.cyan },
+	{ key = "LORE", icon = "📖", label = "LORE", color = COLORS.yellow },
+	{ key = "AWAKENING", icon = "⚡", label = "DESPERTAR", color = COLORS.magenta },
+}
+
+local DETAIL_STAT_LABELS = {
+	HPFlat = "Vida",
+	HPPercent = "Vida",
+	DamageBoost = "Dano",
+	DamageResistance = "Resistência",
+	DefenseFlat = "Defesa",
+	WalkSpeedFlat = "Velocidade",
+	WalkSpeedPercent = "Velocidade",
+	JumpFlat = "Pulo",
+	JumpPercent = "Pulo",
+	IncomingHealing = "Cura recebida",
+	OutgoingHealing = "Cura dada",
+	FlightSpeed = "Voo",
+	InterruptResist = "Resist. interrupção",
+	Shield = "Escudo",
+	MeleeBoost = "Dano corpo a corpo",
+	RangedBoost = "Dano à distância",
+	MagicBoost = "Dano mágico",
+	SummonBoost = "Dano de invocação",
+	DebuffBoost = "Dano de debuff",
+	MeleeResist = "Resist. corpo a corpo",
+	RangedResist = "Resist. à distância",
+	MagicResist = "Resist. mágica",
+	SummonResist = "Resist. invocação",
+	DebuffResist = "Resist. debuff",
+	MeleePierce = "Perfura corpo a corpo",
+	RangedPierce = "Perfura à distância",
+	MagicPierce = "Perfura mágica",
+	SummonPierce = "Perfura invocação",
+	DebuffPierce = "Perfura debuff",
+}
+
+local DETAIL_FLAT_STATS = {
+	HPFlat = true,
+	DefenseFlat = true,
+	WalkSpeedFlat = true,
+	JumpFlat = true,
+	Shield = true,
+}
+
+local function getDetailLayout()
+	local viewport = getViewportSize()
+	local portrait = viewport.Y > viewport.X
+	local width
+	local height
+
+	if isMobile then
+		width = portrait and 0.94 or 0.86
+		height = portrait and 0.84 or 0.88
+	else
+		width = portrait and 0.82 or 0.66
+		height = portrait and 0.8 or 0.82
+	end
+
+	return {
+		portrait = portrait,
+		size = UDim2.fromScale(width, height),
+		aspect = (viewport.X * width) / math.max(1, viewport.Y * height),
+		contentHeight = math.max(260, viewport.Y * height * 0.765),
+	}
+end
+
+local function createDetailSection(parent, context, order, height, accent, title)
+	local sectionHeight = math.max(44, math.floor(getDetailLayout().contentHeight * height))
+	local section = Instance.new("Frame")
+	section.Name = "Section_" .. tostring(order)
+	section.Size = UDim2.new(1, 0, 0, sectionHeight)
+	section.BackgroundColor3 = COLORS.panelRaised
+	section.BackgroundTransparency = 0.46
+	section.BorderSizePixel = 0
+	section.LayoutOrder = order
+	section.Parent = parent
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = accent
+	stroke.Thickness = 2
+	stroke.Transparency = 0.38
+	stroke.Parent = section
+
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, COLORS.panelRaised:Lerp(accent, 0.13)),
+		ColorSequenceKeypoint.new(1, COLORS.background),
+	})
+	gradient.Rotation = 90
+	gradient.Parent = section
+
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.84
+	scale.Parent = section
+	tocarTween(
+		context,
+		scale,
+		scale,
+		TweenInfo.new(
+			0.34,
+			Enum.EasingStyle.Back,
+			Enum.EasingDirection.Out,
+			0,
+			false,
+			math.min((order - 1) * 0.045, 0.27)
+		),
+		{ Scale = 1 }
+	)
+
+	if title and title ~= "" then
+		local titleLabel = Instance.new("TextLabel")
+		titleLabel.Position = UDim2.fromScale(0.025, 0.035)
+		titleLabel.Size = UDim2.fromScale(0.95, 0.17)
+		titleLabel.BackgroundTransparency = 1
+		titleLabel.Text = title
+		titleLabel.TextColor3 = accent
+		titleLabel.TextScaled = true
+		titleLabel.Font = Enum.Font.Arcade
+		titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+		titleLabel.Parent = section
+		limitarTexto(titleLabel, 9, 20)
+	end
+
+	return section
+end
+
+local function animateTypedText(context, label, fullText, skipButton, delay)
+	fullText = tostring(fullText or "")
+	label.Text = fullText
+	label.MaxVisibleGraphemes = 0
+	local total = utf8.len(fullText) or #fullText
+	local visible = 0
+	-- O atraso é dado em segundos; o acumulador trabalha em grafemas.
+	local accumulator = -(delay or 0) * 72
+	local finished = false
+	local heartbeatConnection = nil
+
+	local function finish()
+		if finished then
+			return
+		end
+		finished = true
+		label.MaxVisibleGraphemes = -1
+		if skipButton and skipButton.Parent then
+			skipButton.Text = "✓ TEXTO COMPLETO"
+			skipButton.TextColor3 = COLORS.green
+		end
+		if heartbeatConnection then
+			heartbeatConnection:Disconnect()
+			heartbeatConnection = nil
+		end
+	end
+
+	if total == 0 then
+		finish()
+		return finish
+	end
+
+	heartbeatConnection = conectarContexto(context, RunService.Heartbeat, function(deltaTime)
+		if finished or not label.Parent then
+			finish()
+			return
+		end
+		accumulator += deltaTime * 72
+		if accumulator < 0 then
+			return
+		end
+		local nextVisible = math.min(total, math.floor(accumulator))
+		if nextVisible ~= visible then
+			visible = nextVisible
+			label.MaxVisibleGraphemes = visible
+		end
+		if visible >= total then
+			finish()
+		end
+	end)
+
+	if skipButton then
+		conectarContexto(context, skipButton.Activated, finish)
+	end
+
+	return finish
+end
+
+local function createTypedSection(parent, context, order, height, accent, title, text)
+	local fullText = tostring(text or "")
+	local textLength = utf8.len(fullText) or #fullText
+	local portrait = getDetailLayout().portrait
+	local charactersPerSection = portrait and 1050 or 1450
+	local adaptiveHeight = math.clamp(0.2 + textLength / charactersPerSection, height, 1.3)
+	local section = createDetailSection(parent, context, order, adaptiveHeight, accent, title)
+
+	local skipButton = Instance.new("TextButton")
+	skipButton.Name = "ShowFullText"
+	skipButton.AnchorPoint = Vector2.new(1, 0)
+	skipButton.Position = UDim2.fromScale(0.97, 0.035)
+	skipButton.Size = UDim2.fromScale(0.28, 0.15)
+	skipButton.BackgroundColor3 = COLORS.background
+	skipButton.BorderSizePixel = 0
+	skipButton.Text = "» MOSTRAR TUDO"
+	skipButton.TextColor3 = accent
+	skipButton.TextScaled = true
+	skipButton.Font = Enum.Font.Arcade
+	skipButton.Parent = section
+	limitarTexto(skipButton, 8, 14)
+	prepararBotaoAnimado(context, skipButton)
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Position = UDim2.fromScale(0.03, 0.23)
+	textLabel.Size = UDim2.fromScale(0.94, 0.72)
+	textLabel.BackgroundTransparency = 1
+	textLabel.Text = ""
+	textLabel.TextColor3 = COLORS.ink
+	textLabel.TextScaled = true
+	textLabel.TextWrapped = true
+	textLabel.Font = Enum.Font.Code
+	textLabel.TextXAlignment = Enum.TextXAlignment.Left
+	textLabel.TextYAlignment = Enum.TextYAlignment.Top
+	textLabel.Parent = section
+	limitarTexto(textLabel, 11, 21)
+
+	animateTypedText(context, textLabel, fullText, skipButton, math.min(order * 0.045, 0.22))
+	return section
+end
+
+local function createDetailRow(parent, context, order, icon, text, color)
+	local row = createDetailSection(parent, context, order, 0.095, color, nil)
+	local label = Instance.new("TextLabel")
+	label.Position = UDim2.fromScale(0.025, 0.12)
+	label.Size = UDim2.fromScale(0.95, 0.76)
+	label.BackgroundTransparency = 1
+	label.Text = icon .. "  " .. text
+	label.TextColor3 = color
+	label.TextScaled = true
+	label.TextWrapped = true
+	label.Font = Enum.Font.Code
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = row
+	limitarTexto(label, 10, 18)
+	return row
+end
+
+local function loadDetailStats(characterName)
+	if not getCharacterStatsInfo then
+		return nil, {}, "EQUILIBRADO"
+	end
+	local ok, statsInfo = pcall(function()
+		return getCharacterStatsInfo:InvokeServer(characterName)
+	end)
+	if not ok or type(statsInfo) ~= "table" then
+		return nil, {}, "EQUILIBRADO"
+	end
+
+	local archetypeName = "EQUILIBRADO"
+	if type(statsInfo.archetypes) == "table" then
+		for _, archetype in ipairs(statsInfo.archetypes) do
+			if archetype.id == statsInfo.archetype then
+				archetypeName = (archetype.icon or "◆") .. " " .. (archetype.name or archetype.id)
+				break
+			end
+		end
+	end
+
+	local lines = {}
+	if type(statsInfo.finalStats) == "table" then
+		for name, value in pairs(statsInfo.finalStats) do
+			if type(value) == "number" and value ~= 0 then
+				local shown = DETAIL_FLAT_STATS[name] and string.format("%+d", math.floor(value))
+					or string.format("%+.0f%%", value * 100)
+				table.insert(lines, {
+					text = (DETAIL_STAT_LABELS[name] or name) .. ": " .. shown,
+					positive = value > 0,
+				})
+			end
+		end
+		table.sort(lines, function(a, b)
+			return a.text < b.text
+		end)
+	end
+
+	return statsInfo, lines, archetypeName
+end
+
+local function createCharacterDetailsPopup(characterName, initialTab, suppliedAwakeningInfo)
+	playSound(sounds.info)
+
+	if activeDetailsGui then
+		limparContexto(activeDetailsRenderContext)
+		limparContexto(activeDetailsContext)
+		activeDetailsGui.Parent = nil
+	end
+
+	local def = getCatalogDef(characterName) or {
+		name = characterName,
+		description = "Sem descrição cadastrada.",
+		lore = "Sem lore cadastrada.",
+		health = 100,
+		rarity = "ROBLOXIANOS",
+		category = "Especial",
+	}
+	local toolsNormais, toolsDespertas = collectCharacterTools(characterName)
+	local statsInfo, statLines, archetypeName = loadDetailStats(characterName)
+	local awakeningInfo = suppliedAwakeningInfo
+	local awakeningLoaded = suppliedAwakeningInfo ~= nil
+	local selectedTab = initialTab or "INFO"
+	local closing = false
+
+	activeDetailsContext = novoContexto()
+	activeDetailsRenderContext = nil
+	local context = activeDetailsContext
+
+	local infoGui = Instance.new("ScreenGui")
+	infoGui.Name = "CharacterDetailsV13"
+	infoGui.DisplayOrder = 160
+	infoGui.ResetOnSpawn = false
+	infoGui.IgnoreGuiInset = true
+	infoGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	infoGui.Parent = playerGui
+	activeDetailsGui = infoGui
+
+	local backdropButton = Instance.new("TextButton")
+	backdropButton.Name = "Backdrop"
+	backdropButton.Size = UDim2.fromScale(1, 1)
+	backdropButton.BackgroundColor3 = Color3.fromRGB(0, 2, 8)
+	backdropButton.BackgroundTransparency = 1
+	backdropButton.BorderSizePixel = 0
+	backdropButton.Text = ""
+	backdropButton.AutoButtonColor = false
+	backdropButton.ZIndex = 1
+	backdropButton.Parent = infoGui
+
+	local detailLayout = getDetailLayout()
+	local popup = Instance.new("Frame")
+	popup.Name = "DetailsPanel"
+	popup.Size = detailLayout.size
+	popup.Position = UDim2.fromScale(0.5, 0.5)
+	popup.AnchorPoint = Vector2.new(0.5, 0.5)
+	popup.BackgroundColor3 = COLORS.background
+	popup.BorderSizePixel = 0
+	popup.ClipsDescendants = true
+	popup.ZIndex = 10
+	popup.Parent = infoGui
+
+	local popupAspect = Instance.new("UIAspectRatioConstraint")
+	popupAspect.AspectRatio = detailLayout.aspect
+	popupAspect.DominantAxis = detailLayout.portrait and Enum.DominantAxis.Width
+		or Enum.DominantAxis.Height
+	popupAspect.Parent = popup
+
+	local popupStroke = Instance.new("UIStroke")
+	popupStroke.Color = COLORS.white
+	popupStroke.Thickness = 4
+	popupStroke.Parent = popup
+
+	local popupGradient = Instance.new("UIGradient")
+	popupGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 30, 45)),
+		ColorSequenceKeypoint.new(0.52, COLORS.background),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(2, 7, 14)),
+	})
+	popupGradient.Rotation = 90
+	popupGradient.Parent = popup
+
+	local panelMotion = criarMolaPainel(context, popup, function()
+		limparContexto(activeDetailsRenderContext)
+		limparContexto(context)
+		if infoGui.Parent then
+			infoGui.Parent = nil
+		end
+		if activeDetailsGui == infoGui then
+			activeDetailsGui = nil
+			activeDetailsContext = nil
+			activeDetailsRenderContext = nil
+		end
+	end)
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.fromScale(1, 0.105)
+	header.BackgroundColor3 = COLORS.panelRaised
+	header.BorderSizePixel = 0
+	header.ZIndex = 12
+	header.Parent = popup
+
+	local headerLine = Instance.new("Frame")
+	headerLine.AnchorPoint = Vector2.new(0, 1)
+	headerLine.Position = UDim2.fromScale(0, 1)
+	headerLine.Size = UDim2.fromScale(1, 0.055)
+	headerLine.BackgroundColor3 = COLORS.cyan
+	headerLine.BorderSizePixel = 0
+	headerLine.ZIndex = 13
+	headerLine.Parent = header
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Position = UDim2.fromScale(0.025, 0.06)
+	titleLabel.Size = UDim2.fromScale(0.78, 0.84)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = "[ " .. characterName:upper() .. " ]"
+	titleLabel.TextColor3 = COLORS.white
+	titleLabel.TextScaled = true
+	titleLabel.Font = Enum.Font.Arcade
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.ZIndex = 14
+	titleLabel.Parent = header
+	limitarTexto(titleLabel, 11, 27)
+
+	local titleGradient = Instance.new("UIGradient")
+	titleGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, COLORS.cyan),
+		ColorSequenceKeypoint.new(0.5, COLORS.white),
+		ColorSequenceKeypoint.new(1, COLORS.magenta),
+	})
+	titleGradient.Offset = Vector2.new(-1, 0)
+	titleGradient.Parent = titleLabel
+	tocarTween(
+		context,
+		titleGradient,
+		titleGradient,
+		TweenInfo.new(2.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Offset = Vector2.new(1, 0) }
+	)
+
+	local closeButton = Instance.new("TextButton")
+	closeButton.Name = "CloseDetails"
+	closeButton.Position = UDim2.fromScale(0.9, 0.15)
+	closeButton.Size = UDim2.fromScale(0.07, 0.68)
+	closeButton.BackgroundColor3 = COLORS.red
+	closeButton.BorderSizePixel = 0
+	closeButton.Text = "X"
+	closeButton.TextColor3 = COLORS.white
+	closeButton.TextScaled = true
+	closeButton.Font = Enum.Font.Arcade
+	closeButton.ZIndex = 15
+	closeButton.Parent = header
+	limitarTexto(closeButton, 12, 22)
+	prepararBotaoAnimado(context, closeButton)
+
+	local closeAspect = Instance.new("UIAspectRatioConstraint")
+	closeAspect.AspectRatio = 1
+	closeAspect.DominantAxis = detailLayout.portrait and Enum.DominantAxis.Width
+		or Enum.DominantAxis.Height
+	closeAspect.Parent = closeButton
+
+	local tabsFrame = Instance.new("Frame")
+	tabsFrame.Position = UDim2.fromScale(0, 0.105)
+	tabsFrame.Size = UDim2.fromScale(1, 0.085)
+	tabsFrame.BackgroundColor3 = COLORS.panel
+	tabsFrame.BorderSizePixel = 0
+	tabsFrame.ZIndex = 12
+	tabsFrame.Parent = popup
+
+	local content = Instance.new("ScrollingFrame")
+	content.Name = "TabContent"
+	content.Position = UDim2.fromScale(0.02, 0.21)
+	content.Size = UDim2.fromScale(0.96, 0.765)
+	content.BackgroundTransparency = 1
+	content.BorderSizePixel = 0
+	content.CanvasSize = UDim2.new()
+	content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	content.ScrollBarThickness = isMobile and 7 or 10
+	content.ScrollBarImageColor3 = COLORS.cyan
+	content.ScrollBarImageTransparency = 0.18
+	content.ZIndex = 12
+	content.Parent = popup
+
+	local contentLayout = Instance.new("UIListLayout")
+	contentLayout.Padding = UDim.new(0, math.floor(detailLayout.contentHeight * 0.018))
+	contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	contentLayout.Parent = content
+
+	local contentPadding = Instance.new("UIPadding")
+	contentPadding.PaddingTop = UDim.new(0, 8)
+	contentPadding.PaddingBottom = UDim.new(0, 20)
+	contentPadding.PaddingLeft = UDim.new(0, 8)
+	contentPadding.PaddingRight = UDim.new(0, 8)
+	contentPadding.Parent = content
+
+	local tabButtons = {}
+	local renderSelectedTab
+
+	local function closeDetails()
+		if closing then
+			return
+		end
+		closing = true
+		playSound(sounds.close)
+		tocarTween(
+			context,
+			"details_backdrop",
+			backdropButton,
+			TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ BackgroundTransparency = 1 }
+		)
+		panelMotion.close()
+	end
+
+	local function addSummary(order)
+		local rarityColor = rarities[def.rarity] and rarities[def.rarity].color or COLORS.muted
+		local section = createDetailSection(
+			content,
+			activeDetailsRenderContext,
+			order,
+			0.18,
+			rarityColor,
+			"◆ VISÃO GERAL"
+		)
+
+		local summary = {
+			{ "❤️ HP", tostring(def.health or 100), COLORS.green },
+			{ "◆ RARIDADE", tostring(def.rarity or "—"), rarityColor },
+			{ "◈ ORIGEM", (CATEGORY_META[def.category] and CATEGORY_META[def.category].label)
+				or tostring(def.category or "ESPECIAL"), COLORS.cyan },
+			{ "⚙ ARQUÉTIPO", archetypeName, COLORS.yellow },
+		}
+		for i, item in ipairs(summary) do
+			local col = (i - 1) % 2
+			local row = math.floor((i - 1) / 2)
+			local label = Instance.new("TextLabel")
+			label.Position = UDim2.fromScale(0.025 + col * 0.49, 0.27 + row * 0.34)
+			label.Size = UDim2.fromScale(0.46, 0.28)
+			label.BackgroundColor3 = COLORS.background
+			label.BackgroundTransparency = 0.18
+			label.BorderSizePixel = 0
+			label.Text = item[1] .. ":  " .. item[2]
+			label.TextColor3 = item[3]
+			label.TextScaled = true
+			label.TextWrapped = true
+			label.Font = Enum.Font.Code
+			label.Parent = section
+			limitarTexto(label, 9, 17)
+		end
+	end
+
+	local function renderInfo()
+		local order = 1
+		addSummary(order)
+		order += 1
+
+		createTypedSection(
+			content,
+			activeDetailsRenderContext,
+			order,
+			0.27,
+			COLORS.cyan,
+			"▣ DESCRIÇÃO",
+			(def.description ~= nil and def.description ~= "" and def.description)
+				or "Sem descrição cadastrada."
+		)
+		order += 1
+
+		createDetailRow(
+			content,
+			activeDetailsRenderContext,
+			order,
+			"🛠️",
+			string.format("FERRAMENTAS CARREGADAS (%d)", #toolsNormais + #toolsDespertas),
+			COLORS.cyan
+		)
+		order += 1
+
+		if #toolsNormais + #toolsDespertas == 0 then
+			createDetailRow(content, activeDetailsRenderContext, order, "—", "Nenhuma ferramenta carregada.", COLORS.muted)
+			order += 1
+		else
+			for _, toolName in ipairs(toolsNormais) do
+				createDetailRow(content, activeDetailsRenderContext, order, "⚔️", toolName, COLORS.ink)
+				order += 1
+			end
+			for _, toolName in ipairs(toolsDespertas) do
+				createDetailRow(
+					content,
+					activeDetailsRenderContext,
+					order,
+					"⚡",
+					toolName .. "  [DESPERTA]",
+					COLORS.magenta
+				)
+				order += 1
+			end
+		end
+
+		if #statLines > 0 then
+			createDetailRow(content, activeDetailsRenderContext, order, "📊", "ATRIBUTOS", COLORS.yellow)
+			order += 1
+			for _, line in ipairs(statLines) do
+				createDetailRow(
+					content,
+					activeDetailsRenderContext,
+					order,
+					line.positive and "＋" or "－",
+					line.text,
+					line.positive and COLORS.green or COLORS.red
+				)
+				order += 1
+			end
+		elseif statsInfo == nil then
+			createDetailRow(
+				content,
+				activeDetailsRenderContext,
+				order,
+				"◇",
+				"Atributos especiais não disponíveis para este personagem.",
+				COLORS.muted
+			)
+		end
+	end
+
+	local function renderLore()
+		local rarityColor = rarities[def.rarity] and rarities[def.rarity].color or COLORS.yellow
+		local meta = CATEGORY_META[def.category]
+		createDetailRow(
+			content,
+			activeDetailsRenderContext,
+			1,
+			RARITY_EMBLEMS[def.rarity] or "◆",
+			string.format(
+				"%s  •  %s",
+				tostring(def.rarity or "SEM RARIDADE"),
+				meta and meta.label or tostring(def.category or "ESPECIAL")
+			),
+			rarityColor
+		)
+		createTypedSection(
+			content,
+			activeDetailsRenderContext,
+			2,
+			0.62,
+			COLORS.yellow,
+			"📖 ARQUIVO DE LORE",
+			(def.lore ~= nil and def.lore ~= "" and def.lore) or "Sem lore cadastrada."
+		)
+		createTypedSection(
+			content,
+			activeDetailsRenderContext,
+			3,
+			0.28,
+			COLORS.cyan,
+			"▣ RESUMO DO PERSONAGEM",
+			(def.description ~= nil and def.description ~= "" and def.description)
+				or "Sem descrição cadastrada."
+		)
+	end
+
+	local function getAwakeningInfo()
+		if awakeningLoaded then
+			return awakeningInfo
+		end
+		awakeningLoaded = true
+		if not checkAwakeningRemote then
+			awakeningInfo = { exists = false }
+			return awakeningInfo
+		end
+		local ok, result = pcall(function()
+			return checkAwakeningRemote:InvokeServer(characterName)
+		end)
+		awakeningInfo = ok and type(result) == "table" and result or { exists = false }
+		return awakeningInfo
+	end
+
+	local function renderAwakening()
+		local info = getAwakeningInfo()
+		if not info or not info.exists then
+			createTypedSection(
+				content,
+				activeDetailsRenderContext,
+				1,
+				0.46,
+				COLORS.magenta,
+				"⚡ DESPERTAR NÃO CONFIGURADO",
+				"Este personagem ainda não possui uma forma de Despertar cadastrada."
+			)
+			return
+		end
+
+		local aw = info.awakening or {}
+		local statusText
+		local statusColor
+		local accessFraction
+		if not info.hasOriginal then
+			statusText = "🔒 PRECISA DO PERSONAGEM ORIGINAL"
+			statusColor = COLORS.red
+			accessFraction = 0.16
+		elseif info.exigeBadge and not info.temBadge then
+			statusText = "🏅 FALTA O EMBLEMA NECESSÁRIO"
+			statusColor = COLORS.yellow
+			accessFraction = 0.52
+		else
+			statusText = "✅ LIBERADO — ENCHA A BARRA EM COMBATE"
+			statusColor = COLORS.green
+			accessFraction = 1
+		end
+
+		local statusSection = createDetailSection(
+			content,
+			activeDetailsRenderContext,
+			1,
+			0.2,
+			statusColor,
+			"⚡ " .. tostring(aw.displayName or (characterName .. " DESPERTADO")):upper()
+		)
+		local statusLabel = Instance.new("TextLabel")
+		statusLabel.Position = UDim2.fromScale(0.03, 0.27)
+		statusLabel.Size = UDim2.fromScale(0.94, 0.26)
+		statusLabel.BackgroundTransparency = 1
+		statusLabel.Text = statusText
+		statusLabel.TextColor3 = statusColor
+		statusLabel.TextScaled = true
+		statusLabel.TextWrapped = true
+		statusLabel.Font = Enum.Font.Arcade
+		statusLabel.Parent = statusSection
+		limitarTexto(statusLabel, 9, 19)
+
+		local accessBack = Instance.new("Frame")
+		accessBack.Position = UDim2.fromScale(0.03, 0.62)
+		accessBack.Size = UDim2.fromScale(0.94, 0.18)
+		accessBack.BackgroundColor3 = COLORS.background
+		accessBack.BorderSizePixel = 0
+		accessBack.ClipsDescendants = true
+		accessBack.Parent = statusSection
+
+		local accessFill = Instance.new("Frame")
+		accessFill.Size = UDim2.fromScale(0, 1)
+		accessFill.BackgroundColor3 = statusColor
+		accessFill.BorderSizePixel = 0
+		accessFill.Parent = accessBack
+		tocarTween(
+			activeDetailsRenderContext,
+			accessFill,
+			accessFill,
+			TweenInfo.new(0.62, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.12),
+			{ Size = UDim2.fromScale(accessFraction, 1) }
+		)
+
+		if info.liberado then
+			tocarTween(
+				activeDetailsRenderContext,
+				statusSection,
+				statusSection:FindFirstChildOfClass("UIStroke"),
+				TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+				{ Transparency = 0.72, Color = COLORS.white }
+			)
+		end
+
+		local visualSection = createDetailSection(
+			content,
+			activeDetailsRenderContext,
+			2,
+			0.36,
+			COLORS.magenta,
+			"◈ FORMA DESPERTA"
+		)
+
+		local imageFrame = Instance.new("Frame")
+		imageFrame.Position = UDim2.fromScale(0.03, 0.23)
+		imageFrame.Size = UDim2.fromScale(0.28, 0.68)
+		imageFrame.BackgroundColor3 = COLORS.background
+		imageFrame.BorderSizePixel = 0
+		imageFrame.ClipsDescendants = true
+		imageFrame.Parent = visualSection
+		local imageAspect = Instance.new("UIAspectRatioConstraint")
+		imageAspect.AspectRatio = 1
+		imageAspect.DominantAxis = Enum.DominantAxis.Height
+		imageAspect.Parent = imageFrame
+
+		local imageId = tonumber(aw.imageId) or 0
+		if imageId > 0 then
+			local image = Instance.new("ImageLabel")
+			image.Size = UDim2.fromScale(1, 1)
+			image.BackgroundTransparency = 1
+			image.Image = "rbxassetid://" .. tostring(imageId)
+			image.ScaleType = Enum.ScaleType.Fit
+			image.Parent = imageFrame
+		else
+			local noImage = Instance.new("TextLabel")
+			noImage.Size = UDim2.fromScale(1, 1)
+			noImage.BackgroundTransparency = 1
+			noImage.Text = "SEM\nIMAGEM"
+			noImage.TextColor3 = COLORS.muted
+			noImage.TextScaled = true
+			noImage.Font = Enum.Font.Arcade
+			noImage.Parent = imageFrame
+		end
+
+		local metrics = {
+			"❤️ HP: " .. tostring(aw.health or "—"),
+			"⏱ DURAÇÃO: " .. (aw.duracao and (tostring(aw.duracao) .. "s") or "PADRÃO"),
+			"⌛ RECARGA: " .. (aw.cooldown and (tostring(aw.cooldown) .. "s") or "PADRÃO"),
+			info.exigeBadge and (info.temBadge and "🏅 EMBLEMA: POSSUI" or "🏅 EMBLEMA: PENDENTE")
+				or "🏅 EMBLEMA: NÃO EXIGIDO",
+		}
+		for i, metric in ipairs(metrics) do
+			local metricLabel = Instance.new("TextLabel")
+			metricLabel.Position = UDim2.fromScale(0.35, 0.23 + (i - 1) * 0.17)
+			metricLabel.Size = UDim2.fromScale(0.61, 0.14)
+			metricLabel.BackgroundColor3 = COLORS.background
+			metricLabel.BackgroundTransparency = 0.18
+			metricLabel.BorderSizePixel = 0
+			metricLabel.Text = metric
+			metricLabel.TextColor3 = i == 4 and statusColor or COLORS.ink
+			metricLabel.TextScaled = true
+			metricLabel.TextWrapped = true
+			metricLabel.Font = Enum.Font.Code
+			metricLabel.TextXAlignment = Enum.TextXAlignment.Left
+			metricLabel.Parent = visualSection
+			limitarTexto(metricLabel, 9, 17)
+		end
+
+		local order = 3
+		createDetailRow(
+			content,
+			activeDetailsRenderContext,
+			order,
+			"⚔️",
+			string.format("HABILIDADES DESPERTAS (%d)", #toolsDespertas),
+			COLORS.magenta
+		)
+		order += 1
+		if #toolsDespertas == 0 then
+			createDetailRow(content, activeDetailsRenderContext, order, "—", "Nenhuma Tool carregada nesta forma.", COLORS.muted)
+			order += 1
+		else
+			for _, toolName in ipairs(toolsDespertas) do
+				createDetailRow(content, activeDetailsRenderContext, order, "⚡", toolName, COLORS.magenta)
+				order += 1
+			end
+		end
+
+		createTypedSection(
+			content,
+			activeDetailsRenderContext,
+			order,
+			0.42,
+			COLORS.magenta,
+			"📖 HISTÓRIA DO DESPERTAR",
+			(aw.lore ~= nil and aw.lore ~= "" and aw.lore)
+				or (aw.description ~= nil and aw.description ~= "" and aw.description)
+				or "Sem história cadastrada para esta forma."
+		)
+	end
+
+	renderSelectedTab = function(tabKey)
+		selectedTab = tabKey
+		limparContexto(activeDetailsRenderContext)
+		activeDetailsRenderContext = novoContexto()
+		for _, child in ipairs(content:GetChildren()) do
+			if child:IsA("Frame") or child:IsA("TextLabel") then
+				child.Parent = nil
+			end
+		end
+		content.CanvasPosition = Vector2.new(0, 0)
+
+		for _, tab in ipairs(DETAIL_TABS) do
+			local button = tabButtons[tab.key]
+			local selected = tab.key == tabKey
+			tocarTween(
+				context,
+				"tab_color_" .. tab.key,
+				button,
+				TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{
+					BackgroundColor3 = selected and tab.color or COLORS.panelRaised,
+					TextColor3 = selected and COLORS.background or tab.color,
+				}
+			)
+		end
+
+		if tabKey == "LORE" then
+			renderLore()
+		elseif tabKey == "AWAKENING" then
+			renderAwakening()
+		else
+			renderInfo()
+		end
+	end
+
+	for index, tab in ipairs(DETAIL_TABS) do
+		local tabButton = Instance.new("TextButton")
+		tabButton.Name = "Tab_" .. tab.key
+		tabButton.Position = UDim2.new((index - 1) / #DETAIL_TABS, 0, 0, 0)
+		tabButton.Size = UDim2.new(1 / #DETAIL_TABS, 0, 1, 0)
+		tabButton.BackgroundColor3 = COLORS.panelRaised
+		tabButton.BorderSizePixel = 0
+		tabButton.Text = tab.icon .. " " .. tab.label
+		tabButton.TextColor3 = tab.color
+		tabButton.TextScaled = true
+		tabButton.TextWrapped = true
+		tabButton.Font = Enum.Font.Arcade
+		tabButton.ZIndex = 14
+		tabButton.Parent = tabsFrame
+		limitarTexto(tabButton, 8, 18)
+		prepararBotaoAnimado(context, tabButton)
+		tabButtons[tab.key] = tabButton
+		conectarContexto(context, tabButton.Activated, function()
+			playSound(sounds.click)
+			renderSelectedTab(tab.key)
+		end)
+	end
+
+	conectarContexto(context, closeButton.Activated, closeDetails)
+	conectarContexto(context, backdropButton.Activated, closeDetails)
+	conectarContexto(context, UserInputService.InputBegan, function(input, processado)
+		if not processado and input.KeyCode == Enum.KeyCode.Escape then
+			closeDetails()
+		end
+	end)
+	conectarContexto(context, infoGui.AncestryChanged, function(_, parent)
+		if parent == nil and context.alive then
+			limparContexto(activeDetailsRenderContext)
+			limparContexto(context)
+		end
+	end)
+
+	local resizeGeneration = 0
+	local lastViewport = getViewportSize()
+	local viewportConnection = nil
+	local function applyDetailLayout()
+		resizeGeneration += 1
+		local generation = resizeGeneration
+		task.delay(0.12, function()
+			if not context.alive or generation ~= resizeGeneration then
+				return
+			end
+			local layout = getDetailLayout()
+			local viewport = getViewportSize()
+			local viewportChanged = math.abs(viewport.X - lastViewport.X) > 2
+				or math.abs(viewport.Y - lastViewport.Y) > 2
+			lastViewport = viewport
+			popup.Size = layout.size
+			popupAspect.AspectRatio = layout.aspect
+			popupAspect.DominantAxis = layout.portrait and Enum.DominantAxis.Width
+				or Enum.DominantAxis.Height
+			closeAspect.DominantAxis = layout.portrait and Enum.DominantAxis.Width
+				or Enum.DominantAxis.Height
+			contentLayout.Padding = UDim.new(0, math.floor(layout.contentHeight * 0.018))
+			for _, tab in ipairs(DETAIL_TABS) do
+				local button = tabButtons[tab.key]
+				button.Text = layout.portrait and (tab.icon .. "\n" .. tab.label)
+					or (tab.icon .. " " .. tab.label)
+			end
+			if viewportChanged then
+				renderSelectedTab(selectedTab)
+			end
+		end)
+	end
+
+	local function bindDetailCamera()
+		if viewportConnection then
+			viewportConnection:Disconnect()
+			viewportConnection = nil
+		end
+		local camera = workspace.CurrentCamera
+		if camera then
+			viewportConnection = conectarContexto(
+				context,
+				camera:GetPropertyChangedSignal("ViewportSize"),
+				applyDetailLayout
+			)
+		end
+		applyDetailLayout()
+	end
+	conectarContexto(context, workspace:GetPropertyChangedSignal("CurrentCamera"), bindDetailCamera)
+	bindDetailCamera()
+
+	backdropButton.BackgroundTransparency = 1
+	tocarTween(
+		context,
+		"details_backdrop",
+		backdropButton,
+		TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ BackgroundTransparency = 0.28 }
+	)
+	panelMotion.open()
+	renderSelectedTab(selectedTab)
+end
+
+-- Os três pontos de entrada antigos continuam existindo para os cards e para
+-- qualquer outro sistema, mas agora só escolhem qual aba o modal V13 abre.
+createAbilitiesPopup = function(characterName)
+	createCharacterDetailsPopup(characterName, "INFO", nil)
+end
+
+createLorePopup = function(characterName)
+	createCharacterDetailsPopup(characterName, "LORE", nil)
+end
+
+createAwakeningPopup = function(characterName, info)
+	createCharacterDetailsPopup(characterName, "AWAKENING", info)
+end
+
+-- =====================================
 -- BOTÃO DE DESPERTAR
 -- (reutilizado — AwakeningSystemServer_V1)
 -- =====================================
@@ -2187,15 +3199,15 @@ local function createAwakeningButton(charData, card, context)
 	prepararBotaoAnimado(context, awakeningButton)
 
 	if awakeningInfo.liberado then
-		awakeningButton.Text = "⚡ VER DESPERTAR"
+		awakeningButton.Text = "⚡ ABA DESPERTAR"
 		awakeningButton.BackgroundColor3 = Color3.fromRGB(120, 0, 160)
 		awakeningButton.TextColor3 = Color3.fromRGB(255, 255, 0)
 	elseif not awakeningInfo.hasOriginal then
-		awakeningButton.Text = "🔒 VER DESPERTAR"
+		awakeningButton.Text = "🔒 ABA DESPERTAR"
 		awakeningButton.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
 		awakeningButton.TextColor3 = Color3.fromRGB(190, 190, 190)
 	else
-		awakeningButton.Text = "🔒 VER DESPERTAR"
+		awakeningButton.Text = "🔒 ABA DESPERTAR"
 		awakeningButton.BackgroundColor3 = Color3.fromRGB(60, 0, 60)
 		awakeningButton.TextColor3 = Color3.fromRGB(190, 190, 190)
 	end
@@ -2903,7 +3915,7 @@ createSystem = function()
 	end
 
 	systemGui = Instance.new("ScreenGui")
-	systemGui.Name = "CharacterSystemV12"
+	systemGui.Name = "CharacterSystemV13"
 	systemGui.ResetOnSpawn = false
 	systemGui.IgnoreGuiInset = true
 	systemGui.DisplayOrder = 112
@@ -3677,15 +4689,15 @@ task.spawn(function()
 			end
 		end, 2)
 
-		print("[CHAR SYSTEM V12] Registrado no Menu Unificado: LOJA + INVENTÁRIO")
+		print("[CHAR SYSTEM V13] Registrado no Menu Unificado: LOJA + INVENTÁRIO")
 	end
 end)
 
 print([[
 ╔══════════════════════════════════════════════════════╗
-║  CHARACTER SYSTEM CLIENT V12 — CARREGADO            ║
+║  CHARACTER SYSTEM CLIENT V13 — CARREGADO            ║
 ╠══════════════════════════════════════════════════════╣
-║  SUBSTITUI: CharacterSystemClient V11                ║
+║  SUBSTITUI: CharacterSystemClient V12                ║
 ╠══════════════════════════════════════════════════════╣
 ║  * Loja e inventário redesenhados em retro-neon      ║
 ║  * Busca: nome/descrição/raridade/categoria/emblema   ║
@@ -3693,5 +4705,7 @@ print([[
 ║  * Selos de origem + emblemas de raridade            ║
 ║  * Entrada e saída com mola amortecida                ║
 ║  * Tweens e conexões limpos em cada render            ║
+║  * Informações, Lore e Despertar em abas animadas      ║
+║  * Texto progressivo com opção de revelar tudo         ║
 ╚══════════════════════════════════════════════════════╝
 ]])
