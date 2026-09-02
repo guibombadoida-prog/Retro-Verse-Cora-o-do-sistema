@@ -11,6 +11,54 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 21:07 UTC — HOTFIX: a Lore estava quebrada no jogo
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 57, 1, 0, 0, 0]` — execução #26, `main` em `d77eb4a`
+
+**`CharacterSystemClient` V13 → V13.1.** A publicação das 20:08 subiu com um
+erro de runtime que derrubava o painel de Lore. O Codex confirmou com print
+do celular e avisou pela PR #9:
+
+```
+CharacterSystemClient:994: attempt to perform arithmetic (mul) on number and table
+```
+
+### O nome enganou
+
+Desde a V12, `getUIScale()` devolve uma **tabela** de configuração responsiva
+— `{ menu, panelAspect, portrait, card }` — e não o fator de escala que o
+nome `uiScale` sugere. O V13 escreveu `16 * uiScale` como se fosse número.
+
+Isso **compila**. Passa no `luau-compile`, no Rojo e no `validar.sh`, porque
+nenhum deles checa tipo. Só quebra quando o jogador abre o painel — e foi
+assim que chegou à produção.
+
+### Dois lugares, não um
+
+O Codex reportou a linha 994, em `criarAreaDeTexto`, que é a do print e
+derruba a Lore. A mesma multiplicação estava na 1909, em `alturaLinha`, e
+derrubava a lista de habilidades do painel de Despertar. Os dois corrigidos.
+
+### A correção
+
+`escalaPorTela(base, minimo, maximo)` deriva um escalar de verdade do lado
+curto do viewport, com 640 de referência e clamp nas pontas:
+
+| tela | lado curto | texto | altura de linha |
+| --- | --- | --- | --- |
+| celular deitado | 360–500 | 13 | 18 |
+| tablet | 834 | 19 | 31 |
+| desktop | 1080 | 19 | 32 |
+
+O comentário no topo da função registra a armadilha, porque o nome `uiScale`
+vai continuar convidando ao mesmo erro.
+
+> **Sobre a PR #9:** ela diagnosticou o defeito corretamente no comentário,
+> mas **não o corrigiu** — as duas linhas quebradas estão idênticas na
+> branch. Mesclar a #9 não teria consertado o jogo. Este hotfix é
+> independente dela e a #9 continua aberta, aguardando decisão do dono.
+
 ## 2026-09-02 20:08 UTC — lore e Despertar com texto digitado
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
