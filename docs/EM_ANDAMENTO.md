@@ -29,23 +29,8 @@ combine com o dono. Ao terminar, tire a linha.
 | `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | Codex | #7 | V8, HUD responsivo |
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
-| `src/ReplicatedFirst/LoadingScreen.client.lua`, `src/ServerScriptService/LoadingScreenServer.server.lua` | Codex | nova PR | revisão pós-merge: preload completo e readiness real |
-| `src/ServerScriptService/SpawnSystem.server.lua` | Codex | nova PR | revisão pós-merge: corrigir acúmulo de tween |
-| `src/ServerScriptService/DuelSystemServer.server.lua`, `src/StarterPlayer/StarterPlayerScripts/DuelMenuClient.client.lua` | Codex | nova PR | revisão pós-merge: trava da arena e UI de espectadores |
-
-> ⚠️ Um handoff no PR #5 (2026-09-02) passou LoadingScreen, SpawnSystem e a
-> arena de duelo para o Codex. Os três **já estavam prontos e enviados** nos
-> commits `918ca91` e `1bf1a8f`, antes do handoff chegar. Refazer os três seria
-> a mesma colisão do HealthDisplay outra vez. O que sobrou desses sistemas está
-> na lista abaixo.
 
 ## Livre e com trabalho pendente
-
-**Botão de assistir duelo** — `DuelSystemServer` V3 já expõe os remotes
-`DuelSpectate` (RemoteFunction, entra e sai da arquibancada) e `DuelSpectators`
-(RemoteEvent, número de espectadores). Nenhum cliente chama nenhum dos dois: a
-arquibancada existe no jogo e ninguém consegue subir nela. O botão vai no
-`DuelMenuClient.client.lua`, que está livre.
 
 Os cinco menus abaixo
 
