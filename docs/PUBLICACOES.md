@@ -11,6 +11,46 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 15:45 UTC — arquibancada de duelo acessível
+
+`[PUBLICAÇÃO] 5 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 53, 5, 0, 0, 0]` — execução #20, `main` em `c8735b7`
+
+Merge da branch `codex/review-claude-upgrades` do Codex. O `verificar` da
+execução #19, no mesmo commit, saiu `58 scripts; 53 iguais; 5 diferentes;
+0 renomeados; 0 novos; 0 problemas` — os cinco diferentes são exatamente os
+cinco arquivos do merge, nenhuma cópia duplicada.
+
+**`DuelMenuClient`** — o botão de assistir duelo que faltava. `DuelSystemServer`
+V3 expunha `DuelSpectate` desde a publicação de 01/09 e nenhum cliente chamava:
+a arquibancada de 48 assentos existia no jogo e ninguém conseguia subir nela.
+Agora o menu mostra `👁 ASSISTIR A VS B [n/24]` quando há luta, ou "ARENA LIVRE"
+quando não há, e durante a partida um overlay traz placar, fase e lotação com
+botão de sair.
+
+**`DuelSystemServer`** — guarda-corpo nos quatro lados da arquibancada, que fica
+a 2000 studs de altura e não tinha nada segurando quem escorregasse. Remotes
+`GetDuelArenaStatus` e `DuelSpectatorState`, e tratamento de espectador que
+morre ou desconecta no meio do duelo.
+
+**`LoadingScreen`** — a lista de classes com conteúdo passou de 15 para 21
+(entrou `MaterialVariant`, `SurfaceAppearance`, `WrapLayer`, `VideoFrame`,
+`AudioPlayer`, `CharacterMesh`), cada lote falho é repetido uma vez, e a
+varredura se repete para pegar o que o servidor insere durante o boot.
+
+**`LoadingScreenServer`** — para de esperar dados de quem já saiu do jogo e
+escreve "USE PULAR" na tela quando o servidor de dados não responde em 30s.
+
+**`SpawnSystem`** — a plataforma de spawn criava um tween infinito por segundo
+dentro de um `while`, acumulando animação na mesma peça pela sessão inteira.
+Virou uma chamada de `pulsar()`. Defeito que passou batido na revisão do V9.
+
+> **Mudança de comportamento:** o Codex removeu o `MAX_WAIT` de 120 s da tela de
+> carregamento. O argumento dele é que teto artificial vira sucesso falso — o
+> preload só termina quando os assets replicados retornam `Success`. Na prática,
+> se o preload travar não existe mais saída automática: a única é o jogador
+> tocar em **PULAR**, que aparece aos 5 s. Publicado com o dono ciente disso.
+
 ## 2026-09-02 05:32 UTC — HUD do HP de volta à posição original
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
