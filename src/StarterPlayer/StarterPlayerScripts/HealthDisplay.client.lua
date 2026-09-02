@@ -1,5 +1,5 @@
 -- ============================================
--- HEALTH DISPLAY V8.3 - HUD NO CANTO SUPERIOR DIREITO
+-- HEALTH DISPLAY V8.4 - HUD NO TOPO CENTRALIZADO
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "HealthDisplay"
 -- SUBSTITUI: HealthDisplay V7
@@ -67,8 +67,13 @@ local FRACAO_ALTURA = 0.16
 local ESCALA_MIN = 0.46
 local ESCALA_MAX = 0.85
 
--- (V8.3) Distância do HUD até as bordas de cima e da direita.
-local MARGEM = 12
+-- (V8.4) Recuo do topo. Pequeno de propósito: o HUD fica o mais alto
+-- possível, encostado logo abaixo da barra do Roblox.
+--
+-- Não pode ser zero somado ao inset e nada mais: o GetGuiInset já
+-- devolve onde a barra do Roblox termina, e esses poucos pixels são só
+-- para o HUD não ficar colado nela.
+local MARGEM_TOPO = 2
 
 -- Evita HUD duplicado quando o script é recarregado durante um teste.
 local previousGui = PlayerGui:FindFirstChild("RetroHealthDisplay")
@@ -88,16 +93,19 @@ HealthGui.Parent = PlayerGui
 -- alinhamento e espaçamento idênticos em qualquer proporção de tela.
 local HudRoot = Instance.new("Frame")
 HudRoot.Name = "HudRoot"
--- (V8.3) Ancorado pelo canto SUPERIOR DIREITO.
+-- (V8.4) Ancorado no TOPO CENTRALIZADO, o mais alto possível.
 --
--- O HUD ficava no topo centralizado, e centralizado no topo é o meio da
--- tela em celular deitado: caía por cima do personagem e disputava espaço
--- com o aviso de alvo, que também é centralizado.
+-- A âncora em (0.5, 0) coloca o ponto fixo no meio da borda de cima. Isso
+-- importa por causa do UIScale: ele encolhe o HUD EM DIREÇÃO ao ponto
+-- ancorado, então o topo fica parado e o HUD cresce e encolhe para os
+-- lados, em vez de a caixa deslizar quando a escala muda de aparelho
+-- para aparelho.
 --
--- A âncora em (1, 0) faz o UIScale encolher o HUD EM DIREÇÃO ao canto —
--- o canto superior direito fica parado em qualquer escala, em vez de a
--- caixa deslizar quando o tamanho muda.
-HudRoot.AnchorPoint = Vector2.new(1, 0)
+-- O V8.3 tinha levado o HUD para o canto direito justamente para não
+-- disputar espaço com o aviso de alvo do WantedClient, que também é
+-- centralizado no topo (0.5, 0.02, altura 0.07). Voltando ao centro, os
+-- dois se sobrepõem enquanto o jogador estiver marcado como alvo.
+HudRoot.AnchorPoint = Vector2.new(0.5, 0)
 HudRoot.Size = UDim2.fromOffset(HUD_WIDTH, HUD_HEIGHT)
 HudRoot.BackgroundTransparency = 1
 HudRoot.Parent = HealthGui
@@ -382,7 +390,7 @@ local function applyResponsiveLayout()
 	local heightScale = math.max(1, viewport.Y * FRACAO_ALTURA) / HUD_HEIGHT
 	ResponsiveScale.Scale =
 		math.clamp(math.min(widthScale, heightScale), ESCALA_MIN, ESCALA_MAX)
-	HudRoot.Position = UDim2.new(1, -MARGEM, 0, getTopInset() + MARGEM)
+	HudRoot.Position = UDim2.new(0.5, 0, 0, getTopInset() + MARGEM_TOPO)
 end
 
 local function bindViewport()
