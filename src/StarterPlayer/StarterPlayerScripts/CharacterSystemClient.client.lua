@@ -1,8 +1,26 @@
 -- ============================================
--- CHARACTER SYSTEM CLIENT V11 — BUSCA E GRADE RESPONSIVA
+-- CHARACTER SYSTEM CLIENT V12 — LOJA + INVENTÁRIO RETRO RESPONSIVOS
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "CharacterSystemClient"
--- SUBSTITUI: CharacterSystemClient V10
+-- SUBSTITUI: CharacterSystemClient V11
+-- ============================================
+-- (V12) Redesign completo da loja e do inventário, inspirado no HUD
+-- retro-neon do próprio jogo: painéis escuros, contornos brancos/ciano,
+-- informação em blocos e cores fortes por raridade.
+--
+-- • Corrige o tamanho de verdade: janela e cards reagem a retrato,
+--   paisagem, tablet e desktop; cards recebem UIAspectRatioConstraint.
+-- • Busca por nome, descrição, raridade, categoria e ID de emblema.
+-- • Cards mostram selo de origem (loja, recompensa, gamepass, emblema),
+--   emblema de raridade e estados ADQUIRIDO/EQUIPADO sem ambiguidade.
+-- • Entrada/saída usa mola amortecida calculada no Heartbeat: animação
+--   com física visual, sem BodyMovers e sem threads disputando a UI.
+-- • Brilhos repetidos usam um tween guardado e cancelável; conexões e
+--   tweens de cada render são limpos antes de filtrar ou reconstruir.
+-- • A busca é desacelerada por geração e atualiza somente a tela aberta.
+--
+-- Mantém toda decisão de compra, venda, emblema e equipamento no servidor.
+-- O cliente apenas apresenta e solicita as ações existentes.
 -- ============================================
 -- (V11) Três problemas do mesmo lugar: o layout da grade.
 --
@@ -181,18 +199,18 @@ local UserInputService = game:GetService("UserInputService")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-print("[CHAR SYSTEM V7] Inicializando sistema 100% catálogo (sem aba Grátis)...")
+print("[CHAR SYSTEM V12] Inicializando loja e inventário retro responsivos...")
 
 -- =====================================
 -- DETECÇÃO DE PLATAFORMA
 -- =====================================
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-local isTablet = isMobile and (workspace.CurrentCamera.ViewportSize.X > 600)
 
 -- =====================================
 -- AGUARDAR REMOTES
@@ -218,7 +236,7 @@ local catalogAnnouncementRemote = remotes:WaitForChild("CatalogAnnouncement", 15
 local getCharacterStatsInfo = remotes:WaitForChild("GetCharacterStatsInfo", 10)
 
 if not getCatalogCharactersRemote then
-	warn("[CHAR SYSTEM V7] GetCatalogCharacters não encontrado — o CharacterCatalogServer_V4 está no ServerScriptService?")
+	warn("[CHAR SYSTEM V12] GetCatalogCharacters não encontrado — o CharacterCatalogServer_V4 está no ServerScriptService?")
 end
 
 -- =====================================
@@ -256,61 +274,64 @@ end
 
 local UI_SIZES = { SMALL = "Pequeno", MEDIUM = "Médio", LARGE = "Grande" }
 local currentUISize = UI_SIZES.MEDIUM
+local CARD_ASPECT_RATIO = 0.68
+
+local function getViewportSize()
+	local camera = workspace.CurrentCamera
+	return camera and camera.ViewportSize or Vector2.new(1280, 720)
+end
 
 local function getUIScale()
-	local viewport = workspace.CurrentCamera.ViewportSize
-	local baseScale
+	local viewport = getViewportSize()
+	local portrait = viewport.Y > viewport.X
+	local shortSide = math.min(viewport.X, viewport.Y)
+	local menuWidth
+	local menuHeight
+	local columns
 
-	if isTablet then
-		baseScale = {
-			menu = { small = 0.75, medium = 0.85, large = 0.95 },
-			button = { small = 0.10, medium = 0.12, large = 0.14 },
-			card = {
-				width = { small = 140, medium = 160, large = 180 },
-				height = { small = 240, medium = 260, large = 280 },
-				columns = 3,
-				spacing = { small = 8, medium = 10, large = 12 },
-			},
-		}
-	elseif isMobile then
-		baseScale = {
-			menu = { small = 0.85, medium = 0.92, large = 0.98 },
-			button = { small = 0.12, medium = 0.15, large = 0.18 },
-			card = {
-				width = {
-					small = math.floor(viewport.X * 0.40),
-					medium = math.floor(viewport.X * 0.45),
-					large = math.floor(viewport.X * 0.48),
-				},
-				height = { small = 220, medium = 240, large = 260 },
-				columns = 2,
-				spacing = { small = 8, medium = 10, large = 15 },
-			},
-		}
+	if isMobile then
+		if portrait then
+			menuWidth = 0.94
+			menuHeight = 0.88
+			columns = shortSide < 440 and 2 or 3
+		else
+			menuWidth = 0.92
+			menuHeight = 0.84
+			columns = viewport.X >= 1450 and 5 or 4
+		end
+	elseif viewport.X < 900 then
+		menuWidth = 0.9
+		menuHeight = 0.86
+		columns = portrait and 2 or 3
 	else
-		baseScale = {
-			menu = { small = 0.65, medium = 0.75, large = 0.85 },
-			button = { small = 0.08, medium = 0.10, large = 0.12 },
-			card = {
-				width = { small = 110, medium = 130, large = 150 },
-				height = { small = 220, medium = 240, large = 260 },
-				columns = 4,
-				spacing = { small = 6, medium = 8, large = 10 },
-			},
-		}
+		menuWidth = 0.78
+		menuHeight = 0.82
+		columns = viewport.X >= 1500 and 6 or 5
 	end
 
-	local size = currentUISize == UI_SIZES.SMALL and "small"
-		or (currentUISize == UI_SIZES.LARGE and "large" or "medium")
+	local sizeFactor = currentUISize == UI_SIZES.SMALL and 0.9
+		or (currentUISize == UI_SIZES.LARGE and 1.08 or 1)
+	local spacing = math.floor(math.clamp(shortSide * 0.012, 6, 14))
+	local contentWidth = viewport.X * menuWidth * 0.96 - spacing * (columns + 1)
+	local cardWidth = math.max(92, math.floor((contentWidth / columns) * sizeFactor))
+	local cardHeight = math.floor(cardWidth / CARD_ASPECT_RATIO)
+	local maxCardHeight = math.floor(viewport.Y * menuHeight * (portrait and 0.58 or 0.7))
+	if cardHeight > maxCardHeight then
+		cardHeight = maxCardHeight
+		cardWidth = math.floor(cardHeight * CARD_ASPECT_RATIO)
+	end
 
 	return {
-		menu = UDim2.new(baseScale.menu[size], 0, baseScale.menu[size], 0),
-		button = UDim2.new(baseScale.button[size], 0, baseScale.button[size] * 0.65, 0),
+		menu = UDim2.fromScale(menuWidth, menuHeight),
+		panelAspect = (viewport.X * menuWidth) / math.max(1, viewport.Y * menuHeight),
+		portrait = portrait,
 		card = {
-			width = baseScale.card.width[size],
-			height = baseScale.card.height[size],
-			columns = baseScale.card.columns,
-			spacing = baseScale.card.spacing[size],
+			width = cardWidth,
+			height = cardHeight,
+			columns = columns,
+			spacing = spacing,
+			aspect = CARD_ASPECT_RATIO,
+			sectionHeader = math.floor(math.clamp(shortSide * 0.05, 24, 40)),
 		},
 	}
 end
@@ -329,6 +350,40 @@ local rarities = {
 	BOSSXIANOS = { color = Color3.fromRGB(255, 0, 0), order = 5 },
 	SUPREMO = { color = Color3.fromRGB(255, 215, 0), order = 6, glow = true },
 	AWAKENED = { color = Color3.fromRGB(255, 0, 255), order = 7, glow = true, special = true },
+}
+
+local COLORS = {
+	background = Color3.fromRGB(7, 9, 16),
+	panel = Color3.fromRGB(15, 18, 28),
+	panelRaised = Color3.fromRGB(27, 31, 43),
+	ink = Color3.fromRGB(238, 247, 255),
+	muted = Color3.fromRGB(138, 153, 171),
+	cyan = Color3.fromRGB(0, 225, 255),
+	blue = Color3.fromRGB(0, 125, 220),
+	yellow = Color3.fromRGB(255, 215, 0),
+	green = Color3.fromRGB(40, 230, 115),
+	red = Color3.fromRGB(225, 55, 70),
+	magenta = Color3.fromRGB(255, 45, 225),
+	white = Color3.fromRGB(245, 250, 255),
+}
+
+local CATEGORY_META = {
+	Shop = { icon = "💰", label = "LOJA", color = COLORS.yellow },
+	Reward = { icon = "🏆", label = "RECOMPENSA", color = Color3.fromRGB(255, 145, 30) },
+	Gamepass = { icon = "🎫", label = "GAMEPASS", color = Color3.fromRGB(45, 155, 255) },
+	Badge = { icon = "🏅", label = "EMBLEMA", color = Color3.fromRGB(45, 235, 170) },
+	Mandatory = { icon = "🎁", label = "GRÁTIS", color = COLORS.green },
+	Trade = { icon = "🔁", label = "TROCA", color = COLORS.magenta },
+}
+
+local RARITY_EMBLEMS = {
+	ROBLOXIANOS = "R",
+	HEROXIANOS = "H",
+	NULLXIANOS = "N",
+	BTUDIOS = "B",
+	BOSSXIANOS = "X",
+	SUPREMO = "S",
+	AWAKENED = "⚡",
 }
 
 -- =====================================
@@ -480,6 +535,192 @@ local createSystem
 local updatePlayerData
 local createCharacterCard
 
+-- Contextos separam conexões/tweens do sistema, da loja e do inventário.
+-- Filtrar uma lista limpa apenas o render dela; remontar a UI limpa tudo.
+local systemContext = nil
+local shopRenderContext = nil
+local inventoryRenderContext = nil
+local mainPanelMotion = nil
+local inventoryPanelMotion = nil
+local backdrop = nil
+local mainAspectConstraint = nil
+local inventoryAspectConstraint = nil
+local mainCloseAspectConstraint = nil
+local inventoryCloseAspectConstraint = nil
+local mainTitleLabel = nil
+local inventoryTitleLabel = nil
+local inventoryHintLabel = nil
+local categoryTabButtons = {}
+
+local function novoContexto()
+	return {
+		alive = true,
+		connections = {},
+		tweens = {},
+	}
+end
+
+local function limparContexto(context)
+	if not context then
+		return
+	end
+	context.alive = false
+	for _, connection in ipairs(context.connections) do
+		connection:Disconnect()
+	end
+	for _, tween in pairs(context.tweens) do
+		tween:Cancel()
+	end
+	table.clear(context.connections)
+	table.clear(context.tweens)
+end
+
+local function conectarContexto(context, signal, callback)
+	local connection = signal:Connect(callback)
+	if context and context.alive then
+		table.insert(context.connections, connection)
+	end
+	return connection
+end
+
+local function tocarTween(context, key, instance, tweenInfo, properties)
+	if not context or not context.alive or not instance or not instance.Parent then
+		return nil
+	end
+	local previous = context.tweens[key]
+	if previous then
+		previous:Cancel()
+	end
+	local tween = TweenService:Create(instance, tweenInfo, properties)
+	context.tweens[key] = tween
+	tween:Play()
+	return tween
+end
+
+local function limitarTexto(label, minSize, maxSize)
+	local constraint = Instance.new("UITextSizeConstraint")
+	constraint.MinTextSize = minSize or 10
+	constraint.MaxTextSize = maxSize or 24
+	constraint.Parent = label
+	return constraint
+end
+
+local function prepararBotaoAnimado(context, button)
+	button.AutoButtonColor = false
+	local scale = Instance.new("UIScale")
+	scale.Scale = 1
+	scale.Parent = button
+
+	local function irPara(value, duration)
+		tocarTween(
+			context,
+			scale,
+			scale,
+			TweenInfo.new(duration or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Scale = value }
+		)
+	end
+
+	conectarContexto(context, button.MouseEnter, function()
+		irPara(1.035)
+	end)
+	conectarContexto(context, button.MouseLeave, function()
+		irPara(1)
+	end)
+	conectarContexto(context, button.MouseButton1Down, function()
+		irPara(0.96, 0.07)
+	end)
+	conectarContexto(context, button.MouseButton1Up, function()
+		irPara(1.02, 0.1)
+	end)
+
+	return scale
+end
+
+-- Mola amortecida para entrada/saída. É física visual de UI: posição,
+-- escala e rotação são integradas no Heartbeat; nenhuma força toca o avatar.
+local function criarMolaPainel(context, frame, aoEsconder)
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.86
+	scale.Parent = frame
+
+	local state = {
+		position = 0.86,
+		velocity = 0,
+		target = 0.86,
+		active = false,
+		closing = false,
+	}
+
+	local controller = {}
+
+	function controller.open()
+		if not frame.Parent then
+			return
+		end
+		frame.Visible = true
+		state.position = math.min(state.position, 0.9)
+		state.velocity = 0
+		state.target = 1
+		state.closing = false
+		state.active = true
+	end
+
+	function controller.close()
+		if not frame.Visible then
+			return
+		end
+		state.target = 0.86
+		state.closing = true
+		state.active = true
+	end
+
+	function controller.hide()
+		state.position = 0.86
+		state.velocity = 0
+		state.target = 0.86
+		state.active = false
+		state.closing = false
+		scale.Scale = 0.86
+		frame.Rotation = 0
+		frame.Visible = false
+	end
+
+	conectarContexto(context, RunService.Heartbeat, function(deltaTime)
+		if not state.active or not frame.Parent then
+			return
+		end
+
+		local dt = math.min(deltaTime, 1 / 30)
+		local stiffness = 230
+		local damping = 25
+		local acceleration = (state.target - state.position) * stiffness - state.velocity * damping
+		state.velocity += acceleration * dt
+		state.position += state.velocity * dt
+		state.position = math.clamp(state.position, 0.82, 1.06)
+
+		scale.Scale = state.position
+		frame.Rotation = math.clamp((1 - state.position) * -8, -2.2, 1.2)
+
+		if math.abs(state.target - state.position) < 0.002 and math.abs(state.velocity) < 0.02 then
+			state.position = state.target
+			state.velocity = 0
+			scale.Scale = state.target
+			frame.Rotation = 0
+			state.active = false
+			if state.closing then
+				state.closing = false
+				frame.Visible = false
+				if aoEsconder then
+					aoEsconder()
+				end
+			end
+		end
+	end)
+
+	return controller
+end
+
 -- =====================================
 -- NOTIFICAÇÃO
 -- (V6) CORREÇÃO: antes do menu existir, um Frame solto no PlayerGui
@@ -538,13 +779,13 @@ local function refreshOpenFrames()
 	if not systemGui then
 		return
 	end
-	local f = systemGui:FindFirstChild("RefreshCategory", true)
+	local f = isMenuOpen and systemGui:FindFirstChild("RefreshCategory", true) or nil
 	if f and f:IsA("BindableFunction") then
 		pcall(function()
 			f:Invoke()
 		end)
 	end
-	local g = systemGui:FindFirstChild("RefreshInventory", true)
+	local g = isInvOpen and systemGui:FindFirstChild("RefreshInventory", true) or nil
 	if g and g:IsA("BindableFunction") then
 		pcall(function()
 			g:Invoke()
@@ -1533,7 +1774,7 @@ end
 --    nada na tela — parecia que o clique não fazia efeito.
 --    Agora o texto diz DESBLOQUEAR, e depois do clique o inventário é
 --    recarregado para o card da forma desperta aparecer na hora.
-local function createAwakeningButton(charData, card)
+local function createAwakeningButton(charData, card, context)
 	if not checkAwakeningRemote then
 		return
 	end
@@ -1571,8 +1812,9 @@ local function createAwakeningButton(charData, card)
 	awakeningButton.TextScaled = true
 	awakeningButton.Font = Enum.Font.Arcade
 	awakeningButton.ZIndex = 10
-	awakeningButton.AutoButtonColor = true
 	awakeningButton.Parent = card
+	limitarTexto(awakeningButton, 8, 18)
+	prepararBotaoAnimado(context, awakeningButton)
 
 	if awakeningInfo.liberado then
 		awakeningButton.Text = "⚡ VER DESPERTAR"
@@ -1590,29 +1832,21 @@ local function createAwakeningButton(charData, card)
 
 	-- Clicar SEMPRE abre o painel, mesmo bloqueado: é assim que o jogador
 	-- descobre o que existe e o que precisa fazer para liberar.
-	awakeningButton.MouseButton1Click:Connect(function()
+	conectarContexto(context, awakeningButton.Activated, function()
 		playSound(sounds.awakening)
 		createAwakeningPopup(charData.name, awakeningInfo)
 	end)
 
-	-- Pulsa quando está liberado, para o jogador notar que tem forma
+	-- Um único tween repetido e registrado: ao filtrar/remontar, ele é
+	-- cancelado junto com o card em vez de deixar threads antigas vivas.
 	if awakeningInfo.liberado then
-		task.spawn(function()
-			while awakeningButton.Parent do
-				TweenService:Create(
-					awakeningButton,
-					TweenInfo.new(1, Enum.EasingStyle.Sine),
-					{ BackgroundColor3 = Color3.fromRGB(190, 0, 240) }
-				):Play()
-				task.wait(1)
-				TweenService:Create(
-					awakeningButton,
-					TweenInfo.new(1, Enum.EasingStyle.Sine),
-					{ BackgroundColor3 = Color3.fromRGB(120, 0, 160) }
-				):Play()
-				task.wait(1)
-			end
-		end)
+		tocarTween(
+			context,
+			awakeningButton,
+			awakeningButton,
+			TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ BackgroundColor3 = Color3.fromRGB(190, 0, 240) }
+		)
 	end
 end
 
@@ -1623,43 +1857,91 @@ end
 --   description, lore, health }
 -- =====================================
 
-createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMode)
+createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMode, context)
 	local card = Instance.new("Frame")
 	card.Size = UDim2.new(0, cardConfig.width, 0, cardConfig.height)
-	card.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	card.BackgroundColor3 = COLORS.panel
+	card.BorderSizePixel = 0
+	card.ClipsDescendants = true
 	card.Parent = parentFrame
 
 	local rarityColor = rarities[charData.rarity] and rarities[charData.rarity].color
 		or Color3.fromRGB(100, 100, 100)
-	card.BorderColor3 = rarityColor
-	card.BorderSizePixel = 3
 
-	-- Efeito AWAKENED
-	if charData.rarity == "AWAKENED" then
-		task.spawn(function()
-			while card.Parent do
-				TweenService:Create(
-					card,
-					TweenInfo.new(1.5, Enum.EasingStyle.Sine),
-					{ BorderColor3 = Color3.fromRGB(200, 0, 200) }
-				):Play()
-				task.wait(1.5)
-				TweenService:Create(
-					card,
-					TweenInfo.new(1.5, Enum.EasingStyle.Sine),
-					{ BorderColor3 = Color3.fromRGB(255, 0, 255) }
-				):Play()
-				task.wait(1.5)
-			end
-		end)
+	local cardAspect = Instance.new("UIAspectRatioConstraint")
+	cardAspect.AspectRatio = cardConfig.aspect or CARD_ASPECT_RATIO
+	cardAspect.DominantAxis = Enum.DominantAxis.Width
+	cardAspect.Parent = card
+
+	local cardStroke = Instance.new("UIStroke")
+	cardStroke.Color = rarityColor
+	cardStroke.Thickness = 3
+	cardStroke.Transparency = 0.05
+	cardStroke.Parent = card
+
+	local cardGradient = Instance.new("UIGradient")
+	cardGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, COLORS.panelRaised),
+		ColorSequenceKeypoint.new(0.55, COLORS.panel),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(7, 8, 14)),
+	})
+	cardGradient.Rotation = 90
+	cardGradient.Parent = card
+
+	local cardScale = Instance.new("UIScale")
+	cardScale.Scale = 0.9
+	cardScale.Parent = card
+	tocarTween(
+		context,
+		cardScale,
+		cardScale,
+		TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Scale = 1 }
+	)
+	conectarContexto(context, card.MouseEnter, function()
+		tocarTween(
+			context,
+			cardScale,
+			cardScale,
+			TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Scale = 1.025 }
+		)
+	end)
+	conectarContexto(context, card.MouseLeave, function()
+		tocarTween(
+			context,
+			cardScale,
+			cardScale,
+			TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Scale = 1 }
+		)
+	end)
+
+	-- Efeito raro: um tween reversível guardado no contexto do render.
+	if rarities[charData.rarity] and rarities[charData.rarity].glow then
+		tocarTween(
+			context,
+			cardStroke,
+			cardStroke,
+			TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Transparency = 0.55, Color = COLORS.white }
+		)
 	end
 
 	-- Header
 	local header = Instance.new("Frame")
 	header.Size = UDim2.new(1, 0, 0.15, 0)
-	header.BackgroundColor3 = rarityColor
+	header.BackgroundColor3 = COLORS.panelRaised:Lerp(rarityColor, 0.28)
 	header.BorderSizePixel = 0
 	header.Parent = card
+
+	local headerLine = Instance.new("Frame")
+	headerLine.AnchorPoint = Vector2.new(0, 1)
+	headerLine.Position = UDim2.fromScale(0, 1)
+	headerLine.Size = UDim2.fromScale(1, 0.08)
+	headerLine.BackgroundColor3 = rarityColor
+	headerLine.BorderSizePixel = 0
+	headerLine.Parent = header
 
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Size = UDim2.new(1, 0, 1, 0)
@@ -1672,6 +1954,7 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	nameLabel.TextScaled = true
 	nameLabel.Font = Enum.Font.Arcade
 	nameLabel.Parent = header
+	limitarTexto(nameLabel, 9, 22)
 
 	-- Imagem
 	local imageContainer = Instance.new("Frame")
@@ -1682,7 +1965,60 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	imageContainer.ClipsDescendants = true
 	imageContainer.Parent = card
 
+	local imageStroke = Instance.new("UIStroke")
+	imageStroke.Color = COLORS.white
+	imageStroke.Thickness = 2
+	imageStroke.Transparency = 0.45
+	imageStroke.Parent = imageContainer
+
 	createCharacterImage(charData.name, imageContainer)
+
+	local categoryMeta = CATEGORY_META[charData.category]
+		or { icon = "◆", label = tostring(charData.category or "ESPECIAL"), color = COLORS.cyan }
+	local categoryBadge = Instance.new("TextLabel")
+	categoryBadge.Name = "CategoryBadge"
+	categoryBadge.Position = UDim2.fromScale(0.04, 0.19)
+	categoryBadge.Size = UDim2.fromScale(0.48, 0.07)
+	categoryBadge.BackgroundColor3 = COLORS.background
+	categoryBadge.BackgroundTransparency = 0.08
+	categoryBadge.BorderSizePixel = 0
+	categoryBadge.Text = categoryMeta.icon .. " " .. categoryMeta.label
+	categoryBadge.TextColor3 = categoryMeta.color
+	categoryBadge.TextScaled = true
+	categoryBadge.Font = Enum.Font.Arcade
+	categoryBadge.ZIndex = 6
+	categoryBadge.Parent = card
+	limitarTexto(categoryBadge, 8, 16)
+
+	local categoryStroke = Instance.new("UIStroke")
+	categoryStroke.Color = categoryMeta.color
+	categoryStroke.Thickness = 2
+	categoryStroke.Parent = categoryBadge
+
+	local rarityBadge = Instance.new("TextLabel")
+	rarityBadge.Name = "RarityEmblem"
+	rarityBadge.AnchorPoint = Vector2.new(1, 0)
+	rarityBadge.Position = UDim2.fromScale(0.96, 0.19)
+	rarityBadge.Size = UDim2.fromScale(0.15, 0.08)
+	rarityBadge.BackgroundColor3 = rarityColor
+	rarityBadge.BorderSizePixel = 0
+	rarityBadge.Text = RARITY_EMBLEMS[charData.rarity] or "?"
+	rarityBadge.TextColor3 = COLORS.white
+	rarityBadge.TextScaled = true
+	rarityBadge.Font = Enum.Font.Arcade
+	rarityBadge.ZIndex = 6
+	rarityBadge.Parent = card
+	limitarTexto(rarityBadge, 9, 18)
+
+	local rarityAspect = Instance.new("UIAspectRatioConstraint")
+	rarityAspect.AspectRatio = 1
+	rarityAspect.DominantAxis = Enum.DominantAxis.Height
+	rarityAspect.Parent = rarityBadge
+
+	local rarityStroke = Instance.new("UIStroke")
+	rarityStroke.Color = COLORS.white
+	rarityStroke.Thickness = 2
+	rarityStroke.Parent = rarityBadge
 
 	-- Descrição
 	local descText = charData.description
@@ -1698,18 +2034,21 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	descLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 	descLabel.TextScaled = true
 	descLabel.Font = Enum.Font.Code
+	descLabel.TextWrapped = true
 	descLabel.Parent = card
+	limitarTexto(descLabel, 8, 16)
 
 	-- Raridade
 	local rarityLabel = Instance.new("TextLabel")
 	rarityLabel.Size = UDim2.new(0.96, 0, 0.05, 0)
 	rarityLabel.Position = UDim2.new(0.02, 0, 0.64, 0)
 	rarityLabel.BackgroundTransparency = 1
-	rarityLabel.Text = charData.rarity or "?"
+	rarityLabel.Text = "[ " .. (charData.rarity or "?") .. " ]"
 	rarityLabel.TextColor3 = rarityColor
 	rarityLabel.TextScaled = true
 	rarityLabel.Font = Enum.Font.Arcade
 	rarityLabel.Parent = card
+	limitarTexto(rarityLabel, 8, 15)
 
 	-- Status / Requisito (V6: por categoria)
 	local statusLabel = Instance.new("TextLabel")
@@ -1720,6 +2059,7 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	statusLabel.TextScaled = true
 	statusLabel.Font = Enum.Font.Arcade
 	statusLabel.Parent = card
+	limitarTexto(statusLabel, 8, 16)
 
 	local isOwned = playerOwnsCharacter(charData.name)
 	local isEquipped = playerData.equippedCharacter == charData.name
@@ -1737,7 +2077,8 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 		statusLabel.Text = "🎫 GAMEPASS"
 		statusLabel.TextColor3 = Color3.fromRGB(0, 200, 255)
 	elseif charData.category == "Badge" then
-		statusLabel.Text = "🏅 EMBLEMA"
+		local badgeId = tonumber(charData.badgeId) or 0
+		statusLabel.Text = badgeId > 0 and ("🏅 EMBLEMA #" .. badgeId) or "🏅 EMBLEMA"
 		statusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
 	else
 		statusLabel.Text = "💰 " .. (charData.value or 0)
@@ -1756,6 +2097,8 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	actionButton.Font = Enum.Font.Arcade
 	actionButton.BorderSizePixel = 0
 	actionButton.Parent = card
+	limitarTexto(actionButton, 8, 16)
+	prepararBotaoAnimado(context, actionButton)
 
 	if isEquippedNow then
 		actionButton.Text = "✅ EQUIPADO"
@@ -1780,7 +2123,7 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 		actionButton.TextColor3 = Color3.new(1, 1, 1)
 	end
 
-	actionButton.MouseButton1Click:Connect(function()
+	conectarContexto(context, actionButton.Activated, function()
 		playSound(sounds.click)
 		if isEquippedNow then
 			return
@@ -1831,13 +2174,15 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 		sellButton.Font = Enum.Font.Arcade
 		sellButton.BorderSizePixel = 0
 		sellButton.Parent = card
+		limitarTexto(sellButton, 8, 15)
+		prepararBotaoAnimado(context, sellButton)
 
 		if canSell and sellPrice and sellPrice > 0 then
 			sellButton.Text = "💰 " .. sellPrice
 			sellButton.BackgroundColor3 = Color3.fromRGB(200, 150, 0)
 			sellButton.TextColor3 = Color3.new(1, 1, 1)
 
-			sellButton.MouseButton1Click:Connect(function()
+			conectarContexto(context, sellButton.Activated, function()
 				playSound(sounds.click)
 				createSellConfirmPopup(charData.name, sellPrice, charId)
 			end)
@@ -1858,8 +2203,9 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 		infoButton.TextScaled = true
 		infoButton.Font = Enum.Font.Arcade
 		infoButton.Parent = card
+		prepararBotaoAnimado(context, infoButton)
 
-		infoButton.MouseButton1Click:Connect(function()
+		conectarContexto(context, infoButton.Activated, function()
 			createAbilitiesPopup(charData.name)
 		end)
 
@@ -1872,8 +2218,9 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 		loreButton.TextScaled = true
 		loreButton.Font = Enum.Font.Arcade
 		loreButton.Parent = card
+		prepararBotaoAnimado(context, loreButton)
 
-		loreButton.MouseButton1Click:Connect(function()
+		conectarContexto(context, loreButton.Activated, function()
 			createLorePopup(charData.name)
 		end)
 	else
@@ -1887,8 +2234,9 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 		infoButton.TextScaled = true
 		infoButton.Font = Enum.Font.Arcade
 		infoButton.Parent = card
+		prepararBotaoAnimado(context, infoButton)
 
-		infoButton.MouseButton1Click:Connect(function()
+		conectarContexto(context, infoButton.Activated, function()
 			createAbilitiesPopup(charData.name)
 		end)
 
@@ -1901,14 +2249,15 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 		loreButton.TextScaled = true
 		loreButton.Font = Enum.Font.Arcade
 		loreButton.Parent = card
+		prepararBotaoAnimado(context, loreButton)
 
-		loreButton.MouseButton1Click:Connect(function()
+		conectarContexto(context, loreButton.Activated, function()
 			createLorePopup(charData.name)
 		end)
 	end
 
 	-- Despertar
-	createAwakeningButton(charData, card)
+	createAwakeningButton(charData, card, context)
 
 	return card
 end
@@ -1929,70 +2278,124 @@ end
 local buscaLoja = ""
 local buscaInventario = ""
 
-local function combinaBusca(nome, termo)
-	if termo == "" then
+local function combinaBusca(charData, termo)
+	local query = string.lower(tostring(termo or ""))
+	if query == "" then
 		return true
 	end
-	return string.find(string.lower(nome), string.lower(termo), 1, true) ~= nil
+	local meta = CATEGORY_META[charData.category]
+	local haystack = string.lower(table.concat({
+		tostring(charData.name or ""),
+		tostring(charData.displayName or ""),
+		tostring(charData.description or ""),
+		tostring(charData.rarity or ""),
+		tostring(charData.category or ""),
+		meta and meta.label or "",
+		tostring(charData.badgeId or ""),
+	}, " "))
+	for token in string.gmatch(query, "%S+") do
+		if not string.find(haystack, token, 1, true) then
+			return false
+		end
+	end
+	return true
 end
 
--- Barra de pesquisa no padrão retro do menu.
-local function criarBarraPesquisa(pai, posicao, tamanho, aoMudar)
+-- Barra de pesquisa no padrão retro do HUD. O debounce por geração evita
+-- reconstruir dezenas de cards para cada tecla de uma digitação rápida.
+local function criarBarraPesquisa(context, pai, posicao, tamanho, accentColor, initialText, aoMudar)
 	local moldura = Instance.new("Frame")
 	moldura.Name = "BarraPesquisa"
 	moldura.Position = posicao
 	moldura.Size = tamanho
-	moldura.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	moldura.BorderColor3 = Color3.fromRGB(120, 120, 120)
-	moldura.BorderSizePixel = 2
+	moldura.BackgroundColor3 = COLORS.panelRaised
+	moldura.BorderSizePixel = 0
 	moldura.Parent = pai
 
+	local searchStroke = Instance.new("UIStroke")
+	searchStroke.Color = accentColor
+	searchStroke.Thickness = 2
+	searchStroke.Transparency = 0.15
+	searchStroke.Parent = moldura
+
+	local searchAccent = Instance.new("Frame")
+	searchAccent.Size = UDim2.fromScale(0.012, 1)
+	searchAccent.BackgroundColor3 = accentColor
+	searchAccent.BorderSizePixel = 0
+	searchAccent.Parent = moldura
+
 	local lupa = Instance.new("TextLabel")
+	lupa.Position = UDim2.fromScale(0.02, 0)
 	lupa.Size = UDim2.fromScale(0.07, 1)
 	lupa.BackgroundTransparency = 1
 	lupa.Text = "🔍"
 	lupa.TextScaled = true
+	lupa.Font = Enum.Font.Arcade
+	lupa.TextColor3 = accentColor
 	lupa.Parent = moldura
+	limitarTexto(lupa, 12, 24)
 
 	local caixa = Instance.new("TextBox")
 	caixa.Name = "Campo"
-	caixa.Position = UDim2.fromScale(0.08, 0.1)
-	caixa.Size = UDim2.fromScale(0.78, 0.8)
+	caixa.Position = UDim2.fromScale(0.1, 0.1)
+	caixa.Size = UDim2.fromScale(0.62, 0.8)
 	caixa.BackgroundTransparency = 1
-	caixa.Text = ""
-	caixa.PlaceholderText = "Pesquisar personagem..."
-	caixa.PlaceholderColor3 = Color3.fromRGB(130, 130, 130)
-	caixa.TextColor3 = Color3.fromRGB(240, 240, 240)
+	caixa.Text = initialText or ""
+	caixa.PlaceholderText = isMobile and "Buscar personagem..." or "Pesquisar nome, raridade ou emblema..."
+	caixa.PlaceholderColor3 = COLORS.muted
+	caixa.TextColor3 = COLORS.ink
 	caixa.TextScaled = true
 	caixa.Font = Enum.Font.Code
 	caixa.TextXAlignment = Enum.TextXAlignment.Left
 	caixa.ClearTextOnFocus = false
 	caixa.Parent = moldura
+	limitarTexto(caixa, 11, 22)
+
+	local counter = Instance.new("TextLabel")
+	counter.Name = "Counter"
+	counter.Position = UDim2.fromScale(0.73, 0.15)
+	counter.Size = UDim2.fromScale(0.16, 0.7)
+	counter.BackgroundColor3 = COLORS.background
+	counter.BorderSizePixel = 0
+	counter.Text = "0 RESULTADOS"
+	counter.TextColor3 = COLORS.muted
+	counter.TextScaled = true
+	counter.Font = Enum.Font.Arcade
+	counter.Parent = moldura
+	limitarTexto(counter, 8, 15)
 
 	local limpar = Instance.new("TextButton")
 	limpar.Name = "Limpar"
-	limpar.Position = UDim2.fromScale(0.88, 0.15)
-	limpar.Size = UDim2.fromScale(0.1, 0.7)
-	limpar.BackgroundColor3 = Color3.fromRGB(70, 30, 30)
+	limpar.Position = UDim2.fromScale(0.91, 0.15)
+	limpar.Size = UDim2.fromScale(0.07, 0.7)
+	limpar.BackgroundColor3 = COLORS.red
 	limpar.BorderSizePixel = 0
 	limpar.Text = "X"
-	limpar.TextColor3 = Color3.fromRGB(230, 230, 230)
+	limpar.TextColor3 = COLORS.white
 	limpar.TextScaled = true
 	limpar.Font = Enum.Font.Arcade
-	limpar.Visible = false
+	limpar.Visible = caixa.Text ~= ""
 	limpar.Parent = moldura
+	limitarTexto(limpar, 10, 18)
+	prepararBotaoAnimado(context, limpar)
 
-	-- Filtra a cada tecla: esperar o Enter faria a busca parecer quebrada.
-	caixa:GetPropertyChangedSignal("Text"):Connect(function()
+	local generation = 0
+	conectarContexto(context, caixa:GetPropertyChangedSignal("Text"), function()
 		limpar.Visible = caixa.Text ~= ""
-		aoMudar(caixa.Text)
+		generation += 1
+		local expectedGeneration = generation
+		task.delay(0.12, function()
+			if context.alive and expectedGeneration == generation then
+				aoMudar(caixa.Text)
+			end
+		end)
 	end)
 
-	limpar.MouseButton1Click:Connect(function()
+	conectarContexto(context, limpar.Activated, function()
 		caixa.Text = ""
 	end)
 
-	return caixa
+	return caixa, counter
 end
 
 -- Prepara um ScrollingFrame para receber seções empilhadas.
@@ -2015,12 +2418,14 @@ local function prepararLista(scroll)
 	-- preciso recalcular CanvasSize a cada filtro da busca.
 	scroll.CanvasSize = UDim2.new()
 	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroll.ScrollBarImageColor3 = COLORS.cyan
+	scroll.ScrollBarImageTransparency = 0.15
 	return lista
 end
 
 -- Uma seção = cabeçalho de raridade + grade daquela raridade, como no
 -- layout de referência ("Starter", "Intermediate").
-local function criarSecao(scroll, titulo, cor, ordem, cardConfig)
+local function criarSecao(scroll, titulo, cor, ordem, cardConfig, total, context)
 	local secao = Instance.new("Frame")
 	secao.Name = "Secao_" .. titulo
 	secao.BackgroundTransparency = 1
@@ -2034,17 +2439,45 @@ local function criarSecao(scroll, titulo, cor, ordem, cardConfig)
 	pilha.Padding = UDim.new(0, 6)
 	pilha.Parent = secao
 
-	local cabecalho = Instance.new("TextLabel")
+	local cabecalho = Instance.new("Frame")
 	cabecalho.Name = "Cabecalho"
-	cabecalho.Size = UDim2.new(1, 0, 0, 26)
-	cabecalho.BackgroundTransparency = 1
-	cabecalho.Text = titulo
-	cabecalho.TextColor3 = cor
-	cabecalho.TextScaled = true
-	cabecalho.Font = Enum.Font.Arcade
-	cabecalho.TextXAlignment = Enum.TextXAlignment.Left
+	cabecalho.Size = UDim2.new(1, 0, 0, cardConfig.sectionHeader)
+	cabecalho.BackgroundColor3 = COLORS.panelRaised
+	cabecalho.BackgroundTransparency = 0.2
+	cabecalho.BorderSizePixel = 0
 	cabecalho.LayoutOrder = 1
 	cabecalho.Parent = secao
+
+	local accent = Instance.new("Frame")
+	accent.Size = UDim2.fromScale(0.012, 1)
+	accent.BackgroundColor3 = cor
+	accent.BorderSizePixel = 0
+	accent.Parent = cabecalho
+
+	local sectionTitle = Instance.new("TextLabel")
+	sectionTitle.Position = UDim2.fromScale(0.03, 0)
+	sectionTitle.Size = UDim2.fromScale(0.72, 1)
+	sectionTitle.BackgroundTransparency = 1
+	sectionTitle.Text = "◆ " .. titulo
+	sectionTitle.TextColor3 = cor
+	sectionTitle.TextScaled = true
+	sectionTitle.Font = Enum.Font.Arcade
+	sectionTitle.TextXAlignment = Enum.TextXAlignment.Left
+	sectionTitle.Parent = cabecalho
+	limitarTexto(sectionTitle, 10, 22)
+
+	local sectionCount = Instance.new("TextLabel")
+	sectionCount.AnchorPoint = Vector2.new(1, 0.5)
+	sectionCount.Position = UDim2.fromScale(0.98, 0.5)
+	sectionCount.Size = UDim2.fromScale(0.2, 0.7)
+	sectionCount.BackgroundTransparency = 1
+	sectionCount.Text = tostring(total) .. (total == 1 and " PERSONAGEM" or " PERSONAGENS")
+	sectionCount.TextColor3 = COLORS.muted
+	sectionCount.TextScaled = true
+	sectionCount.Font = Enum.Font.Code
+	sectionCount.TextXAlignment = Enum.TextXAlignment.Right
+	sectionCount.Parent = cabecalho
+	limitarTexto(sectionCount, 9, 17)
 
 	local grade = Instance.new("Frame")
 	grade.Name = "Grade"
@@ -2058,7 +2491,21 @@ local function criarSecao(scroll, titulo, cor, ordem, cardConfig)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.CellSize = UDim2.new(0, cardConfig.width, 0, cardConfig.height)
 	layout.CellPadding = UDim2.new(0, cardConfig.spacing, 0, cardConfig.spacing)
+	layout.FillDirectionMaxCells = cardConfig.columns
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	layout.Parent = grade
+
+	local function atualizarAlturaGrade()
+		if grade.Parent then
+			grade.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y)
+		end
+	end
+	conectarContexto(context, layout:GetPropertyChangedSignal("AbsoluteContentSize"), atualizarAlturaGrade)
+	task.defer(function()
+		if context.alive then
+			atualizarAlturaGrade()
+		end
+	end)
 
 	return grade
 end
@@ -2068,15 +2515,41 @@ end
 -- =====================================
 
 createSystem = function()
+	limparContexto(shopRenderContext)
+	limparContexto(inventoryRenderContext)
+	limparContexto(systemContext)
+	shopRenderContext = nil
+	inventoryRenderContext = nil
+	systemContext = novoContexto()
+	table.clear(categoryTabButtons)
+	mainTitleLabel = nil
+	inventoryTitleLabel = nil
+	inventoryHintLabel = nil
+	mainCloseAspectConstraint = nil
+	inventoryCloseAspectConstraint = nil
+
 	if systemGui then
 		systemGui.Parent = nil
 	end
 
 	systemGui = Instance.new("ScreenGui")
-	systemGui.Name = "CharacterSystemV6"
+	systemGui.Name = "CharacterSystemV12"
 	systemGui.ResetOnSpawn = false
 	systemGui.IgnoreGuiInset = true
+	systemGui.DisplayOrder = 112
+	systemGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 	systemGui.Parent = playerGui
+
+	backdrop = Instance.new("Frame")
+	backdrop.Name = "Backdrop"
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.BackgroundColor3 = Color3.fromRGB(0, 2, 8)
+	backdrop.BackgroundTransparency = 0.28
+	backdrop.BorderSizePixel = 0
+	backdrop.Active = true
+	backdrop.Visible = false
+	backdrop.ZIndex = 0
+	backdrop.Parent = systemGui
 
 	-- ─────────────────────────────────────
 	-- FRAME PRINCIPAL - LOJA
@@ -2087,65 +2560,118 @@ createSystem = function()
 	mainFrame.Size = uiScale.menu
 	mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 	mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	mainFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
-	mainFrame.BorderSizePixel = 4
+	mainFrame.BackgroundColor3 = COLORS.background
+	mainFrame.BorderSizePixel = 0
+	mainFrame.ClipsDescendants = true
 	mainFrame.Visible = false
 	mainFrame.Parent = systemGui
 
+	mainAspectConstraint = Instance.new("UIAspectRatioConstraint")
+	mainAspectConstraint.AspectRatio = uiScale.panelAspect
+	mainAspectConstraint.DominantAxis = Enum.DominantAxis.Width
+	mainAspectConstraint.Parent = mainFrame
+
+	local mainStroke = Instance.new("UIStroke")
+	mainStroke.Color = COLORS.white
+	mainStroke.Thickness = 4
+	mainStroke.Parent = mainFrame
+
+	local mainGradient = Instance.new("UIGradient")
+	mainGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 28, 42)),
+		ColorSequenceKeypoint.new(0.55, COLORS.background),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(2, 8, 15)),
+	})
+	mainGradient.Rotation = 90
+	mainGradient.Parent = mainFrame
+
+	mainPanelMotion = criarMolaPainel(systemContext, mainFrame, function()
+		if not isMenuOpen and not isInvOpen and backdrop then
+			backdrop.Visible = false
+		end
+	end)
+
 	local menuHeader = Instance.new("Frame")
-	menuHeader.Size = UDim2.new(1, 0, 0.08, 0)
-	menuHeader.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	menuHeader.Size = UDim2.fromScale(1, 0.105)
+	menuHeader.BackgroundColor3 = COLORS.panelRaised
 	menuHeader.BorderSizePixel = 0
 	menuHeader.Parent = mainFrame
 
+	local menuHeaderLine = Instance.new("Frame")
+	menuHeaderLine.AnchorPoint = Vector2.new(0, 1)
+	menuHeaderLine.Position = UDim2.fromScale(0, 1)
+	menuHeaderLine.Size = UDim2.fromScale(1, 0.06)
+	menuHeaderLine.BackgroundColor3 = COLORS.cyan
+	menuHeaderLine.BorderSizePixel = 0
+	menuHeaderLine.Parent = menuHeader
+
 	local menuTitle = Instance.new("TextLabel")
-	menuTitle.Size = UDim2.new(0.7, 0, 1, 0)
+	menuTitle.Position = UDim2.fromScale(0.03, 0.05)
+	menuTitle.Size = UDim2.fromScale(0.58, 0.9)
 	menuTitle.BackgroundTransparency = 1
-	menuTitle.Text = "🧑 MENU DE PERSONAGENS"
-	menuTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
+	menuTitle.Text = uiScale.portrait and "[ LOJA ]" or "[ PERSONAGENS ]  LOJA"
+	menuTitle.TextColor3 = COLORS.cyan
 	menuTitle.TextScaled = true
 	menuTitle.Font = Enum.Font.Arcade
+	menuTitle.TextXAlignment = Enum.TextXAlignment.Left
 	menuTitle.Parent = menuHeader
+	limitarTexto(menuTitle, 9, 28)
+	mainTitleLabel = menuTitle
 
 	local coinsLabel = Instance.new("TextLabel")
 	coinsLabel.Name = "CoinsLabel"
-	coinsLabel.Size = UDim2.new(0.2, 0, 0.8, 0)
-	coinsLabel.Position = UDim2.new(0.70, 0, 0.1, 0)
-	coinsLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	coinsLabel.Size = UDim2.fromScale(0.22, 0.72)
+	coinsLabel.Position = UDim2.fromScale(0.68, 0.14)
+	coinsLabel.BackgroundColor3 = COLORS.background
 	coinsLabel.BorderSizePixel = 0
 	coinsLabel.Text = "💰 " .. playerData.coins
-	coinsLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	coinsLabel.TextColor3 = COLORS.yellow
 	coinsLabel.TextScaled = true
 	coinsLabel.Font = Enum.Font.Arcade
 	coinsLabel.Parent = menuHeader
+	limitarTexto(coinsLabel, 10, 21)
+
+	local coinsStroke = Instance.new("UIStroke")
+	coinsStroke.Color = COLORS.yellow
+	coinsStroke.Thickness = 2
+	coinsStroke.Parent = coinsLabel
 
 	local menuClose = Instance.new("TextButton")
-	menuClose.Size = UDim2.new(0.08, 0, 0.8, 0)
-	menuClose.Position = UDim2.new(0.91, 0, 0.1, 0)
-	menuClose.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+	menuClose.Size = UDim2.fromScale(0.065, 0.72)
+	menuClose.Position = UDim2.fromScale(0.92, 0.14)
+	menuClose.BackgroundColor3 = COLORS.red
 	menuClose.BorderSizePixel = 0
 	menuClose.Text = "X"
-	menuClose.TextColor3 = Color3.new(1, 1, 1)
+	menuClose.TextColor3 = COLORS.white
 	menuClose.TextScaled = true
 	menuClose.Font = Enum.Font.Arcade
 	menuClose.Parent = menuHeader
+	limitarTexto(menuClose, 12, 22)
+	prepararBotaoAnimado(systemContext, menuClose)
+
+	mainCloseAspectConstraint = Instance.new("UIAspectRatioConstraint")
+	mainCloseAspectConstraint.AspectRatio = 1
+	mainCloseAspectConstraint.DominantAxis = uiScale.portrait and Enum.DominantAxis.Width
+		or Enum.DominantAxis.Height
+	mainCloseAspectConstraint.Parent = menuClose
 
 	-- Tabs de categoria (V6: 4 abas — SEM GRÁTIS)
 	local tabFrame = Instance.new("Frame")
-	tabFrame.Size = UDim2.new(1, 0, 0.06, 0)
-	tabFrame.Position = UDim2.new(0, 0, 0.08, 0)
-	tabFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	tabFrame.Size = UDim2.fromScale(1, 0.08)
+	tabFrame.Position = UDim2.fromScale(0, 0.105)
+	tabFrame.BackgroundColor3 = COLORS.panel
 	tabFrame.BorderSizePixel = 0
 	tabFrame.Parent = mainFrame
 
 	local tabWidth = 1 / #SHOP_TABS
 
-	-- (V11) Barra de pesquisa da loja, entre as abas e a grade.
-	criarBarraPesquisa(
+	local _, shopCounter = criarBarraPesquisa(
+		systemContext,
 		mainFrame,
-		UDim2.new(0.01, 0, 0.145, 0),
-		UDim2.new(0.98, 0, 0.052, 0),
+		UDim2.fromScale(0.015, 0.195),
+		UDim2.fromScale(0.97, 0.07),
+		COLORS.cyan,
+		buscaLoja,
 		function(texto)
 			buscaLoja = texto
 			refreshOpenFrames()
@@ -2153,39 +2679,61 @@ createSystem = function()
 	)
 
 	contentFrame = Instance.new("ScrollingFrame")
-	contentFrame.Size = UDim2.new(0.98, 0, 0.79, 0)
-	contentFrame.Position = UDim2.new(0.01, 0, 0.203, 0)
-	contentFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-	contentFrame.BorderColor3 = Color3.fromRGB(100, 100, 100)
-	contentFrame.BorderSizePixel = 2
+	contentFrame.Size = UDim2.fromScale(0.97, 0.705)
+	contentFrame.Position = UDim2.fromScale(0.015, 0.28)
+	contentFrame.BackgroundColor3 = Color3.fromRGB(5, 8, 14)
+	contentFrame.BackgroundTransparency = 0.08
+	contentFrame.BorderSizePixel = 0
 	contentFrame.ScrollBarThickness = isMobile and 8 or 12
 	contentFrame.Parent = mainFrame
 
+	local contentStroke = Instance.new("UIStroke")
+	contentStroke.Color = COLORS.cyan
+	contentStroke.Thickness = 2
+	contentStroke.Transparency = 0.55
+	contentStroke.Parent = contentFrame
+
 	for i, tab in ipairs(SHOP_TABS) do
+		local tabMeta = CATEGORY_META[tab.key]
+			or { icon = "◆", label = tab.label, color = COLORS.cyan }
 		local tabButton = Instance.new("TextButton")
 		tabButton.Size = UDim2.new(tabWidth, 0, 1, 0)
 		tabButton.Position = UDim2.new((i - 1) * tabWidth, 0, 0, 0)
-		tabButton.BackgroundColor3 = selectedCategory == tab.key and Color3.fromRGB(200, 150, 0)
-			or Color3.fromRGB(40, 40, 40)
+		tabButton.BackgroundColor3 = selectedCategory == tab.key and tabMeta.color or COLORS.panelRaised
 		tabButton.BorderSizePixel = 0
-		tabButton.Text = tab.label
-		tabButton.TextColor3 = selectedCategory == tab.key and Color3.fromRGB(20, 20, 20)
-			or Color3.new(1, 1, 1)
+		tabButton.Text = uiScale.portrait and (tabMeta.icon .. "\n" .. tabMeta.label)
+			or (tabMeta.icon .. " " .. tabMeta.label)
+		tabButton.TextColor3 = selectedCategory == tab.key and COLORS.background or tabMeta.color
 		tabButton.TextScaled = true
+		tabButton.TextWrapped = true
 		tabButton.Font = Enum.Font.Arcade
 		tabButton.Parent = tabFrame
+		tabButton:SetAttribute("CategoryKey", tab.key)
+		tabButton:SetAttribute("CategoryIcon", tabMeta.icon)
+		tabButton:SetAttribute("CategoryLabel", tabMeta.label)
+		tabButton:SetAttribute("AccentR", tabMeta.color.R)
+		tabButton:SetAttribute("AccentG", tabMeta.color.G)
+		tabButton:SetAttribute("AccentB", tabMeta.color.B)
+		limitarTexto(tabButton, 9, 18)
+		prepararBotaoAnimado(systemContext, tabButton)
+		table.insert(categoryTabButtons, tabButton)
 
-		tabButton.MouseButton1Click:Connect(function()
+		conectarContexto(systemContext, tabButton.Activated, function()
 			playSound(sounds.click)
 			selectedCategory = tab.key
 			for _, btn in pairs(tabFrame:GetChildren()) do
 				if btn:IsA("TextButton") then
-					btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-					btn.TextColor3 = Color3.new(1, 1, 1)
+					local btnColor = Color3.new(
+						btn:GetAttribute("AccentR") or 0,
+						btn:GetAttribute("AccentG") or 0.88,
+						btn:GetAttribute("AccentB") or 1
+					)
+					btn.BackgroundColor3 = COLORS.panelRaised
+					btn.TextColor3 = btnColor
 				end
 			end
-			tabButton.BackgroundColor3 = Color3.fromRGB(200, 150, 0)
-			tabButton.TextColor3 = Color3.fromRGB(20, 20, 20)
+			tabButton.BackgroundColor3 = tabMeta.color
+			tabButton.TextColor3 = COLORS.background
 			local f = systemGui:FindFirstChild("RefreshCategory")
 			if f and f:IsA("BindableFunction") then
 				pcall(function()
@@ -2201,6 +2749,8 @@ createSystem = function()
 	refreshCategory.Parent = systemGui
 
 	refreshCategory.OnInvoke = function()
+		limparContexto(shopRenderContext)
+		shopRenderContext = novoContexto()
 		for _, child in pairs(contentFrame:GetChildren()) do
 			if child:IsA("Frame") or child:IsA("TextLabel") then
 				child.Parent = nil
@@ -2219,7 +2769,7 @@ createSystem = function()
 		local porRaridade = {}
 		local index = 0
 		for _, charDef in ipairs(chars) do
-			if not playerOwnsCharacter(charDef.name) and combinaBusca(charDef.name, buscaLoja) then
+			if not playerOwnsCharacter(charDef.name) and combinaBusca(charDef, buscaLoja) then
 				local chave = charDef.rarity or "ROBLOXIANOS"
 				porRaridade[chave] = porRaridade[chave] or {}
 				table.insert(porRaridade[chave], charDef)
@@ -2249,13 +2799,19 @@ createSystem = function()
 				chave,
 				info and info.color or Color3.fromRGB(200, 200, 200),
 				ordem,
-				cardConfig
+				cardConfig,
+				#porRaridade[chave],
+				shopRenderContext
 			)
 			for i, charDef in ipairs(porRaridade[chave]) do
-				local card = createCharacterCard(charDef, grade, cardConfig, false)
+				local card = createCharacterCard(charDef, grade, cardConfig, false, shopRenderContext)
 				card.LayoutOrder = i
 			end
 		end
+
+		shopCounter.Text = (isMobile or uiScale.portrait) and tostring(index)
+			or (tostring(index) .. (index == 1 and " RESULTADO" or " RESULTADOS"))
+		shopCounter.TextColor3 = index > 0 and COLORS.cyan or COLORS.red
 
 		-- (V6) Categoria vazia → aviso em vez de tela em branco
 		-- (V11) A mensagem distingue categoria vazia de busca sem resultado:
@@ -2268,7 +2824,7 @@ createSystem = function()
 			emptyLabel.Text = buscaLoja ~= ""
 					and ('Nenhum personagem encontrado para "' .. buscaLoja .. '".')
 				or "Nenhum personagem disponível nesta categoria no momento."
-			emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+			emptyLabel.TextColor3 = COLORS.muted
 			emptyLabel.TextScaled = true
 			emptyLabel.TextWrapped = true
 			emptyLabel.Font = Enum.Font.Code
@@ -2286,47 +2842,107 @@ createSystem = function()
 
 	invFrame = Instance.new("Frame")
 	invFrame.Name = "InventoryFrame"
-	invFrame.Size = isMobile and UDim2.new(0.95, 0, 0.85, 0) or UDim2.new(0.7, 0, 0.75, 0)
+	invFrame.Size = uiScale.menu
 	invFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 	invFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	invFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-	invFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
-	invFrame.BorderSizePixel = 4
+	invFrame.BackgroundColor3 = COLORS.background
+	invFrame.BorderSizePixel = 0
+	invFrame.ClipsDescendants = true
 	invFrame.Visible = false
 	invFrame.Parent = systemGui
 
+	inventoryAspectConstraint = Instance.new("UIAspectRatioConstraint")
+	inventoryAspectConstraint.AspectRatio = uiScale.panelAspect
+	inventoryAspectConstraint.DominantAxis = Enum.DominantAxis.Width
+	inventoryAspectConstraint.Parent = invFrame
+
+	local invStroke = Instance.new("UIStroke")
+	invStroke.Color = COLORS.white
+	invStroke.Thickness = 4
+	invStroke.Parent = invFrame
+
+	local invGradient = Instance.new("UIGradient")
+	invGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 32, 48)),
+		ColorSequenceKeypoint.new(0.55, COLORS.background),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(3, 8, 16)),
+	})
+	invGradient.Rotation = 90
+	invGradient.Parent = invFrame
+
+	inventoryPanelMotion = criarMolaPainel(systemContext, invFrame, function()
+		if not isMenuOpen and not isInvOpen and backdrop then
+			backdrop.Visible = false
+		end
+	end)
+
 	local invHeader = Instance.new("Frame")
-	invHeader.Size = UDim2.new(1, 0, 0.08, 0)
-	invHeader.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	invHeader.Size = UDim2.fromScale(1, 0.105)
+	invHeader.BackgroundColor3 = COLORS.panelRaised
 	invHeader.BorderSizePixel = 0
 	invHeader.Parent = invFrame
 
+	local invHeaderLine = Instance.new("Frame")
+	invHeaderLine.AnchorPoint = Vector2.new(0, 1)
+	invHeaderLine.Position = UDim2.fromScale(0, 1)
+	invHeaderLine.Size = UDim2.fromScale(1, 0.06)
+	invHeaderLine.BackgroundColor3 = COLORS.blue
+	invHeaderLine.BorderSizePixel = 0
+	invHeaderLine.Parent = invHeader
+
 	local invTitle = Instance.new("TextLabel")
-	invTitle.Size = UDim2.new(0.9, 0, 1, 0)
+	invTitle.Position = UDim2.fromScale(0.03, 0.05)
+	invTitle.Size = UDim2.fromScale(0.58, 0.9)
 	invTitle.BackgroundTransparency = 1
-	invTitle.Text = "📦 INVENTÁRIO — 💰 Clique no preço para vender"
-	invTitle.TextColor3 = Color3.fromRGB(100, 200, 255)
+	invTitle.Text = uiScale.portrait and "[ INVENTÁRIO ]" or "[ PERSONAGENS ]  INVENTÁRIO"
+	invTitle.TextColor3 = COLORS.cyan
 	invTitle.TextScaled = true
 	invTitle.Font = Enum.Font.Arcade
+	invTitle.TextXAlignment = Enum.TextXAlignment.Left
 	invTitle.Parent = invHeader
+	limitarTexto(invTitle, 9, 28)
+	inventoryTitleLabel = invTitle
+
+	local invHint = Instance.new("TextLabel")
+	invHint.Position = UDim2.fromScale(0.6, 0.15)
+	invHint.Size = UDim2.fromScale(0.29, 0.7)
+	invHint.BackgroundTransparency = 1
+	invHint.Text = "💰 PREÇO = VENDER"
+	invHint.TextColor3 = COLORS.yellow
+	invHint.TextScaled = true
+	invHint.Font = Enum.Font.Code
+	invHint.Parent = invHeader
+	limitarTexto(invHint, 9, 17)
+	inventoryHintLabel = invHint
 
 	local invClose = Instance.new("TextButton")
-	invClose.Size = UDim2.new(0.08, 0, 0.8, 0)
-	invClose.Position = UDim2.new(0.91, 0, 0.1, 0)
-	invClose.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+	invClose.Size = UDim2.fromScale(0.065, 0.72)
+	invClose.Position = UDim2.fromScale(0.92, 0.14)
+	invClose.BackgroundColor3 = COLORS.red
 	invClose.BorderSizePixel = 0
 	invClose.Text = "X"
-	invClose.TextColor3 = Color3.new(1, 1, 1)
+	invClose.TextColor3 = COLORS.white
 	invClose.TextScaled = true
 	invClose.Font = Enum.Font.Arcade
 	invClose.Parent = invHeader
+	limitarTexto(invClose, 12, 22)
+	prepararBotaoAnimado(systemContext, invClose)
+
+	inventoryCloseAspectConstraint = Instance.new("UIAspectRatioConstraint")
+	inventoryCloseAspectConstraint.AspectRatio = 1
+	inventoryCloseAspectConstraint.DominantAxis = uiScale.portrait and Enum.DominantAxis.Width
+		or Enum.DominantAxis.Height
+	inventoryCloseAspectConstraint.Parent = invClose
 
 	-- (V11) Mesma barra no inventário: com muitos personagens, rolar até
 	-- achar o certo era o gargalo.
-	criarBarraPesquisa(
+	local _, inventoryCounter = criarBarraPesquisa(
+		systemContext,
 		invFrame,
-		UDim2.new(0.01, 0, 0.095, 0),
-		UDim2.new(0.98, 0, 0.055, 0),
+		UDim2.fromScale(0.015, 0.125),
+		UDim2.fromScale(0.97, 0.07),
+		COLORS.blue,
+		buscaInventario,
 		function(texto)
 			buscaInventario = texto
 			refreshOpenFrames()
@@ -2334,13 +2950,19 @@ createSystem = function()
 	)
 
 	invScroll = Instance.new("ScrollingFrame")
-	invScroll.Size = UDim2.new(0.98, 0, 0.84, 0)
-	invScroll.Position = UDim2.new(0.01, 0, 0.155, 0)
-	invScroll.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-	invScroll.BorderColor3 = Color3.fromRGB(100, 100, 100)
-	invScroll.BorderSizePixel = 2
+	invScroll.Size = UDim2.fromScale(0.97, 0.775)
+	invScroll.Position = UDim2.fromScale(0.015, 0.21)
+	invScroll.BackgroundColor3 = Color3.fromRGB(5, 8, 14)
+	invScroll.BackgroundTransparency = 0.08
+	invScroll.BorderSizePixel = 0
 	invScroll.ScrollBarThickness = isMobile and 8 or 12
 	invScroll.Parent = invFrame
+
+	local invScrollStroke = Instance.new("UIStroke")
+	invScrollStroke.Color = COLORS.blue
+	invScrollStroke.Thickness = 2
+	invScrollStroke.Transparency = 0.5
+	invScrollStroke.Parent = invScroll
 
 	-- Refresh inventário
 	local refreshInventory = Instance.new("BindableFunction")
@@ -2348,6 +2970,8 @@ createSystem = function()
 	refreshInventory.Parent = systemGui
 
 	refreshInventory.OnInvoke = function()
+		limparContexto(inventoryRenderContext)
+		inventoryRenderContext = novoContexto()
 		for _, child in pairs(invScroll:GetChildren()) do
 			if child:IsA("Frame") or child:IsA("TextLabel") then
 				child.Parent = nil
@@ -2377,7 +3001,7 @@ createSystem = function()
 
 			-- (V11) Busca também no inventário: com muitos personagens,
 			-- rolar até achar o certo era o gargalo.
-			if combinaBusca(charInfo.name, buscaInventario) then
+			if combinaBusca(charInfo, buscaInventario) then
 				local chave = charInfo.rarity or "ROBLOXIANOS"
 				porRaridadeInv[chave] = porRaridadeInv[chave] or {}
 				table.insert(porRaridadeInv[chave], charInfo)
@@ -2405,13 +3029,19 @@ createSystem = function()
 				chave,
 				info and info.color or Color3.fromRGB(200, 200, 200),
 				ordem,
-				cardConfig
+				cardConfig,
+				#porRaridadeInv[chave],
+				inventoryRenderContext
 			)
 			for i, charInfo in ipairs(porRaridadeInv[chave]) do
-				local card = createCharacterCard(charInfo, grade, cardConfig, true)
+				local card = createCharacterCard(charInfo, grade, cardConfig, true, inventoryRenderContext)
 				card.LayoutOrder = i
 			end
 		end
+
+		inventoryCounter.Text = (isMobile or uiScale.portrait) and tostring(index)
+			or (tostring(index) .. (index == 1 and " PERSONAGEM" or " PERSONAGENS"))
+		inventoryCounter.TextColor3 = index > 0 and COLORS.blue or COLORS.red
 
 		if index == 0 then
 			local vazio = Instance.new("TextLabel")
@@ -2420,7 +3050,7 @@ createSystem = function()
 			vazio.Text = buscaInventario ~= ""
 					and ('Nenhum personagem seu combina com "' .. buscaInventario .. '".')
 				or "Seu inventário está vazio. Personagens GRÁTIS chegam aqui automaticamente!"
-			vazio.TextColor3 = Color3.fromRGB(150, 150, 150)
+			vazio.TextColor3 = COLORS.muted
 			vazio.TextScaled = true
 			vazio.TextWrapped = true
 			vazio.Font = Enum.Font.Code
@@ -2457,10 +3087,11 @@ createSystem = function()
 	_G.OpenCharacterShop = function()
 		if isInvOpen then
 			isInvOpen = false
-			invFrame.Visible = false
+			inventoryPanelMotion.hide()
 		end
 		isMenuOpen = true
-		mainFrame.Visible = true
+		backdrop.Visible = true
+		mainPanelMotion.open()
 		playSound(sounds.open)
 		refreshCatalogCharacters() -- (V5) busca personagens novos ao abrir
 		local f = systemGui:FindFirstChild("RefreshCategory")
@@ -2473,16 +3104,20 @@ createSystem = function()
 
 	_G.CloseCharacterShop = function()
 		isMenuOpen = false
-		mainFrame.Visible = false
+		mainPanelMotion.hide()
+		if not isInvOpen then
+			backdrop.Visible = false
+		end
 	end
 
 	_G.OpenCharacterInventory = function()
 		if isMenuOpen then
 			isMenuOpen = false
-			mainFrame.Visible = false
+			mainPanelMotion.hide()
 		end
 		isInvOpen = true
-		invFrame.Visible = true
+		backdrop.Visible = true
+		inventoryPanelMotion.open()
 		playSound(sounds.open)
 		refreshCatalogCharacters() -- (V5) garante defs pros cards
 		local f = systemGui:FindFirstChild("RefreshInventory")
@@ -2495,19 +3130,38 @@ createSystem = function()
 
 	_G.CloseCharacterInventory = function()
 		isInvOpen = false
-		invFrame.Visible = false
+		inventoryPanelMotion.hide()
+		if not isMenuOpen then
+			backdrop.Visible = false
+		end
 	end
 
-	menuClose.MouseButton1Click:Connect(function()
+	conectarContexto(systemContext, menuClose.Activated, function()
 		playSound(sounds.close)
 		isMenuOpen = false
-		mainFrame.Visible = false
+		mainPanelMotion.close()
 	end)
 
-	invClose.MouseButton1Click:Connect(function()
+	conectarContexto(systemContext, invClose.Activated, function()
 		playSound(sounds.close)
 		isInvOpen = false
-		invFrame.Visible = false
+		inventoryPanelMotion.close()
+	end)
+
+	conectarContexto(systemContext, backdrop.InputBegan, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			playSound(sounds.close)
+			if isMenuOpen then
+				isMenuOpen = false
+				mainPanelMotion.close()
+			elseif isInvOpen then
+				isInvOpen = false
+				inventoryPanelMotion.close()
+			end
+		end
 	end)
 end
 
@@ -2528,23 +3182,59 @@ end
 -- rotação dispara várias mudanças seguidas — remontar em cada uma
 -- deixaria o menu piscando.
 do
-	local remontagemAgendada = false
+	local viewportConnection = nil
+	local resizeGeneration = 0
 
 	local function aoMudarViewport()
-		if remontagemAgendada then
-			return
-		end
-		remontagemAgendada = true
-
-		task.defer(function()
-			remontagemAgendada = false
+		resizeGeneration += 1
+		local expectedGeneration = resizeGeneration
+		task.delay(0.12, function()
+			if expectedGeneration ~= resizeGeneration then
+				return
+			end
 			uiScale = getUIScale()
 
 			if mainFrame then
 				mainFrame.Size = uiScale.menu
 			end
+			if mainAspectConstraint then
+				mainAspectConstraint.AspectRatio = uiScale.panelAspect
+				mainAspectConstraint.DominantAxis = uiScale.portrait and Enum.DominantAxis.Width
+					or Enum.DominantAxis.Height
+			end
 			if invFrame then
 				invFrame.Size = uiScale.menu
+			end
+			if inventoryAspectConstraint then
+				inventoryAspectConstraint.AspectRatio = uiScale.panelAspect
+				inventoryAspectConstraint.DominantAxis = uiScale.portrait and Enum.DominantAxis.Width
+					or Enum.DominantAxis.Height
+			end
+			if mainCloseAspectConstraint then
+				mainCloseAspectConstraint.DominantAxis = uiScale.portrait and Enum.DominantAxis.Width
+					or Enum.DominantAxis.Height
+			end
+			if inventoryCloseAspectConstraint then
+				inventoryCloseAspectConstraint.DominantAxis = uiScale.portrait and Enum.DominantAxis.Width
+					or Enum.DominantAxis.Height
+			end
+			if mainTitleLabel then
+				mainTitleLabel.Text = uiScale.portrait and "[ LOJA ]" or "[ PERSONAGENS ]  LOJA"
+			end
+			if inventoryTitleLabel then
+				inventoryTitleLabel.Text = uiScale.portrait and "[ INVENTÁRIO ]"
+					or "[ PERSONAGENS ]  INVENTÁRIO"
+			end
+			if inventoryHintLabel then
+				inventoryHintLabel.Text = uiScale.portrait and "💰 VENDER" or "💰 PREÇO = VENDER"
+			end
+			for _, tabButton in ipairs(categoryTabButtons) do
+				if tabButton.Parent then
+					local icon = tabButton:GetAttribute("CategoryIcon") or "◆"
+					local label = tabButton:GetAttribute("CategoryLabel") or ""
+					tabButton.Text = uiScale.portrait and (icon .. "\n" .. label)
+						or (icon .. " " .. label)
+				end
 			end
 
 			refreshOpenFrames()
@@ -2552,9 +3242,14 @@ do
 	end
 
 	local function ligarCamera()
+		if viewportConnection then
+			viewportConnection:Disconnect()
+			viewportConnection = nil
+		end
 		local camera = workspace.CurrentCamera
 		if camera then
-			camera:GetPropertyChangedSignal("ViewportSize"):Connect(aoMudarViewport)
+			viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(aoMudarViewport)
+			aoMudarViewport()
 		end
 	end
 
@@ -2566,14 +3261,12 @@ task.spawn(refreshCatalogCharacters)
 
 player.CharacterAdded:Connect(function()
 	task.wait(1)
-	createSystem()
 	updatePlayerData()
+	refreshOpenFrames()
 end)
 
-if player.Character then
-	createSystem()
-	updatePlayerData()
-end
+createSystem()
+task.spawn(updatePlayerData)
 
 -- Sync periódico
 task.spawn(function()
@@ -2614,39 +3307,21 @@ task.spawn(function()
 			end
 		end, 2)
 
-		print("[CHAR SYSTEM V7] Registrado no Menu Unificado: LOJA + INVENTÁRIO")
+		print("[CHAR SYSTEM V12] Registrado no Menu Unificado: LOJA + INVENTÁRIO")
 	end
 end)
 
 print([[
 ╔══════════════════════════════════════════════════════╗
-║  CHARACTER SYSTEM CLIENT V8 — CARREGADO             ║
+║  CHARACTER SYSTEM CLIENT V12 — CARREGADO            ║
 ╠══════════════════════════════════════════════════════╣
-║  SUBSTITUI: CharacterSystemClient V7                 ║
-║  REMOVER:   CharacterSystemClient V7                 ║
+║  SUBSTITUI: CharacterSystemClient V11                ║
 ╠══════════════════════════════════════════════════════╣
-║  V8 MUDANÇAS (DESPERTAR):                            ║
-║  * Botão saiu de cima da borda do card (dava pra     ║
-║    ver, agora dá) — faixa própria em y=0.865         ║
-║  * Botão é DESBLOQUEAR, não equipar: o remote só     ║
-║    concede; equipar o original já usa a forma        ║
-║  * Card separado da forma desperta no INVENTÁRIO     ║
-║  * Estados claros: DESPERTO / DESBLOQUEAR / FALTA    ║
-║    O EMBLEMA / PRECISA DO ORIGINAL                   ║
-║  * Popup de habilidades lista as FERRAMENTAS         ║
-║    carregadas (normais + despertas), lendo direto    ║
-║    de ReplicatedStorage.Characters — sem remote      ║
-╠══════════════════════════════════════════════════════╣
-║  V6 MUDANÇAS:                                        ║
-║  * ABA GRÁTIS REMOVIDA (Mandatory vai direto pro     ║
-║    Inventário via CatalogServer V4)                  ║
-║  * 4 abas: LOJA/RECOMPENSA/GAMEPASS/EMBLEMA          ║
-║  * Mensagens de erro reais do servidor               ║
-║  * Notificação pré-menu corrigida (ScreenGui temp)   ║
-║  MANTIDO DO V5:                                      ║
-║  * ZERO personagem fixo — tudo do catálogo           ║
-║  * Escuta CatalogAnnouncement (aviso global)         ║
-║  * Popups/venda 25%/Despertar/UI responsiva          ║
+║  * Loja e inventário redesenhados em retro-neon      ║
+║  * Busca: nome/descrição/raridade/categoria/emblema   ║
+║  * Cards proporcionais por orientação e viewport     ║
+║  * Selos de origem + emblemas de raridade            ║
+║  * Entrada e saída com mola amortecida                ║
+║  * Tweens e conexões limpos em cada render            ║
 ╚══════════════════════════════════════════════════════╝
 ]])
-
