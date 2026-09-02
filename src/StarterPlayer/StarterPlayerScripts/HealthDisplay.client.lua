@@ -1,5 +1,5 @@
 -- ============================================
--- HEALTH DISPLAY V8 - HUD RESPONSIVO E ANIMADO
+-- HEALTH DISPLAY V8.1 - HUD RESPONSIVO E ANIMADO
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "HealthDisplay"
 -- SUBSTITUI: HealthDisplay V7
@@ -158,15 +158,30 @@ HealthTextConstraint.MinTextSize = 9
 HealthTextConstraint.MaxTextSize = 17
 HealthTextConstraint.Parent = HealthText
 
+-- (V8.1) O indicador ficava POR CIMA da barra de vida.
+--
+-- Ele ocupava X de 0.005 a 0.065 e a barra começa em 0.025, com o
+-- indicador em ZIndex 3 contra o ZIndex 2 da barra — daí o quadradinho
+-- colado na ponta esquerda do verde. A sobreposição vinha desde o V7 e
+-- só ficou evidente quando o HUD passou a ser desenhado grande.
+--
+-- Ele foi para dentro do cabeçalho, à esquerda do título, onde havia
+-- espaço vazio e onde um indicador de estado se lê melhor.
 local StatusIndicator = Instance.new("Frame")
 StatusIndicator.Name = "StatusIndicator"
-StatusIndicator.Size = UDim2.new(0.06, 0, 0.16, 0)
-StatusIndicator.Position = UDim2.new(0.005, 0, 0.26, 0)
+StatusIndicator.Size = UDim2.new(0.05, 0, 0.55, 0)
+StatusIndicator.Position = UDim2.new(0.02, 0, 0.225, 0)
 StatusIndicator.BackgroundColor3 = COLORS.healthHigh
 StatusIndicator.BorderColor3 = COLORS.border
 StatusIndicator.BorderSizePixel = 1
 StatusIndicator.ZIndex = 3
-StatusIndicator.Parent = MainContainer
+StatusIndicator.Parent = HeaderBar
+
+-- Quadrado em qualquer proporção de tela, como manda o padrão do projeto.
+local StatusRatio = Instance.new("UIAspectRatioConstraint")
+StatusRatio.AspectRatio = 1
+StatusRatio.DominantAxis = Enum.DominantAxis.Height
+StatusRatio.Parent = StatusIndicator
 
 local EnergyBackground = Instance.new("Frame")
 EnergyBackground.Name = "EnergyBackground"
@@ -324,11 +339,20 @@ local function applyResponsiveLayout()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
 
-	-- Reserva margens laterais e no máximo 32% da altura para o HUD.
-	-- O limite inferior ainda cabe em telas de 320 px sem cortar conteúdo.
-	local widthScale = math.max(1, viewport.X - 24) / HUD_WIDTH
-	local heightScale = math.max(1, viewport.Y * 0.32) / HUD_HEIGHT
-	ResponsiveScale.Scale = math.clamp(math.min(widthScale, heightScale), 0.62, 1.15)
+	-- (V8.1) O HUD saía gigante em qualquer tela larga.
+	--
+	-- A conta antiga era `viewport.X - 24`, ou seja, tratava a tela INTEIRA
+	-- como espaço disponível para o HUD. Num celular em paisagem isso dá
+	-- algo perto de 4.7 para 420 px de largura, então a largura nunca era
+	-- a restrição: o min() caía sempre na altura, batia no teto de 1.15 e
+	-- o HUD ficava no tamanho máximo em todo aparelho grande.
+	--
+	-- Agora cada eixo recebe uma FRAÇÃO da tela — o HUD é um canto da
+	-- interface, não a interface — e o teto é 1.0, o tamanho de projeto.
+	-- Acima disso ele só cresceria para ocupar espaço que não é dele.
+	local widthScale = math.max(1, viewport.X * 0.34) / HUD_WIDTH
+	local heightScale = math.max(1, viewport.Y * 0.22) / HUD_HEIGHT
+	ResponsiveScale.Scale = math.clamp(math.min(widthScale, heightScale), 0.58, 1)
 	HudRoot.Position = UDim2.new(0.5, 0, 0, getTopInset() + 8)
 end
 

@@ -1,8 +1,8 @@
 -- ============================================
--- SPAWN SYSTEM V9 - BASE DA ZONA SEGURA DETALHADA
+-- SPAWN SYSTEM V9.1 - BASE DA ZONA SEGURA DETALHADA
 -- Coloque em ServerScriptService
 -- Nome: "SpawnSystem"
--- SUBSTITUI: SpawnSystem V8
+-- SUBSTITUI: SpawnSystem V9
 -- ============================================
 -- (V9) A base ganhou grade neon no piso, totens de canto que respiram,
 --      emblema central e placas de sinalização. Duas adições resolvem
@@ -539,23 +539,32 @@ local function createLobbyDetails(pai)
 	placas.Name = "Placas"
 	placas.Parent = pai
 
+	-- (V9.1) As duas placas ficavam de costas para quem está na base.
+	--
+	-- Ambas usavam Face = Back, que é a face +Z LOCAL da peça. A placa da
+	-- borda +Z mostrava o texto para fora da zona; a da borda -Z era
+	-- girada 180°, o que leva o +Z local para o -Z do mundo — também para
+	-- fora. Das duas o jogador via o verso.
+	--
+	-- A rotação saiu de cena: sem ela não há como o texto sair espelhado.
+	-- Cada placa agora declara a face que aponta para o CENTRO da base:
+	-- Front é -Z local, Back é +Z local.
 	local ladosPlaca = {
-		{ Vector3.new(0, 0, metadeZ - 2), 0 },
-		{ Vector3.new(0, 0, -metadeZ + 2), 180 },
+		{ deslocamento = Vector3.new(0, 0, metadeZ - 2), face = Enum.NormalId.Front },
+		{ deslocamento = Vector3.new(0, 0, -metadeZ + 2), face = Enum.NormalId.Back },
 	}
 	for i, def in ipairs(ladosPlaca) do
 		local placa = novaPeca(
 			placas,
 			"Placa" .. i,
 			Vector3.new(40, 8, 0.5),
-			LOBBY.POSITION + def[1] + Vector3.new(0, topoPiso - LOBBY.POSITION.Y + 9, 0),
+			LOBBY.POSITION + def.deslocamento + Vector3.new(0, topoPiso - LOBBY.POSITION.Y + 9, 0),
 			Color3.fromRGB(14, 12, 30),
 			Enum.Material.SmoothPlastic
 		)
-		placa.CFrame = CFrame.new(placa.Position) * CFrame.Angles(0, math.rad(def[2]), 0)
 
 		local borda = Instance.new("SurfaceGui")
-		borda.Face = Enum.NormalId.Back
+		borda.Face = def.face
 		borda.AlwaysOnTop = false
 		borda.CanvasSize = Vector2.new(800, 160)
 		borda.Parent = placa
