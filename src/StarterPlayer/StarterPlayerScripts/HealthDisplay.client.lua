@@ -1,25 +1,8 @@
 -- ============================================
--- HEALTH DISPLAY V8 - VIDA + ENERGIA + BARRA DE DESPERTAR
+-- HEALTH DISPLAY V7 - VIDA + ENERGIA + BARRA DE DESPERTAR
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "HealthDisplay"
--- SUBSTITUI: HealthDisplay (V7)
--- (V8) Camada de animação reescrita. Quatro defeitos:
---      1. VAZAMENTO: borderPulseEffect criava 2 tweens a cada 3s num
---         laço `while` sem fim — e o ScreenGui tem ResetOnSpawn = false,
---         então nunca acabava. Virou 1 tween com RepeatCount = -1.
---      2. BORDA PRESA: 5 funções escreviam em BorderColor3 salvando e
---         restaurando a cor. Dois flashes em menos de 0.1s faziam o
---         segundo salvar a cor do primeiro como "original" e a borda
---         ficava presa. Agora só atualizarBorda() escreve nela.
---      3. BARRA TREMENDO: a vida perdida animava dentro de task.spawn
---         com task.wait(0.3). Cada golpe abria uma thread e todas
---         disputavam a mesma barra. O atraso agora é DelayTime do
---         TweenInfo, sem thread.
---      4. FORMA DEFORMADA: o indicador de status é pixel art definida
---         só em Scale, virando retângulo em cada proporção de celular.
---         Ganhou UIAspectRatioConstraint.
---      A barra de Despertar deixou de depender do número fixo Y 0.187 e
---      passou a ser filha do MainContainer, ancorada abaixo dele.
+-- SUBSTITUI: HealthDisplay (V4)
 -- (V7) Mostra a janela de TRANSFORMANDO: o jogador fica desarmado por
 --      alguns segundos enquanto a forma troca, nos dois sentidos. Sem
 --      indicação na tela isso parece travamento.
@@ -86,28 +69,6 @@ local COLORS = {
 
 -- (V4) Abaixo disso a maioria das Tools já não ativa (custo padrão 15)
 local LOW_ENERGY_THRESHOLD = 15
-
--- =====================================
--- (V8) GERENCIADOR DE TWEENS
--- =====================================
--- O V7 criava um tween novo a cada evento e nunca cancelava nenhum. Em
--- combate, uma sequência de golpes deixava vários tweens vivos disputando
--- a mesma barra, e ela tremia em vez de deslizar.
---
--- Aqui cada alvo animável tem uma CHAVE. Só existe um tween por chave: o
--- anterior é cancelado antes do novo nascer.
-local tweensAtivos = {}
-
-local function animar(chave, objeto, info, propriedades)
-	local anterior = tweensAtivos[chave]
-	if anterior then
-		anterior:Cancel()
-	end
-	local tween = TweenService:Create(objeto, info, propriedades)
-	tweensAtivos[chave] = tween
-	tween:Play()
-	return tween
-end
 
 -- =====================================
 -- CRIAR SCREENGUI
@@ -229,15 +190,6 @@ StatusIndicator.BorderColor3 = COLORS.border
 StatusIndicator.BorderSizePixel = 1
 StatusIndicator.Parent = MainContainer
 
--- (V8) O indicador é pixel art: precisa ser QUADRADO. Definido só em
--- Scale (0.06 x 0.16 do container), ele virava um retângulo diferente em
--- cada proporção de celular. A constraint trava a forma e deixa a altura
--- mandar na largura.
-local StatusRatio = Instance.new("UIAspectRatioConstraint")
-StatusRatio.AspectRatio = 1
-StatusRatio.DominantAxis = Enum.DominantAxis.Height
-StatusRatio.Parent = StatusIndicator
-
 -- =====================================
 -- (V4) BARRA DE ENERGIA
 -- =====================================
@@ -291,27 +243,17 @@ EnergyText.Parent = MainContainer
 -- exatamente por cima do texto de energia e passando de 1.0 — metade
 -- dela caía fora do container.
 --
--- Aqui ela vira uma faixa própria logo abaixo do container.
---
--- (V8) Ela era filha do ScreenGui, na posição fixa Y 0.187 — número
--- calculado à mão a partir do MainContainer (0.06 + 0.12 = 0.18). Qualquer
--- ajuste no container desgrudava as duas em silêncio, e foi assim que a
--- barra sumiu no V5.
---
--- Agora ela é FILHA do container, ancorada logo abaixo dele: 1 = a base do
--- pai, mais 4px de respiro. Mexer no container leva a barra junto.
--- As medidas equivalem exatamente às antigas — largura 0.25 da tela é 1.0
--- de um pai que mede 0.25; altura 0.028 da tela é 0.2333 de um pai que
--- mede 0.12.
+-- Aqui ela vira uma faixa própria logo abaixo: o MainContainer está em
+-- Y 0.06 com altura 0.12, então termina em 0.18.
 local AwakenBackground = Instance.new("Frame")
 AwakenBackground.Name = "AwakenBackground"
-AwakenBackground.Size = UDim2.new(1, 0, 0.2333, 0)
-AwakenBackground.Position = UDim2.new(0, 0, 1, 4)
+AwakenBackground.Size = UDim2.new(0.25, 0, 0.028, 0)
+AwakenBackground.Position = UDim2.new(0.375, 0, 0.187, 0)
 AwakenBackground.BackgroundColor3 = COLORS.barBackground
 AwakenBackground.BorderColor3 = COLORS.border
 AwakenBackground.BorderSizePixel = 2
 AwakenBackground.Visible = false
-AwakenBackground.Parent = MainContainer
+AwakenBackground.Parent = HealthGui
 
 local AwakenBar = Instance.new("Frame")
 AwakenBar.Name = "AwakenBar"
@@ -325,9 +267,7 @@ AwakenText.Name = "AwakenText"
 AwakenText.Size = UDim2.new(1, 0, 1, 0)
 AwakenText.BackgroundTransparency = 1
 AwakenText.Text = ""
--- (V8) Era `COLORS.text or ...`, e COLORS.text nunca existiu nesta
--- tabela — o texto vinha branco pelo fallback, por acidente.
-AwakenText.TextColor3 = COLORS.textGlow
+AwakenText.TextColor3 = COLORS.text or Color3.fromRGB(255, 255, 255)
 AwakenText.TextScaled = true
 AwakenText.Font = Enum.Font.Arcade
 AwakenText.TextStrokeTransparency = 0.4
@@ -436,47 +376,6 @@ local isBlinking = false
 local energyBlinking = false
 
 -- =====================================
--- (V8) DONO ÚNICO DA COR DA BORDA
--- =====================================
--- Cinco lugares escreviam em MainContainer.BorderColor3 com o padrão
--- "salva o valor atual, muda, restaura depois de 0.1s". Dois flashes em
--- menos de 0.1s faziam o segundo capturar a cor do primeiro como
--- "original" — e a borda ficava presa naquela cor para sempre.
---
--- Agora ninguém escreve na borda direto. Cada efeito declara seu estado e
--- esta função decide, por prioridade, qual cor vale agora.
-local flashAtual = nil -- cor do flash momentâneo, ou nil
-local piscaCritica = false -- fase do piscar de vida crítica
-
-local function atualizarBorda()
-	if flashAtual then
-		MainContainer.BorderColor3 = flashAtual
-	elseif isBlinking then
-		MainContainer.BorderColor3 = piscaCritica and COLORS.healthCritical or COLORS.border
-	else
-		MainContainer.BorderColor3 = COLORS.border
-	end
-end
-
--- Cada flash tem um número. Só o mais recente pode se apagar, então um
--- flash antigo terminando não limpa o flash que começou depois dele.
-local flashSequencia = 0
-
-local function flashBorda(cor, duracao)
-	flashSequencia += 1
-	local meu = flashSequencia
-	flashAtual = cor
-	atualizarBorda()
-
-	task.delay(duracao, function()
-		if flashSequencia == meu then
-			flashAtual = nil
-			atualizarBorda()
-		end
-	end)
-end
-
--- =====================================
 -- FUNÇÃO: OBTER COR BASEADA NA VIDA
 -- =====================================
 
@@ -497,9 +396,15 @@ end
 -- =====================================
 
 local function createDamageFlash()
-	-- (V8) Não salva nem restaura mais: só declara o flash. Quem decide a
-	-- cor da borda é atualizarBorda().
-	flashBorda(COLORS.healthCritical, 0.1)
+	-- (V4) task.spawn: antes o task.wait segurava o HealthChanged
+	task.spawn(function()
+		local originalBorder = MainContainer.BorderColor3
+		MainContainer.BorderColor3 = COLORS.healthCritical
+		task.wait(0.1)
+		if not isBlinking then
+			MainContainer.BorderColor3 = originalBorder
+		end
+	end)
 end
 
 -- =====================================
@@ -507,7 +412,15 @@ end
 -- =====================================
 
 local function createHealFlash()
-	flashBorda(COLORS.healthHigh, 0.1)
+	-- (V4) task.spawn: antes o task.wait segurava o HealthChanged
+	task.spawn(function()
+		local originalBorder = MainContainer.BorderColor3
+		MainContainer.BorderColor3 = COLORS.healthHigh
+		task.wait(0.1)
+		if not isBlinking then
+			MainContainer.BorderColor3 = originalBorder
+		end
+	end)
 end
 
 -- =====================================
@@ -522,22 +435,19 @@ local function startCriticalBlink()
 
 	task.spawn(function()
 		while isBlinking do
-			piscaCritica = true
+			-- Piscar borda
+			MainContainer.BorderColor3 = COLORS.healthCritical
 			StatusIndicator.BackgroundColor3 = COLORS.healthCritical
-			atualizarBorda()
 			task.wait(0.3)
 
 			if not isBlinking then
 				break
 			end
 
-			piscaCritica = false
+			MainContainer.BorderColor3 = COLORS.border
 			StatusIndicator.BackgroundColor3 = COLORS.barBackground
-			atualizarBorda()
 			task.wait(0.3)
 		end
-		piscaCritica = false
-		atualizarBorda()
 	end)
 end
 
@@ -546,8 +456,8 @@ local function stopCriticalBlink()
 		return
 	end
 	isBlinking = false
-	piscaCritica = false
-	atualizarBorda()
+
+	MainContainer.BorderColor3 = COLORS.border
 end
 
 -- =====================================
@@ -585,34 +495,31 @@ local function UpdateHealth()
 		local healthColor = getHealthColor(healthPercent)
 
 		-- Animar barra de vida perdida (efeito de delay)
-		--
-		-- (V8) O V7 fazia task.spawn + task.wait(0.3) aqui. Cada golpe
-		-- criava uma thread; numa sequência elas acordavam juntas e cada
-		-- uma puxava a mesma barra para um tamanho já vencido, então ela
-		-- tremia em vez de deslizar. O atraso agora é o DelayTime do
-		-- próprio TweenInfo, sem thread nenhuma, e só existe um tween por
-		-- barra: o anterior é cancelado.
 		if wasDamaged then
-			animar(
-				"vidaPerdida",
-				LostHealthBar,
-				TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, 0, false, 0.3),
-				{ Size = UDim2.new(healthPercent, 0, 1, 0) }
-			)
+			task.spawn(function()
+				task.wait(0.3) -- Delay antes de seguir a barra principal
+				local lostTween = TweenService:Create(
+					LostHealthBar,
+					TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+					{ Size = UDim2.new(healthPercent, 0, 1, 0) }
+				)
+				lostTween:Play()
+			end)
 		else
 			-- Se curou, atualizar imediatamente
-			local pendente = tweensAtivos.vidaPerdida
-			if pendente then
-				pendente:Cancel()
-			end
 			LostHealthBar.Size = UDim2.new(healthPercent, 0, 1, 0)
 		end
 
 		-- Animar barra principal
-		animar("vida", HealthBar, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Size = UDim2.new(healthPercent, 0, 1, 0),
-			BackgroundColor3 = healthColor,
-		})
+		local barTween = TweenService:Create(
+			HealthBar,
+			TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{
+				Size = UDim2.new(healthPercent, 0, 1, 0),
+				BackgroundColor3 = healthColor,
+			}
+		)
+		barTween:Play()
 
 		-- Atualizar indicador de status
 		StatusIndicator.BackgroundColor3 = healthColor
@@ -644,20 +551,29 @@ end
 -- =====================================
 
 local function borderPulseEffect()
-	-- (V8) O V7 rodava um laço `while` criando DOIS tweens a cada 3
-	-- segundos, para sempre — e como o ScreenGui tem ResetOnSpawn = false,
-	-- ele nunca termina. Eram cerca de 40 objetos de tween por minuto
-	-- abandonados, pela sessão inteira.
-	--
-	-- O mesmo efeito cabe em um único tween que se repete sozinho:
-	-- RepeatCount = -1 (infinito) e Reverses = true (vai e volta).
-	MainContainer.BackgroundTransparency = 0
-	animar(
-		"pulsoBorda",
-		MainContainer,
-		TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ BackgroundTransparency = 0.3 }
-	)
+	task.spawn(function()
+		local baseTransparency = 0
+		local pulseTransparency = 0.3
+
+		while HealthGui.Parent do
+			-- Pulso sutil
+			TweenService:Create(
+				MainContainer,
+				TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+				{ BackgroundTransparency = pulseTransparency }
+			):Play()
+
+			task.wait(1.5)
+
+			TweenService:Create(
+				MainContainer,
+				TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+				{ BackgroundTransparency = baseTransparency }
+			):Play()
+
+			task.wait(1.5)
+		end
+	end)
 end
 
 -- =====================================
@@ -718,10 +634,14 @@ local function updateEnergy(payload)
 
 	local color = getEnergyColor(current, max)
 
-	animar("energia", EnergyBar, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = UDim2.new(percent, 0, 1, 0),
-		BackgroundColor3 = color,
-	})
+	TweenService:Create(
+		EnergyBar,
+		TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{
+			Size = UDim2.new(percent, 0, 1, 0),
+			BackgroundColor3 = color,
+		}
+	):Play()
 
 	if current <= 0 then
 		EnergyText.Text = "SEM ENERGIA"
@@ -760,7 +680,14 @@ task.spawn(function()
 	if energyDepleted then
 		energyDepleted.OnClientEvent:Connect(function()
 			-- Flash laranja na borda ao esgotar
-			flashBorda(COLORS.energyLow, 0.15)
+			task.spawn(function()
+				local original = MainContainer.BorderColor3
+				MainContainer.BorderColor3 = COLORS.energyLow
+				task.wait(0.15)
+				if not isBlinking then
+					MainContainer.BorderColor3 = original
+				end
+			end)
 		end)
 	end
 
@@ -777,11 +704,6 @@ borderPulseEffect()
 -- Conectar ao personagem
 Player.CharacterAdded:Connect(function(character)
 	task.wait(0.5)
-	-- (V8) Sem isto, lastHealth guardava a vida baixa de antes de morrer e
-	-- o primeiro update do personagem novo era lido como CURA, disparando
-	-- um flash verde a cada renascimento.
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	lastHealth = humanoid and humanoid.MaxHealth or 100
 	UpdateHealth()
 end)
 
@@ -792,26 +714,41 @@ end
 
 print([[
 ╔════════════════════════════════════════════════════╗
-║  ✅ HEALTH DISPLAY V8 CARREGADO                    ║
+║  ✅ HEALTH DISPLAY V4 (HP + ENERGIA) CARREGADO    ║
 ╠════════════════════════════════════════════════════╣
-║  SUBSTITUI: HealthDisplay V7                       ║
-║  REMOVER:   HealthDisplay V7                       ║
+║  SUBSTITUI: HealthDisplay V3                       ║
+║  REMOVER:   HealthDisplay V3                       ║
 ╠════════════════════════════════════════════════════╣
-║  CORRIGIDO NO V8:                                  ║
-║  • Pulso da borda vazava ~40 tweens por minuto    ║
-║    pela sessão inteira — agora é 1 tween          ║
-║  • Borda podia ficar presa na cor de um flash     ║
-║  • Barra de vida perdida tremia em combate        ║
-║  • Indicador de status deformava por proporção    ║
-║  • Barra de Despertar colada ao container         ║
-║  • Flash verde falso ao renascer                  ║
+║  NOVO NO V4:                                       ║
+║  • Barra de ENERGIA abaixo do HP                  ║
+║  • Pisca laranja com energia baixa                ║
+║  • "SEM ENERGIA" quando zera                      ║
+║  • Sem EnergySystemServer, a barra some e o HP    ║
+║    funciona igual ao V3                           ║
+║  • Correção: flash de dano não segura mais o      ║
+║    evento HealthChanged                           ║
 ╠════════════════════════════════════════════════════╣
-║  MANTIDO:                                          ║
-║  • Visual retro, fonte Arcade, bordas 3px         ║
-║  • HP + ENERGIA + DESPERTAR no HUD                ║
-║  • Piscar em vida crítica e energia baixa         ║
-║  • Janela de TRANSFORMANDO do Despertar           ║
-║  • Sem EnergySystemServer / AwakeningMeterServer, ║
-║    as barras somem e o HP continua igual          ║
+║  MANTIDO DO V3:                                    ║
+║  • Visual 100% retro estilo anos 80/90           ║
+║  • Fonte Arcade em todos os elementos             ║
+║  • Bordas grossas (3px)                           ║
+║  • Cores neon vibrantes                           ║
+║  • Efeito de piscar em vida crítica               ║
+║  • Barra de delay no dano (efeito visual)         ║
+║  • Indicador de status por cor                    ║
+║  • Flash de dano/cura                             ║
+║  • Pulso sutil na borda                           ║
+╠════════════════════════════════════════════════════╣
+║  CORES POR NÍVEL DE VIDA:                         ║
+║  • 100-75%: Verde Neon                            ║
+║  • 74-50%:  Amarelo Neon                          ║
+║  • 49-25%:  Laranja                               ║
+║  • 24-0%:   Vermelho Neon (com piscar)           ║
+╠════════════════════════════════════════════════════╣
+║  EFEITOS:                                          ║
+║  • Vida crítica (<20%): Borda pisca vermelho      ║
+║  • Dano recebido: Flash vermelho                  ║
+║  • Cura recebida: Flash verde                     ║
+║  • Barra de delay mostra dano gradualmente        ║
 ╚════════════════════════════════════════════════════╝
 ]])
