@@ -11,6 +11,26 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 21:56 UTC — modal unificado de detalhes publicado
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 57, 1, 0, 0, 0]` — execução #28, `main` em `7111daa`
+
+**`CharacterSystemClient` — merge da PR #9.** Informações, Lore e Despertar
+agora dividem um modal responsivo com três abas. A tela ganhou entrada por mola
+amortecida, transição entre abas, seções em cascata, texto progressivo e
+reconstrução ao girar o celular sem perder a aba selecionada.
+
+O hotfix publicado às 21:07 foi preservado durante o merge:
+`escalaPorTela()` continua sendo usado tanto no corpo da Lore quanto na altura
+das habilidades de Despertar, evitando novamente a multiplicação de número por
+`uiScale`, que é uma tabela.
+
+A validação da `main` (execução #32) passou. A verificação anterior à
+publicação (execução #27) encontrou exatamente 1 script diferente, 0 renomeados,
+0 novos, 0 pastas novas e 0 problemas — o único alterado foi
+`StarterPlayer > StarterPlayerScripts > CharacterSystemClient`.
+
 ## 2026-09-02 21:07 UTC — HOTFIX: a Lore estava quebrada no jogo
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
