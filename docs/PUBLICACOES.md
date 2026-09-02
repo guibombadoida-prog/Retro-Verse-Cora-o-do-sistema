@@ -11,6 +11,29 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 01:10 UTC — correções da publicação anterior + menu com busca
+
+`[PUBLICAÇÃO] 3 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 55, 3, 0, 0, 0]` — execução #14, `main` em `20e283d`
+
+Duas correções de defeitos que o dono viu no jogo depois da publicação das
+00:59, mais o menu de personagens.
+
+- **`SpawnSystem` V9.1** — as duas placas da zona segura mostravam o verso.
+  Ambas usavam `Face = Back`, a face +Z local: a da borda +Z apontava para
+  fora, e a da borda -Z era girada 180°, o que também a virava para fora. A
+  rotação saiu e cada placa passou a declarar a face voltada ao centro.
+- **`HealthDisplay` V8.1** — o HUD saía no tamanho máximo em qualquer tela
+  grande. A escala usava `viewport.X - 24`, ou seja, a tela inteira como
+  espaço do HUD, então a largura nunca limitava e o valor batia no teto de
+  1.15. Numa viewport de 900x400 ocupava 54% da largura; agora ocupa 27%.
+  Junto, o `StatusIndicator` saiu de cima da barra de vida — sobreposição que
+  existia desde o V7 e só ficou visível com o HUD grande.
+- **`CharacterSystemClient` V11** — barra de pesquisa na loja e no inventário,
+  grade por `UIGridLayout` recalculada quando a `ViewportSize` muda (antes o
+  `getUIScale()` rodava uma vez só e girar o celular não refazia nada), e
+  cards agrupados em seções por raridade.
+
 ## 2026-09-02 00:59 UTC — três sistemas novos + HUD do Codex
 
 `[PUBLICAÇÃO] 5 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
