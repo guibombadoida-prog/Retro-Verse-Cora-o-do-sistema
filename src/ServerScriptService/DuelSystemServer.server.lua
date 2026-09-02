@@ -1,5 +1,20 @@
 -- ============================================
--- DUEL SYSTEM SERVER V2 — ARENA + APOSTA + ISOLAMENTO
+-- DUEL SYSTEM SERVER V3 — ARENA MAIOR + ARQUIBANCADA
+-- SUBSTITUI: DuelSystemServer V2
+-- (V3) A arena passou de 60x60 para 110x110 studs. Com o tamanho antigo
+--      os dois começavam quase colados e qualquer recuo batia na parede,
+--      o que tirava o reposicionamento do jogo.
+-- (V3) Arquibancada em quatro lados, 4 fileiras cada, 48 assentos, teto
+--      de 24 espectadores. Ela fica FORA das paredes de propósito: as
+--      paredes de ForceField já separam quem luta de quem assiste, então
+--      o espectador não pisa no piso, não empurra ninguém e não entra em
+--      raycast de golpe — o isolamento de dano continua valendo sem
+--      precisar de regra nova.
+-- (V3) Remotes novos: DuelSpectate (RemoteFunction, entra e sai) e
+--      DuelSpectators (RemoteEvent, avisa os lutadores quantos assistem).
+--      A volta do espectador é automática no fim do duelo, ao sair da
+--      arquibancada e ao sair do jogo — sem isso ele ficaria preso a
+--      2000 studs de altura.
 -- Coloque em ServerScriptService
 -- Nome: "DuelSystemServer"
 -- SUBSTITUI: DuelSystemServer V1
@@ -38,8 +53,18 @@ local CONFIG = {
 	MAX_BET = 100000,
 	ISOLATION_WINDOW = 1.5, -- s: janela p/ considerar um golpe do oponente
 	ARENA_CENTER = Vector3.new(0, 2000, 0), -- bem acima de tudo
-	ARENA_HALF = 30, -- meia-largura do piso
-	ARENA_WALL_H = 40, -- altura das paredes
+	-- (V3) 30 -> 55. Com 60x60 studs os dois começavam praticamente
+	-- colados e qualquer recuo batia na parede, o que anulava
+	-- reposicionamento como recurso de luta. 110x110 dá espaço para
+	-- circular sem transformar o duelo em corrida.
+	ARENA_HALF = 55, -- meia-largura do piso
+	ARENA_WALL_H = 45, -- altura das paredes
+	-- (V3) Arquibancada
+	ARQ_DEGRAUS = 4, -- fileiras por lado
+	ARQ_ALTURA = 4, -- subida por fileira
+	ARQ_PROF = 6, -- profundidade de cada fileira
+	ARQ_FOLGA = 6, -- distância entre a parede e a 1ª fileira
+	MAX_ESPECTADORES = 24,
 }
 
 repeat
@@ -78,12 +103,16 @@ local duelInviteRemote = ensureRemote("DuelInvite", "RemoteEvent")
 local respondToDuelRemote = ensureRemote("RespondToDuel", "RemoteEvent")
 local duelCountdownRemote = ensureRemote("DuelCountdown", "RemoteEvent")
 local duelResultRemote = ensureRemote("DuelResult", "RemoteEvent")
+-- (V3) Espectadores
+local spectateRemote = ensureRemote("DuelSpectate", "RemoteFunction")
+local spectatorsRemote = ensureRemote("DuelSpectators", "RemoteEvent")
 
 -- =====================================
 -- ARENA (construída 1x)
 -- =====================================
 
 local arenaSpawnA, arenaSpawnB
+local assentos = {} -- (V3) CFrames da arquibancada, virados para o centro
 
 local function buildArena()
 	local center = CONFIG.ARENA_CENTER
@@ -135,13 +164,123 @@ local function buildArena()
 		wall.Parent = model
 	end
 
+	-- (V3) ARQUIBANCADA
+	--
+	-- Fica FORA das paredes de propósito. As paredes de ForceField já
+	-- separam quem luta de quem assiste, então o espectador não entra no
+	-- piso, não empurra ninguém e não aparece em raycast de golpe. Isso
+	-- mantém o isolamento de dano do duelo intacto sem precisar de regra
+	-- nova: quem assiste está fisicamente do lado de fora.
+	local arq = Instance.new("Folder")
+	arq.Name = "Arquibancada"
+	arq.Parent = model
+
+	assentos = {}
+
+	-- Um lado da arena por vez, girando o eixo a cada volta.
+	local lados = {
+		{ dir = Vector3.new(0, 0, 1), giro = 180 },
+		{ dir = Vector3.new(0, 0, -1), giro = 0 },
+		{ dir = Vector3.new(1, 0, 0), giro = 270 },
+		{ dir = Vector3.new(-1, 0, 0), giro = 90 },
+	}
+
+	for l, lado in ipairs(lados) do
+		for d = 1, CONFIG.ARQ_DEGRAUS do
+			local recuo = half + CONFIG.ARQ_FOLGA + (d - 0.5) * CONFIG.ARQ_PROF
+			local altura = d * CONFIG.ARQ_ALTURA
+			local comprimento = half * 2 + CONFIG.ARQ_FOLGA * 2 + d * CONFIG.ARQ_PROF * 2
+
+			local degrau = Instance.new("Part")
+			degrau.Name = string.format("Degrau_L%d_D%d", l, d)
+			degrau.Anchored = true
+			degrau.CanCollide = true
+			degrau.Material = Enum.Material.SmoothPlastic
+			degrau.Color = Color3.fromRGB(38, 28, 58)
+			degrau.TopSurface = Enum.SurfaceType.Smooth
+
+			if lado.dir.Z ~= 0 then
+				degrau.Size = Vector3.new(comprimento, CONFIG.ARQ_ALTURA, CONFIG.ARQ_PROF)
+				degrau.Position = center
+					+ Vector3.new(0, altura - CONFIG.ARQ_ALTURA / 2, lado.dir.Z * recuo)
+			else
+				degrau.Size = Vector3.new(CONFIG.ARQ_PROF, CONFIG.ARQ_ALTURA, comprimento)
+				degrau.Position = center
+					+ Vector3.new(lado.dir.X * recuo, altura - CONFIG.ARQ_ALTURA / 2, 0)
+			end
+			degrau.Parent = arq
+
+			-- Faixa neon na quina de cada fileira: dá leitura de altura e
+			-- evita que a arquibancada vire um bloco chapado à distância.
+			local faixa = Instance.new("Part")
+			faixa.Name = degrau.Name .. "_Neon"
+			faixa.Anchored = true
+			faixa.CanCollide = false
+			faixa.CanTouch = false
+			faixa.CanQuery = false
+			faixa.Material = Enum.Material.Neon
+			faixa.Color = l % 2 == 0 and Color3.fromRGB(255, 80, 0) or Color3.fromRGB(0, 200, 255)
+			faixa.Transparency = 0.3
+			if lado.dir.Z ~= 0 then
+				faixa.Size = Vector3.new(comprimento, 0.4, 0.6)
+				faixa.Position = degrau.Position
+					+ Vector3.new(0, CONFIG.ARQ_ALTURA / 2, -lado.dir.Z * (CONFIG.ARQ_PROF / 2))
+			else
+				faixa.Size = Vector3.new(0.6, 0.4, comprimento)
+				faixa.Position = degrau.Position
+					+ Vector3.new(-lado.dir.X * (CONFIG.ARQ_PROF / 2), CONFIG.ARQ_ALTURA / 2, 0)
+			end
+			faixa.Parent = arq
+
+			-- Assentos: posições prontas, viradas para o centro.
+			local porFileira = 3
+			for s = 1, porFileira do
+				local t = (s / (porFileira + 1)) * 2 - 1
+				local pos
+				if lado.dir.Z ~= 0 then
+					pos = degrau.Position
+						+ Vector3.new(t * (comprimento / 2 - 6), CONFIG.ARQ_ALTURA / 2 + 3, 0)
+				else
+					pos = degrau.Position
+						+ Vector3.new(0, CONFIG.ARQ_ALTURA / 2 + 3, t * (comprimento / 2 - 6))
+				end
+				table.insert(assentos, CFrame.lookAt(pos, Vector3.new(center.X, pos.Y, center.Z)))
+			end
+		end
+	end
+
+	-- Luz de arena vinda de cima, para a arquibancada não ficar preta.
+	local refletor = Instance.new("Part")
+	refletor.Name = "Refletor"
+	refletor.Size = Vector3.new(4, 1, 4)
+	refletor.Position = center + Vector3.new(0, CONFIG.ARENA_WALL_H + 18, 0)
+	refletor.Anchored = true
+	refletor.CanCollide = false
+	refletor.CanQuery = false
+	refletor.Transparency = 1
+	refletor.Parent = model
+
+	local luzArena = Instance.new("PointLight")
+	luzArena.Brightness = 3
+	luzArena.Range = 120
+	luzArena.Color = Color3.fromRGB(255, 200, 140)
+	luzArena.Parent = refletor
+
 	-- Pontos de spawn (lados opostos, virados um pro outro)
 	local posA = center + Vector3.new(0, 5, half - 8)
 	local posB = center + Vector3.new(0, 5, -(half - 8))
 	arenaSpawnA = CFrame.lookAt(posA, Vector3.new(center.X, posA.Y, center.Z))
 	arenaSpawnB = CFrame.lookAt(posB, Vector3.new(center.X, posB.Y, center.Z))
 
-	print("[DUEL V2] ✓ Arena construída em " .. tostring(center))
+	print(
+		string.format(
+			"[DUEL V3] ✓ Arena %dx%d construída em %s, %d assentos",
+			half * 2,
+			half * 2,
+			tostring(center),
+			#assentos
+		)
+	)
 end
 
 buildArena()
@@ -153,6 +292,7 @@ buildArena()
 local pendingRequests = {} -- [id]     = { from, to, expires, bet }
 local activeDuels = {} -- [player] = session
 local duelCooldown = {} -- [player] = os.time()
+local devolverEspectadores -- (V3) definida abaixo, usada por clearDuel
 
 -- =====================================
 -- HELPERS
@@ -187,6 +327,69 @@ local function getHRP(plr)
 	return plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 end
 
+-- =====================================
+-- (V3) ESPECTADORES
+-- =====================================
+-- Assistir é uma ida e volta: o jogador é levado para um assento e
+-- precisa voltar exatamente para onde estava. Se o duelo acabar, se ele
+-- morrer, ou se sair do jogo, a volta tem que acontecer sozinha — senão
+-- ele fica preso a 2000 studs de altura, longe do mapa.
+
+local espectadores = {} -- [player] = { session = ..., volta = CFrame }
+
+local function contarEspectadores(session)
+	local total = 0
+	for _, dados in pairs(espectadores) do
+		if dados.session == session then
+			total += 1
+		end
+	end
+	return total
+end
+
+local function avisarPlateia(session)
+	if not session then
+		return
+	end
+	local total = contarEspectadores(session)
+	for _, plr in ipairs({ session.a, session.b }) do
+		if plr and plr.Parent then
+			pcall(function()
+				spectatorsRemote:FireClient(plr, total)
+			end)
+		end
+	end
+end
+
+local function tirarEspectador(player, teleportarDeVolta)
+	local dados = espectadores[player]
+	if not dados then
+		return false
+	end
+	espectadores[player] = nil
+
+	if teleportarDeVolta and dados.volta then
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			pcall(function()
+				hrp.CFrame = dados.volta
+			end)
+		end
+	end
+
+	avisarPlateia(dados.session)
+	return true
+end
+
+function devolverEspectadores(session)
+	for player, dados in pairs(espectadores) do
+		if dados.session == session then
+			tirarEspectador(player, true)
+		end
+	end
+end
+
 local function disconnectSession(session)
 	if session.conns then
 		for _, c in ipairs(session.conns) do
@@ -204,6 +407,7 @@ local function clearDuel(session)
 	activeDuels[session.b] = nil
 	session.active = false
 	session.aborted = true
+	devolverEspectadores(session)
 end
 
 -- Aposta: liquida (vencedor leva o pote) ou reembolsa (winner = nil)
@@ -533,6 +737,86 @@ local function requestDuel(player, targetName, betAmount)
 	return true, "Desafio enviado para " .. target.Name .. "!" .. betTxt
 end
 
+-- (V3) Entrar e sair da arquibancada.
+--
+-- Devolve (ok, mensagem). O cliente decide o que mostrar; aqui só
+-- valida e move. Recusa quem está duelando: o lutador ir para a
+-- arquibancada abandonaria a luta pela porta dos fundos.
+spectateRemote.OnServerInvoke = function(player, alvo)
+	if espectadores[player] then
+		tirarEspectador(player, true)
+		return true, "Você saiu da arquibancada."
+	end
+
+	if activeDuels[player] then
+		return false, "Você está em um duelo."
+	end
+
+	local session
+	if typeof(alvo) == "Instance" and alvo:IsA("Player") then
+		session = activeDuels[alvo]
+	else
+		-- Sem alvo: pega qualquer duelo em andamento.
+		for _, s in pairs(activeDuels) do
+			if s.active then
+				session = s
+				break
+			end
+		end
+	end
+
+	if not session or not session.active then
+		return false, "Nenhum duelo em andamento."
+	end
+
+	if contarEspectadores(session) >= CONFIG.MAX_ESPECTADORES then
+		return false, "Arquibancada lotada."
+	end
+
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return false, "Personagem não encontrado."
+	end
+
+	if #assentos == 0 then
+		return false, "Arquibancada indisponível."
+	end
+
+	-- Assento livre: percorre a lista e pula os já ocupados, para dois
+	-- espectadores não caírem um dentro do outro.
+	local ocupados = {}
+	for _, dados in pairs(espectadores) do
+		if dados.assento then
+			ocupados[dados.assento] = true
+		end
+	end
+
+	local escolhido
+	for i = 1, #assentos do
+		if not ocupados[i] then
+			escolhido = i
+			break
+		end
+	end
+	if not escolhido then
+		return false, "Arquibancada lotada."
+	end
+
+	espectadores[player] = {
+		session = session,
+		volta = hrp.CFrame,
+		assento = escolhido,
+	}
+
+	pcall(function()
+		hrp.CFrame = assentos[escolhido]
+	end)
+
+	avisarPlateia(session)
+	return true, "Assistindo ao duelo."
+end
+
 requestDuelRemote.OnServerInvoke = requestDuel
 
 respondToDuelRemote.OnServerEvent:Connect(function(player, accepted)
@@ -610,6 +894,12 @@ end)
 -- SAÍDA DE JOGADOR
 -- =====================================
 
+-- (V3) Quem sai do jogo assistindo não precisa de teleporte de volta,
+-- mas precisa sair da contagem, senão a arquibancada lota com fantasmas.
+Players.PlayerRemoving:Connect(function(player)
+	tirarEspectador(player, false)
+end)
+
 Players.PlayerRemoving:Connect(function(player)
 	for id, req in pairs(pendingRequests) do
 		if req.from == player or req.to == player then
@@ -634,9 +924,10 @@ end)
 
 print([[
 ╔════════════════════════════════════════════════════╗
-║   ⚔️ DUEL SYSTEM SERVER V2 — ARENA + APOSTA       ║
+║   ⚔️ DUEL SYSTEM SERVER V3 — ARENA + PLATEIA      ║
 ╠════════════════════════════════════════════════════╣
-║  * Arena dedicada com paredes (1x)                ║
+║  * Arena 110x110 com paredes (1x)                 ║
+║  * Arquibancada em 4 lados, até 24 espectadores   ║
 ║  * Só os dois se machucam (isolamento de dano)    ║
 ║  * Aposta de moedas (escrow + reembolso)          ║
 ║  * Só duela fora da zona segura | sair = derrota  ║

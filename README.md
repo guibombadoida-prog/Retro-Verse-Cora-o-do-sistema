@@ -60,6 +60,14 @@ com sufixo de versão — o nome do arquivo respeita isso:
 
 ## 🔄 Fluxo de atualização de script
 
+> **Script novo ou alterado nos quatro contêineres publicáveis não passa mais por
+> `central/`.** O workflow **Publicar somente código** leva o arquivo de `src/`
+> direto para a place de produção, criando o script se ele ainda não existir. O
+> ciclo abaixo — colar no Studio e rodar `promover.sh` — vale apenas para o que a
+> Open Cloud não alcança: instância 3D, `Model`, `Workspace`, `StarterGui` e a
+> place do chefão. Procedimento completo em
+> [`docs/ADICIONAR_SCRIPT.md`](docs/ADICIONAR_SCRIPT.md).
+
 **Duas regras, e é o que faz este repositório valer algo:**
 
 1. **`src/` espelha o que está rodando no Studio agora.** Não "o mais novo que
@@ -189,6 +197,8 @@ Cada passiva do `PassiveCatalog` já declara seu `vfx` (`BRILHO_METALICO`,
 - [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) — inventário completo dos scripts, versões e mapa de dependências `_G`
 - [`docs/Diretrizes_Sistema_Chefao_Boss.md`](docs/Diretrizes_Sistema_Chefao_Boss.md) — regras formais (V5) para criar chefões
 - [`docs/SEM_PC_ANDROID.md`](docs/SEM_PC_ANDROID.md) — editar no Android, validar no GitHub, executar headless e publicar somente código via Open Cloud
+- [`docs/ADICIONAR_SCRIPT.md`](docs/ADICIONAR_SCRIPT.md) — como colocar um script novo no jogo sem Studio, e como não duplicar um que já existe lá
+- [`AGENTS.md`](AGENTS.md) — instruções para Claude Code, Codex e demais agentes
 
 ### Fluxo sem Roblox Studio
 

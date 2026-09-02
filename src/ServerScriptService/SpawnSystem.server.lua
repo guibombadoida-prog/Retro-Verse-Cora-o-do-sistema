@@ -1,8 +1,22 @@
 -- ============================================
--- SPAWN SYSTEM V8 - DETECÇÃO ULTRA AVANÇADA
+-- SPAWN SYSTEM V9 - BASE DA ZONA SEGURA DETALHADA
 -- Coloque em ServerScriptService
 -- Nome: "SpawnSystem"
--- SUBSTITUI: SpawnSystem V7
+-- SUBSTITUI: SpawnSystem V8
+-- ============================================
+-- (V9) A base ganhou grade neon no piso, totens de canto que respiram,
+--      emblema central e placas de sinalização. Duas adições resolvem
+--      problema de verdade, não só visual:
+--
+--      • FAIXA DO LIMITE. A zona segura real inclui SAFE_ZONE.MARGIN e
+--        era invisível — o jogador só descobria que tinha saído quando
+--        levava dano. Agora a fronteira tem cor.
+--      • PLACAS. A base não se identificava como zona sem PvP.
+--
+--      Nada disso entra no cálculo da zona: getSafeZoneBounds() deriva
+--      os limites de LOBBY.SIZE e LOBBY.POSITION, que são constantes.
+--      As peças são CanCollide/CanTouch/CanQuery false, exceto a base
+--      dos totens, para não interferirem em raycast nem em detecção.
 -- ============================================
 -- (V8) ALTERAÇÕES — ULTRA AVANÇADO:
 -- • ZONA SEGURA por DETECÇÃO GEOMÉTRICA contínua: a tag
@@ -348,6 +362,217 @@ end
 -- (1 único SpawnLocation — igual ao V5)
 -- =====================================
 
+-- =====================================
+-- (V9) DETALHAMENTO DA BASE DA ZONA SEGURA
+-- =====================================
+-- Tudo aqui é decoração e sinalização: nenhuma peça entra no cálculo da
+-- zona segura. getSafeZoneBounds() deriva os limites de LOBBY.SIZE e
+-- LOBBY.POSITION, que são constantes — então detalhe novo não move a
+-- fronteira nem quebra isInSafeZoneRegion.
+--
+-- Duas coisas que este detalhamento resolve de verdade, além do visual:
+-- o jogador não tinha como ver ONDE a zona segura termina, e a base não
+-- se identificava como zona sem PvP.
+
+local DETALHE = {
+	LINHAS_GRADE = 7, -- linhas de grade por eixo
+	ESPESSURA = 0.4,
+	ALTURA_TOTEM = 16,
+	COR_NEON = Color3.fromRGB(0, 255, 200),
+	COR_AVISO = Color3.fromRGB(255, 180, 0),
+	COR_MAGENTA = Color3.fromRGB(255, 0, 130),
+}
+
+-- Um tween por alvo, guardado para poder ser cancelado. Mesma regra do
+-- resto do projeto: nada de laço criando tween a cada volta.
+local tweensLobby = {}
+
+local function pulsar(chave, objeto, duracao, propriedades)
+	local anterior = tweensLobby[chave]
+	if anterior then
+		anterior:Cancel()
+	end
+	local tween = TweenService:Create(
+		objeto,
+		TweenInfo.new(duracao, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		propriedades
+	)
+	tweensLobby[chave] = tween
+	tween:Play()
+	return tween
+end
+
+local function novaPeca(pai, nome, tamanho, posicao, cor, material)
+	local peca = Instance.new("Part")
+	peca.Name = nome
+	peca.Size = tamanho
+	peca.Position = posicao
+	peca.Anchored = true
+	peca.CanCollide = false
+	peca.CanTouch = false
+	peca.CanQuery = false
+	peca.Material = material or Enum.Material.Neon
+	peca.Color = cor
+	peca.TopSurface = Enum.SurfaceType.Smooth
+	peca.BottomSurface = Enum.SurfaceType.Smooth
+	peca.Parent = pai
+	return peca
+end
+
+local function createLobbyDetails(pai)
+	local topoPiso = LOBBY.POSITION.Y + LOBBY.FLOOR_HEIGHT / 2
+	local metadeX = LOBBY.SIZE.X / 2
+	local metadeZ = LOBBY.SIZE.Z / 2
+
+	-- 1. GRADE NEON NO PISO
+	-- Dá escala e direção ao chão: sem ela o piso é uma laje lisa e o
+	-- jogador não percebe o próprio deslocamento dentro da base.
+	local grade = Instance.new("Folder")
+	grade.Name = "GradeNeon"
+	grade.Parent = pai
+
+	for i = 1, DETALHE.LINHAS_GRADE do
+		local t = (i / (DETALHE.LINHAS_GRADE + 1)) * 2 - 1 -- -1 .. 1
+		novaPeca(
+			grade,
+			"LinhaX" .. i,
+			Vector3.new(LOBBY.SIZE.X, 0.1, DETALHE.ESPESSURA),
+			LOBBY.POSITION + Vector3.new(0, LOBBY.FLOOR_HEIGHT / 2 + 0.06, t * metadeZ),
+			DETALHE.COR_NEON
+		).Transparency = 0.35
+		novaPeca(
+			grade,
+			"LinhaZ" .. i,
+			Vector3.new(DETALHE.ESPESSURA, 0.1, LOBBY.SIZE.Z),
+			LOBBY.POSITION + Vector3.new(t * metadeX, LOBBY.FLOOR_HEIGHT / 2 + 0.06, 0),
+			DETALHE.COR_NEON
+		).Transparency = 0.35
+	end
+
+	-- 2. FAIXA DO LIMITE DA ZONA SEGURA
+	-- A fronteira real inclui SAFE_ZONE.MARGIN, e até agora era invisível:
+	-- o jogador só descobria que saiu quando levava dano. Agora ela tem cor.
+	local limite = Instance.new("Folder")
+	limite.Name = "LimiteZonaSegura"
+	limite.Parent = pai
+
+	local limX = metadeX + SAFE_ZONE.MARGIN
+	local limZ = metadeZ + SAFE_ZONE.MARGIN
+	local faixas = {
+		{ Vector3.new(limX * 2, 0.3, 1.2), Vector3.new(0, 0, limZ) },
+		{ Vector3.new(limX * 2, 0.3, 1.2), Vector3.new(0, 0, -limZ) },
+		{ Vector3.new(1.2, 0.3, limZ * 2), Vector3.new(limX, 0, 0) },
+		{ Vector3.new(1.2, 0.3, limZ * 2), Vector3.new(-limX, 0, 0) },
+	}
+	for i, def in ipairs(faixas) do
+		local faixa = novaPeca(
+			limite,
+			"Faixa" .. i,
+			def[1],
+			Vector3.new(LOBBY.POSITION.X, topoPiso + 0.15, LOBBY.POSITION.Z) + def[2],
+			DETALHE.COR_AVISO
+		)
+		faixa.Transparency = 0.25
+	end
+
+	local luzLimite = Instance.new("PointLight")
+	luzLimite.Brightness = 1
+	luzLimite.Range = 24
+	luzLimite.Color = DETALHE.COR_AVISO
+	luzLimite.Parent = limite:FindFirstChild("Faixa1")
+
+	-- 3. TOTENS DE CANTO
+	local totens = Instance.new("Folder")
+	totens.Name = "Totens"
+	totens.Parent = pai
+
+	local cantos = {
+		Vector3.new(metadeX - 6, 0, metadeZ - 6),
+		Vector3.new(-metadeX + 6, 0, metadeZ - 6),
+		Vector3.new(metadeX - 6, 0, -metadeZ + 6),
+		Vector3.new(-metadeX + 6, 0, -metadeZ + 6),
+	}
+	for i, canto in ipairs(cantos) do
+		local base = novaPeca(
+			totens,
+			"TotemBase" .. i,
+			Vector3.new(3, 1.2, 3),
+			LOBBY.POSITION + canto + Vector3.new(0, LOBBY.FLOOR_HEIGHT / 2 + 0.6, 0),
+			Color3.fromRGB(40, 40, 70),
+			Enum.Material.SmoothPlastic
+		)
+		base.CanCollide = true
+
+		local haste = novaPeca(
+			totens,
+			"TotemLuz" .. i,
+			Vector3.new(1, DETALHE.ALTURA_TOTEM, 1),
+			LOBBY.POSITION + canto + Vector3.new(0, topoPiso - LOBBY.POSITION.Y + DETALHE.ALTURA_TOTEM / 2 + 1.2, 0),
+			i % 2 == 0 and DETALHE.COR_MAGENTA or DETALHE.COR_NEON
+		)
+
+		local luz = Instance.new("PointLight")
+		luz.Brightness = 2.5
+		luz.Range = 26
+		luz.Color = haste.Color
+		luz.Parent = haste
+
+		-- Respiração lenta e dessincronizada entre os quatro.
+		pulsar("totem" .. i, haste, 1.6 + i * 0.25, { Transparency = 0.55 })
+	end
+
+	-- 4. EMBLEMA CENTRAL
+	local emblema = novaPeca(
+		pai,
+		"EmblemaZonaSegura",
+		Vector3.new(18, 0.2, 18),
+		LOBBY.POSITION + Vector3.new(0, topoPiso - LOBBY.POSITION.Y + 0.1, 0),
+		DETALHE.COR_NEON
+	)
+	emblema.Transparency = 0.5
+	pulsar("emblema", emblema, 2.4, { Transparency = 0.85 })
+
+	-- 5. PLACAS
+	-- Sinalização escrita: a base agora se apresenta como zona sem PvP,
+	-- em vez de o jogador ter que descobrir isso apanhando lá fora.
+	local placas = Instance.new("Folder")
+	placas.Name = "Placas"
+	placas.Parent = pai
+
+	local ladosPlaca = {
+		{ Vector3.new(0, 0, metadeZ - 2), 0 },
+		{ Vector3.new(0, 0, -metadeZ + 2), 180 },
+	}
+	for i, def in ipairs(ladosPlaca) do
+		local placa = novaPeca(
+			placas,
+			"Placa" .. i,
+			Vector3.new(40, 8, 0.5),
+			LOBBY.POSITION + def[1] + Vector3.new(0, topoPiso - LOBBY.POSITION.Y + 9, 0),
+			Color3.fromRGB(14, 12, 30),
+			Enum.Material.SmoothPlastic
+		)
+		placa.CFrame = CFrame.new(placa.Position) * CFrame.Angles(0, math.rad(def[2]), 0)
+
+		local borda = Instance.new("SurfaceGui")
+		borda.Face = Enum.NormalId.Back
+		borda.AlwaysOnTop = false
+		borda.CanvasSize = Vector2.new(800, 160)
+		borda.Parent = placa
+
+		local texto = Instance.new("TextLabel")
+		texto.Size = UDim2.fromScale(1, 1)
+		texto.BackgroundTransparency = 1
+		texto.Text = "ZONA SEGURA  •  SEM PVP"
+		texto.TextColor3 = DETALHE.COR_NEON
+		texto.TextScaled = true
+		texto.Font = Enum.Font.Arcade
+		texto.Parent = borda
+	end
+
+	print("[SPAWN V9] ✓ Base da zona segura detalhada")
+end
+
 local function createLobbyStructure()
 	print("[SPAWN V8] Criando estrutura do lobby...")
 
@@ -511,6 +736,9 @@ local function createLobbyStructure()
 		pLight.Color = Color3.fromRGB(255, 255, 255)
 		pLight.Parent = pillar
 	end
+
+	-- (V9) Detalhamento visual e sinalização da base
+	createLobbyDetails(lobbyModel)
 
 	-- Referência SafeZone para compatibilidade com outros sistemas
 	local safeZoneRef = Instance.new("Model")

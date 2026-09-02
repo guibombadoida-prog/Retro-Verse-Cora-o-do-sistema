@@ -1,7 +1,22 @@
 -- ============================================
--- TELA DE CARREGAMENTO RETRO ARCADE V2 (CLIENT)
+-- TELA DE CARREGAMENTO RETRO ARCADE V3 (CLIENT)
 -- ReplicatedFirst > LoadingScreen (LocalScript)
--- SUBSTITUI: LoadingScreen V1 ("HIPER AVANÇADA")
+-- Nome: "LoadingScreen"
+-- SUBSTITUI: LoadingScreen V2
+-- ============================================
+-- (V3) DUAS MUDANÇAS:
+--
+-- 1. ESPERA OS ASSETS DE VERDADE. O V2 saía quando game:IsLoaded()
+--    ficava true, mas isso só diz que o DataModel replicou — não que
+--    textura, som e malha terminaram de baixar. O jogador entrava e via
+--    o mapa cinza se montando na frente dele. Agora a tela chama
+--    ContentProvider:PreloadAsync sobre o conteúdo real do jogo, em
+--    lotes, e a barra passa a mostrar quanto já baixou de fato.
+--
+-- 2. BOTÃO DE PULAR. Preload honesto custa tempo, e em rede ruim pode
+--    custar muito. O botão aparece depois de alguns segundos e deixa o
+--    jogador entrar quando quiser, sem esperar o download acabar.
+--    Aparece por BOTÃO, nunca por tecla — regra de GUI do projeto.
 -- ============================================
 -- (V2) ALTERAÇÕES — ESTILO RETRO TOTAL:
 -- • Grid synthwave no horizonte (linhas + raios em perspectiva)
@@ -25,6 +40,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local ContentProvider = game:GetService("ContentProvider")
 
 print("[LOADING V2] script iniciado")
 
@@ -33,8 +49,16 @@ pcall(function()
 end)
 
 local MIN_DISPLAY = 4 -- segundos mínimos visíveis
-local MAX_WAIT = 30 -- limite anti-trava
+-- (V3) O V2 parava em 30s. Preload de verdade passa disso em rede de
+-- celular, e cortar no meio devolve o problema que este V3 resolve. O
+-- limite subiu, e quem não quer esperar tem o botão de pular.
+local MAX_WAIT = 120 -- limite anti-trava
 local SEGMENTOS = 20 -- blocos da barra pixelada
+
+-- (V3) Preload
+local SKIP_APOS = 5 -- segundos até o botão de pular aparecer
+local LOTE_ASSETS = 20 -- itens por chamada de PreloadAsync
+local MAX_ASSETS = 1200 -- teto de itens; mapa grande não trava a entrada
 
 -- LocalPlayer (sem travar)
 local player = Players.LocalPlayer
@@ -369,7 +393,46 @@ flicker.BorderSizePixel = 0
 flicker.ZIndex = 10
 flicker.Parent = fundo
 
-print("[LOADING V2] tela retro criada e exibida")
+-- ===================== (V3) BOTÃO DE PULAR =====================
+-- Fica escondido no começo: mostrar "pular" antes de a tela sequer
+-- desenhar convida a pular sempre, e aí o preload nunca serve para nada.
+-- Aparece depois de SKIP_APOS segundos.
+local btnPular = Instance.new("TextButton")
+btnPular.Name = "BotaoPular"
+btnPular.AnchorPoint = Vector2.new(0.5, 0.5)
+btnPular.Position = UDim2.fromScale(0.5, 0.93)
+btnPular.Size = UDim2.fromScale(0.22, 0.055)
+btnPular.BackgroundColor3 = COR_FUNDO2
+btnPular.BorderSizePixel = 0
+btnPular.Text = "PULAR  ▶"
+btnPular.TextColor3 = COR_AMARELO
+btnPular.TextScaled = true
+btnPular.Font = Enum.Font.Arcade
+btnPular.AutoButtonColor = false
+btnPular.Visible = false
+btnPular.BackgroundTransparency = 1
+btnPular.TextTransparency = 1
+btnPular.ZIndex = 50
+btnPular.Parent = fundo
+
+local btnBorda = Instance.new("UIStroke")
+btnBorda.Color = COR_AMARELO
+btnBorda.Thickness = 2
+btnBorda.Transparency = 1
+btnBorda.Parent = btnPular
+
+-- Mantém a forma do botão em qualquer proporção de tela.
+local btnRatio = Instance.new("UIAspectRatioConstraint")
+btnRatio.AspectRatio = 4
+btnRatio.DominantAxis = Enum.DominantAxis.Height
+btnRatio.Parent = btnPular
+
+local btnPad = Instance.new("UIPadding")
+btnPad.PaddingLeft = UDim.new(0, 6)
+btnPad.PaddingRight = UDim.new(0, 6)
+btnPad.Parent = btnPular
+
+print("[LOADING V3] tela retro criada e exibida")
 
 -- ===================== ESTADO =====================
 local rodando = true
@@ -377,9 +440,140 @@ local serverReady = false
 local serverFraction = 0 -- progresso reportado pelo servidor (0..1)
 local mostrado = 0 -- progresso exibido (suavizado)
 
+-- (V3) Preload e pulo
+local pulou = false -- jogador apertou PULAR
+local assetsProntos = false -- PreloadAsync terminou (ou não havia o que baixar)
+local assetsFeitos = 0
+local assetsTotal = 0
+
 local statusAlvo = "INICIALIZANDO SISTEMA..."
 local statusDigitado = ""
 local cursorLigado = true
+
+-- ===================== (V3) PULAR =====================
+btnPular.Activated:Connect(function()
+	if not rodando then
+		return
+	end
+	pulou = true
+	btnPular.Text = "ENTRANDO..."
+	btnPular.Active = false
+end)
+
+-- Revela o botão depois de SKIP_APOS. Um tween só, com alvo final —
+-- nada de laço criando tween a cada volta.
+task.delay(SKIP_APOS, function()
+	if not rodando then
+		return
+	end
+	btnPular.Visible = true
+	TweenService:Create(btnPular, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+		BackgroundTransparency = 0.35,
+		TextTransparency = 0,
+	}):Play()
+	TweenService:Create(btnBorda, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+		Transparency = 0,
+	}):Play()
+end)
+
+-- ===================== (V3) PRELOAD DOS ASSETS =====================
+-- game:IsLoaded() só garante que a árvore replicou. O que faz o jogador
+-- ver mapa cinza e ouvir silêncio é o conteúdo — textura, som, malha —
+-- que só baixa quando alguém pede. ContentProvider:PreloadAsync é esse
+-- pedido.
+task.spawn(function()
+	-- Só varre depois que a árvore existe, senão metade do jogo ainda
+	-- não chegou e a varredura sai curta.
+	if not game:IsLoaded() then
+		game.Loaded:Wait()
+	end
+	if not rodando then
+		return
+	end
+
+	local COM_CONTEUDO = {
+		Decal = true,
+		Texture = true,
+		ImageLabel = true,
+		ImageButton = true,
+		Sound = true,
+		MeshPart = true,
+		SpecialMesh = true,
+		ParticleEmitter = true,
+		Beam = true,
+		Trail = true,
+		Sky = true,
+		Animation = true,
+		Shirt = true,
+		Pants = true,
+		ShirtGraphic = true,
+	}
+
+	-- Ordem proposital: o que o jogador vê no primeiro segundo vem antes.
+	-- Se o teto de MAX_ASSETS cortar, corta no cenário distante, não na
+	-- interface nem nas ferramentas de combate.
+	local raizes = {
+		game:GetService("StarterGui"),
+		ReplicatedStorage,
+		game:GetService("StarterPack"),
+		game:GetService("Lighting"),
+		game:GetService("Workspace"),
+	}
+
+	local fila = {}
+	for _, raiz in raizes do
+		if #fila >= MAX_ASSETS then
+			break
+		end
+		local ok, filhos = pcall(function()
+			return raiz:GetDescendants()
+		end)
+		if ok then
+			for _, item in filhos do
+				if COM_CONTEUDO[item.ClassName] then
+					table.insert(fila, item)
+					if #fila >= MAX_ASSETS then
+						break
+					end
+				end
+			end
+		end
+	end
+
+	assetsTotal = #fila
+	if assetsTotal == 0 then
+		assetsProntos = true
+		return
+	end
+
+	statusAlvo = "BAIXANDO ASSETS..."
+
+	-- Em lotes: PreloadAsync de uma lista enorme só devolve o controle no
+	-- fim, e aí a barra ficaria parada até acabar. Lote pequeno mantém a
+	-- barra andando e o botão de pular respondendo.
+	local indice = 1
+	while indice <= assetsTotal and rodando and not pulou do
+		local lote = {}
+		for _ = 1, LOTE_ASSETS do
+			if indice > assetsTotal then
+				break
+			end
+			table.insert(lote, fila[indice])
+			indice += 1
+		end
+
+		-- Um asset podre (id removido, sem permissão) não pode derrubar a
+		-- entrada no jogo inteiro.
+		pcall(function()
+			ContentProvider:PreloadAsync(lote)
+		end)
+
+		assetsFeitos = math.min(indice - 1, assetsTotal)
+		task.wait()
+	end
+
+	assetsProntos = true
+end)
 
 -- ===================== ANIMAÇÕES (todas determinísticas) =====================
 -- Spinner girando (REUTILIZADO da V1)
@@ -492,9 +686,22 @@ heartbeatConn = RunService.Heartbeat:Connect(function()
 	end
 	local agora = os.clock()
 
-	-- Progresso suavizado (REUTILIZADO da V1): tempo + servidor
+	-- Progresso suavizado: tempo + servidor + (V3) download real
+	--
+	-- O tempo decorrido é só um piso, para a barra não ficar imóvel nos
+	-- primeiros instantes. Quem manda é o que já baixou de verdade: uma
+	-- barra que anda sozinha enquanto nada carrega é a mentira que este
+	-- V3 existe para acabar.
 	local porTempo = (agora - startTime) / MIN_DISPLAY
 	local alvo = math.max(serverFraction, math.min(porTempo, 0.95))
+
+	if assetsTotal > 0 then
+		local porAsset = assetsFeitos / assetsTotal
+		-- Enquanto baixa, a barra é o download. Só chega a 1.0 quando
+		-- termina de verdade.
+		alvo = assetsProntos and 1 or math.min(porAsset, 0.98)
+	end
+
 	mostrado = mostrado + (alvo - mostrado) * 0.08
 	local f = math.clamp(mostrado, 0, 1)
 
@@ -580,11 +787,13 @@ if not gameLoaded then
 	end)
 end
 
--- Espera: jogo carregado E servidor pronto E tempo mínimo — limitado por MAX_WAIT
+-- Espera: jogo carregado E servidor pronto E (V3) assets baixados E
+-- tempo mínimo — com três saídas de emergência: o botão de pular, o
+-- limite anti-trava, e o próprio fim do preload.
 while rodando do
 	local elapsed = os.clock() - startTime
-	local prontoTudo = gameLoaded and serverReady and elapsed >= MIN_DISPLAY
-	if prontoTudo or elapsed >= MAX_WAIT then
+	local prontoTudo = gameLoaded and serverReady and assetsProntos and elapsed >= MIN_DISPLAY
+	if prontoTudo or pulou or elapsed >= MAX_WAIT then
 		break
 	end
 	task.wait(0.1)
@@ -592,7 +801,12 @@ end
 
 -- ===================== FINAL =====================
 serverFraction = 1
-statusAlvo = "READY!"
+assetsProntos = true
+statusAlvo = pulou and "PULANDO..." or "READY!"
+
+-- O botão some junto com a tela; deixá-lo clicável durante o fade só
+-- geraria clique sem efeito.
+btnPular.Active = false
 task.wait(0.45)
 
 -- Pisca final dos blocos (2 piscadas fixas, estilo arcade)
@@ -609,7 +823,14 @@ end
 
 rodando = false
 
-print("[LOADING V2] sumindo")
+print(
+	string.format(
+		"[LOADING V3] sumindo — assets %d/%d, pulou=%s",
+		assetsFeitos,
+		assetsTotal,
+		tostring(pulou)
+	)
+)
 
 -- Desconectar conexões antes da limpeza (sem vazamentos)
 if heartbeatConn then
