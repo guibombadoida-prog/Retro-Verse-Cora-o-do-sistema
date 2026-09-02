@@ -11,6 +11,27 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 00:59 UTC — três sistemas novos + HUD do Codex
+
+`[PUBLICAÇÃO] 5 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 53, 5, 0, 0, 0]` — execução #13, a partir da `main`
+em `6fc10e0` (PRs #5 e #7 mesclados)
+
+- **`LoadingScreen` V3** — passa a esperar os assets baixarem de fato, via
+  `ContentProvider:PreloadAsync` em lotes, em vez de sair no `game:IsLoaded()`;
+  a barra mostra o download real; botão PULAR aparece após 5s.
+- **`SpawnSystem` V9** — base da zona segura detalhada, com faixa visível
+  marcando o limite (que antes só se descobria ao levar dano) e placas
+  identificando a área sem PvP.
+- **`DuelSystemServer` V3** — arena de 60x60 para 110x110 studs, arquibancada de
+  48 assentos em quatro lados, remotes `DuelSpectate` e `DuelSpectators`.
+  Nenhum cliente chama esses remotes ainda: a arquibancada existe e ninguém
+  consegue subir nela.
+- **`HealthDisplay` V8** (Codex, PR #7) — HUD responsivo por `UIScale`, reage a
+  `ViewportSize`, desconecta o Humanoid anterior, escuta `MaxHealth`. Substituiu
+  o V8 que eu havia publicado às 20:22.
+- **`EnergySystemServer`** (Codex, PR #7) — física de energia.
+
 ## 2026-09-01 20:22 UTC — HealthDisplay V8
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
