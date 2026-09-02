@@ -11,6 +11,22 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 05:24 UTC — HUD do HP no canto superior direito
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 57, 1, 0, 0, 0]` — execução #16, `main` em `d684d2e`
+
+**`HealthDisplay` V8.3** — o HUD estava ancorado no topo centralizado, e
+centralizado no topo é o meio da tela em celular deitado: ficava por cima do
+personagem e disputava espaço com o aviso de alvo, que também é centralizado.
+
+A âncora passou de `(0.5, 0)` para `(1, 0)` e a posição para a borda direita
+menos a margem. A âncora no canto importa por causa do `UIScale`: ele encolhe
+o HUD em direção ao ponto ancorado, então o canto superior direito fica parado
+em qualquer escala, em vez de a caixa deslizar conforme o aparelho. O recuo do
+topo continua somando o `GetGuiInset` para não entrar embaixo da barra do
+Roblox.
+
 ## 2026-09-02 05:18 UTC — HUD do HP no tamanho certo
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
