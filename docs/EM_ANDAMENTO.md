@@ -9,9 +9,10 @@ dos dois trabalhos teve de ser descartado.
 
 ## Regras
 
-**Publicou, avisou.** Toda publicação na produção vai para o chat e para
-[`PUBLICACOES.md`](PUBLICACOES.md). Detalhe em *Avisar sempre que o jogo for
-atualizado*, no [`AGENTS.md`](../AGENTS.md).
+**Código atualizado não é jogo atualizado.** Commit, push e PR são *"código
+atualizado"*. Só depois de um `publicar` terminar bem é que se diz *"jogo
+atualizado"* — e aí a publicação vai para o chat e para
+[`PUBLICACOES.md`](PUBLICACOES.md). Detalhe no [`AGENTS.md`](../AGENTS.md).
 
 Antes de editar um arquivo listado abaixo como ocupado, escolha outro ou
 combine com o dono. Ao terminar, tire a linha.
@@ -22,17 +23,31 @@ combine com o dono. Ao terminar, tire a linha.
 | --- | --- | --- | --- |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
-| `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | V3, preload + botão de pular |
-| `src/ServerScriptService/SpawnSystem.server.lua` | Claude | #5 | V9, base da zona segura |
-| `src/ServerScriptService/DuelSystemServer.server.lua` | Claude | #5 | V3, arena + arquibancada |
+| `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
+| `src/ServerScriptService/SpawnSystem.server.lua` | Claude | #5 | **PRONTO** — V9, base da zona segura |
+| `src/ServerScriptService/DuelSystemServer.server.lua` | Claude | #5 | **PRONTO** — V3, arena + arquibancada |
 | `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | Codex | #7 | V8, HUD responsivo |
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
 
+> ⚠️ Um handoff no PR #5 (2026-09-02) passou LoadingScreen, SpawnSystem e a
+> arena de duelo para o Codex. Os três **já estavam prontos e enviados** nos
+> commits `918ca91` e `1bf1a8f`, antes do handoff chegar. Refazer os três seria
+> a mesma colisão do HealthDisplay outra vez. O que sobrou desses sistemas está
+> na lista abaixo.
+
 ## Livre e com trabalho pendente
 
-Estes têm o mesmo problema de animação que o `HealthDisplay` tinha — tween
-criado sem cancelar o anterior — e ninguém está neles:
+**Botão de assistir duelo** — `DuelSystemServer` V3 já expõe os remotes
+`DuelSpectate` (RemoteFunction, entra e sai da arquibancada) e `DuelSpectators`
+(RemoteEvent, número de espectadores). Nenhum cliente chama nenhum dos dois: a
+arquibancada existe no jogo e ninguém consegue subir nela. O botão vai no
+`DuelMenuClient.client.lua`, que está livre.
+
+Os cinco menus abaixo
+
+têm o mesmo problema de animação que o `HealthDisplay` tinha — tween criado sem
+cancelar o anterior — e ninguém está neles:
 
 - `src/StarterPlayer/StarterPlayerScripts/UnifiedMenuClient.client.lua`
 - `src/StarterPlayer/StarterPlayerScripts/TeamMenuClient_V2.client.lua`

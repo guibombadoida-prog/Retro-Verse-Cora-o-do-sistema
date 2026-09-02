@@ -149,16 +149,32 @@ devem voltar por conveniência.
 - [ ] Conexões e constraints criadas têm ponto de saída
 - [ ] `tools/validar.sh` sem erro
 
-## Avisar sempre que o jogo for atualizado
+## Código atualizado não é jogo atualizado
+
+Duas coisas diferentes, e confundir as duas faz o dono achar que já pode entrar
+e testar quando nada mudou no jogo ainda.
+
+| O que aconteceu | Como dizer |
+| --- | --- |
+| Commit, push, PR aberto ou atualizado | **"código atualizado"** ou **"PR atualizado"** |
+| `publicar` terminou com sucesso na place | **"jogo atualizado"** |
+
+**Só diga "jogo atualizado" depois de uma publicação real terminar bem.** Rodar
+`verificar` não atualiza nada: ele lê e compara, e nunca chama `SavePlaceAsync`.
+Mesclar PR também não — o código entra na `main` e continua fora do jogo até
+alguém publicar.
+
+Quando entregar código sem publicar, **diga que o jogo ainda não mudou.** O
+silêncio aqui é lido como "já está no ar".
+
+### Ao publicar
 
 **Toda publicação bem-sucedida tem que ser avisada. Sem exceção.**
 
-Publicar muda o jogo para todos os jogadores agora. O dono precisa saber que
-mudou, e o outro agente precisa saber que a base de comparação do `verificar`
-mudou — quem rodar o workflow depois vai comparar o repositório contra um jogo
-que alguém alterou, e sem aviso não tem como saber disso.
-
-Ao terminar um `publicar` com sucesso, faça as duas coisas:
+Publicar muda o jogo para todos os jogadores agora. O dono precisa saber, e o
+outro agente também: a base de comparação do `verificar` mudou junto, e quem
+rodar o workflow depois vai comparar o repositório contra um jogo que alguém
+alterou.
 
 1. **Avise no chat**, com os números reais da linha `[PUBLICAÇÃO]` do log e o
    que cada script mudou no jogo. Não basta dizer "publicado".
