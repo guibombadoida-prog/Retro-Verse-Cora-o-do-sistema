@@ -11,6 +11,27 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 05:18 UTC — HUD do HP no tamanho certo
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 57, 1, 0, 0, 0]` — execução #15, `main` em `74322fe`
+
+**`HealthDisplay` V8.2** — a correção das 01:10 tirou o HUD do tamanho máximo
+mas parou em 26% a 30% da largura, e o dono pediu de novo que diminuísse.
+Agora fica entre 18.6% e 24.2%, do celular pequeno ao desktop:
+
+| aparelho | original | V8.1 | V8.2 |
+| --- | --- | --- | --- |
+| celular pequeno | 30% | 30.4% | 24.2% |
+| celular do print | 54% | 27.0% | 19.6% |
+| tablet | 26% | 26.2% | 22.3% |
+| desktop | 22% | 21.9% | 18.6% |
+
+As frações viraram constantes com nome no topo do arquivo — `FRACAO_LARGURA`,
+`FRACAO_ALTURA`, `ESCALA_MIN`, `ESCALA_MAX` — para o próximo ajuste ser de uma
+linha. `ESCALA_MIN` ficou em 0.46 porque abaixo disso o texto, que tem mínimo
+de 8 a 9 px por `UITextSizeConstraint`, para de caber.
+
 ## 2026-09-02 01:10 UTC — correções da publicação anterior + menu com busca
 
 `[PUBLICAÇÃO] 3 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
