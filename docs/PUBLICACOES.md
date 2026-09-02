@@ -11,6 +11,63 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 20:08 UTC — lore e Despertar com texto digitado
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 57, 1, 0, 0, 0]` — execução #24, `main` em `19b36a6`
+
+**`CharacterSystemClient` V12 → V13.** Os painéis de lore e de Despertar eram
+os dois últimos do arquivo sem animação nenhuma: nasciam prontos com
+`Parent = playerGui` e sumiam com `Parent = nil`.
+
+### O defeito que mais atrapalhava a leitura
+
+Os dois liam texto longo com `TextScaled`, que encolhe a fonte até a última
+palavra caber na caixa. Quanto **mais** história o personagem tivesse,
+**menor** ficava a letra — um personagem bem escrito era punido com texto
+ilegível no celular. Agora a fonte tem tamanho fixo derivado do `uiScale`,
+com `UITextSizeConstraint`, dentro de `ScrollingFrame` com
+`AutomaticCanvasSize`. Texto grande rola em vez de encolher.
+
+### Animação de texto
+
+`maquinaDeEscrever()` revela a história letra a letra por
+`MaxVisibleGraphemes`. Duas decisões que valem registro:
+
+- **Não reatribui `Text` a cada quadro.** Cortar a string e reescrever
+  recalcula a quebra de linha em toda letra, e com `TextWrapped` a última
+  palavra fica pulando de linha enquanto digita. `MaxVisibleGraphemes` esconde
+  o final sem tocar em `Text`, então a quebra é a final desde o primeiro
+  quadro e nada se move na tela.
+- **Conta grafema, não byte.** "ç" e "ã" ocupam dois bytes e emoji ocupa mais;
+  cortar por byte mostraria meio caractere.
+
+O atraso inicial vive dentro da própria máquina, no `Heartbeat`, em vez de um
+`task.wait` antes de chamar — assim morre junto do contexto se o jogador
+fechar o painel antes de a digitação começar. Tocar no texto revela tudo.
+
+### Painel de lore
+
+Ganhou o retrato do personagem — ler a história de alguém sem ver quem é era
+o pior detalhe daquela tela —, selo de raridade na cor da raridade com brilho
+pulsante nas que têm `glow`, e a lore num corpo rolável e digitado.
+
+### Aba de Despertar
+
+Seções entram escalonadas pelo `DelayTime` do `TweenInfo`, a lista de
+habilidades aparece linha a linha, e a moldura respira em magenta enquanto o
+Despertar está trancado, parando quando está liberado — o estado vira
+movimento, dá para saber de longe sem ler o selo. O retrato entra com
+transparência 0.45 quando bloqueado e 0 quando liberado. A `CanvasSize` da
+lista era calculada à mão com `#tools * 26 + 6`, número válido só para a
+altura de linha daquele momento; virou `AutomaticCanvasSize`.
+
+Os dois passam a dividir `criarModal()`: fundo em fade, mola amortecida na
+entrada e na saída, fechar por botão, por toque no fundo e por ESC.
+
+O arquivo continua com **um único** `TweenService:Create`, dentro do
+gerenciador, e agora com 11 `UIAspectRatioConstraint`.
+
 ## 2026-09-02 19:54 UTC — animação nos dois menus
 
 `[PUBLICAÇÃO] 2 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
