@@ -11,6 +11,43 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-02 05:32 UTC — HUD do HP de volta à posição original
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 57, 1, 0, 0, 0]` — execução #18, `main` em `036f41c`
+
+**`HealthDisplay` V8.5** — o dono pediu a posição exatamente como estava antes
+das alterações, e é isso que esta publicação faz: desfaz as duas mudanças de
+posição das 05:24 e das 05:28 e deixa o HUD onde o V8.2 o tinha.
+
+```lua
+HudRoot.AnchorPoint = Vector2.new(0.5, 0)
+HudRoot.Position = UDim2.new(0.5, 0, 0, getTopInset() + 8)
+```
+
+O original foi lido do git (`74322fe`, o V8.2, e `dd9ef69`, o V8 do Codex),
+não da memória — as duas revisões têm as quatro propriedades do `HudRoot`
+byte a byte iguais a esta. A constante `MARGEM_TOPO` saiu junto; o recuo
+voltou a ser o literal `+ 8` sobre o `GetGuiInset`.
+
+**O tamanho continua corrigido.** Só a posição voltou. O HUD segue entre 18.6%
+e 24.2% da largura (era 54% no print do dono) e o `StatusIndicator` continua no
+`HeaderBar`, fora da barra de vida.
+
+## 2026-09-02 05:28 UTC — HUD do HP no topo colado
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 58, 57, 1, 0, 0, 0]` — execução #17, `main` em `813c17f`
+
+**`HealthDisplay` V8.4** — o canto superior direito das 05:24 não agradou; o
+pedido virou "centralizado, o mais para cima possível". A âncora voltou para
+`(0.5, 0)` e o recuo do topo caiu de 8 px para `MARGEM_TOPO = 2`, ainda somando
+o `GetGuiInset` para não entrar embaixo da barra do Roblox.
+
+> Desfeito pelo V8.5 quatro minutos depois. Fica registrado porque chegou a
+> rodar no jogo: quem comparar o place com o repositório neste intervalo vai
+> encontrar esta versão.
+
 ## 2026-09-02 05:24 UTC — HUD do HP no canto superior direito
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
