@@ -2102,7 +2102,11 @@ local function createLorePopup(characterName)
 	entrarEmSequencia(context, selo, "selo", 1, { TextTransparency = 0 })
 
 	if infoRaridade and infoRaridade.glow then
+		-- (V14.1) Border, não Contextual. O comentário acima promete um
+		-- brilho em volta do selo, mas sem declarar o modo o traço ia nas
+		-- letras — franja colorida no texto escuro, não glow na caixa.
 		local seloBrilho = Instance.new("UIStroke")
+		seloBrilho.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		seloBrilho.Color = corRaridade
 		seloBrilho.Thickness = 2
 		seloBrilho.Parent = selo
@@ -3671,9 +3675,17 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	categoryBadge.Parent = card
 	limitarTexto(categoryBadge, 8, 16)
 
+	-- (V14.1) ApplyStrokeMode EXPLÍCITO. O padrão é Contextual, e em
+	-- TextLabel isso põe o traço nas LETRAS, não na borda da caixa.
+	-- Como a cor do traço aqui é a mesma do texto, cada letra ganhava um
+	-- halo sólido de 2 px da própria cor: o dobro de massa colorida no
+	-- mesmo glifo, que é o que deixava o card saturado.
+	-- O selo tem fundo próprio, então o contorno é da CAIXA.
 	local categoryStroke = Instance.new("UIStroke")
+	categoryStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	categoryStroke.Color = categoryMeta.color
-	categoryStroke.Thickness = 2
+	categoryStroke.Thickness = 1
+	categoryStroke.Transparency = 0.35
 	categoryStroke.Parent = categoryBadge
 
 	local rarityBadge = Instance.new("TextLabel")
@@ -3696,9 +3708,12 @@ createCharacterCard = function(charData, parentFrame, cardConfig, isInventoryMod
 	rarityAspect.DominantAxis = Enum.DominantAxis.Height
 	rarityAspect.Parent = rarityBadge
 
+	-- Mesmo caso: texto branco com traço branco de 2 px virava borrão.
 	local rarityStroke = Instance.new("UIStroke")
+	rarityStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	rarityStroke.Color = COLORS.white
-	rarityStroke.Thickness = 2
+	rarityStroke.Thickness = 1
+	rarityStroke.Transparency = 0.4
 	rarityStroke.Parent = rarityBadge
 
 	-- Descrição
@@ -4312,9 +4327,13 @@ createSystem = function()
 	coinsLabel.Parent = menuHeader
 	limitarTexto(coinsLabel, 10, 21)
 
+	-- Mesmo defeito do card, no contador de moedas do cabeçalho: amarelo
+	-- sobre amarelo. Fica junto porque aparece na mesma tela.
 	local coinsStroke = Instance.new("UIStroke")
+	coinsStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	coinsStroke.Color = COLORS.yellow
-	coinsStroke.Thickness = 2
+	coinsStroke.Thickness = 1
+	coinsStroke.Transparency = 0.35
 	coinsStroke.Parent = coinsLabel
 
 	local menuClose = Instance.new("TextButton")
