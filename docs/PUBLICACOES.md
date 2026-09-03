@@ -11,6 +11,53 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-03 15:24 UTC — traço do texto do card
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 60, 59, 1, 0, 0, 0]` — execução #34, `main` em `95bc36f`
+
+**`CharacterSystemClient` V14 → V14.1.** O dono viu no jogo: o texto do card
+de personagem estava saturado.
+
+### A causa
+
+`UIStroke.ApplyStrokeMode` tem padrão `Contextual`, e em **TextLabel** isso
+aplica o traço nas **letras**, não na borda da caixa. Três selos criavam o
+stroke sem declarar o modo — e nos três a cor do traço era **idêntica à cor
+do texto**, com 2 px e sem transparência:
+
+| elemento | texto | traço |
+| --- | --- | --- |
+| `categoryBadge` | `categoryMeta.color` | `categoryMeta.color` |
+| `rarityBadge` | branco | branco |
+| `coinsLabel` | amarelo | amarelo |
+
+Cada letra ganhava um halo sólido de 2 px da própria cor, o que dobra a massa
+colorida dentro do mesmo glifo — é exatamente isso que se lê como saturado.
+
+O que denuncia a intenção original: todo o resto do card usa stroke como
+borda de moldura (`card`, `imageContainer`), e os dois selos têm fundo
+próprio. O contorno sempre foi para ser da **caixa**.
+
+### A correção
+
+`ApplyStrokeMode.Border` explícito nos três, espessura de 2 para 1 e
+transparência entre 0.35 e 0.4, para o contorno acompanhar a paleta do card
+em vez de competir com o texto.
+
+Junto foi um defeito do V13: o brilho do selo de raridade no painel de
+detalhe tinha o mesmo problema. O comentário promete "brilho pulsante" em
+volta do selo, mas sem declarar o modo o tween pulsava uma franja colorida
+nas letras escuras. Também virou `Border`.
+
+Auditados os 14 `UIStroke` do arquivo: os **4 que ficam em TextLabel** agora
+declaram `Border`; os 10 restantes estão em `Frame`, onde `Contextual` já
+significa borda, e não foram tocados.
+
+> Armadilha para o próximo: `UIStroke` num `TextLabel` contorna o **glifo**,
+> não a caixa, a menos que `ApplyStrokeMode` seja declarado. Nenhuma
+> validação do repositório pega isso.
+
 ## 2026-09-03 02:27 UTC — detalhes de personagem V14 publicados
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
