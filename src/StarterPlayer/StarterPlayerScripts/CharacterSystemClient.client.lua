@@ -1,8 +1,19 @@
 -- ============================================
--- CHARACTER SYSTEM CLIENT V13 — DETALHES, LORE E DESPERTAR ANIMADOS
+-- CHARACTER SYSTEM CLIENT V14 — CINCO ABAS DE DETALHES VISÍVEIS
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "CharacterSystemClient"
--- SUBSTITUI: CharacterSystemClient V12
+-- SUBSTITUI: CharacterSystemClient V13
+-- ============================================
+-- (V14) Corrige o conteúdo invisível do modal publicado na V13. O ScreenGui
+-- usava ZIndexBehavior.Global: painel e rolagem estavam nas camadas 10/12,
+-- mas as seções internas continuavam na camada padrão 1 e eram desenhadas
+-- atrás do painel. O modal agora usa Sibling, preservando a hierarquia real.
+--
+-- O conteúdo foi separado em cinco abas: Informações, Lore, Habilidades,
+-- Atributos e Despertar. Habilidades lê as Tools realmente replicadas e os
+-- metadados que elas publicam; Atributos lê HP, arquétipo, bônus e penalidades
+-- do CharacterStatsServer. Um UIGridLayout distribui as cinco abas sem
+-- posições manuais e usa rótulos curtos no celular em retrato.
 -- ============================================
 -- (V13) Informações, Lore e Despertar agora dividem um modal único,
 -- responsivo e navegável por abas. A entrada usa mola amortecida, cada
@@ -390,6 +401,7 @@ local COLORS = {
 	cyan = Color3.fromRGB(0, 225, 255),
 	blue = Color3.fromRGB(0, 125, 220),
 	yellow = Color3.fromRGB(255, 215, 0),
+	orange = Color3.fromRGB(255, 145, 30),
 	green = Color3.fromRGB(40, 230, 115),
 	red = Color3.fromRGB(225, 55, 70),
 	magenta = Color3.fromRGB(255, 45, 225),
@@ -2151,21 +2163,24 @@ local function createLorePopup(characterName)
 end
 
 -- =====================================
--- (V13) DETALHES UNIFICADOS E ANIMADOS
+-- (V14) DETALHES UNIFICADOS E ANIMADOS
 -- =====================================
 -- As implementações V12 acima ficam como histórico da evolução do arquivo.
--- A partir daqui, os três botões abrem o MESMO modal com abas. Assim Lore,
--- Informações e Despertar compartilham tamanho, mola, navegação, limpeza de
--- conexões e linguagem visual.
+-- A partir daqui, os pontos de entrada abrem o MESMO modal com cinco abas.
+-- Informações, Lore, Habilidades, Atributos e Despertar compartilham tamanho,
+-- mola, navegação, limpeza de conexões e linguagem visual.
 
 local activeDetailsGui = nil
 local activeDetailsContext = nil
 local activeDetailsRenderContext = nil
+local activeDetailsOpenGeneration = 0
 
 local DETAIL_TABS = {
-	{ key = "INFO", icon = "⚔️", label = "INFORMAÇÕES", color = COLORS.cyan },
-	{ key = "LORE", icon = "📖", label = "LORE", color = COLORS.yellow },
-	{ key = "AWAKENING", icon = "⚡", label = "DESPERTAR", color = COLORS.magenta },
+	{ key = "INFO", icon = "◈", label = "INFORMAÇÕES", shortLabel = "INFO", color = COLORS.cyan },
+	{ key = "LORE", icon = "📖", label = "LORE", shortLabel = "LORE", color = COLORS.yellow },
+	{ key = "ABILITIES", icon = "⚔", label = "HABILIDADES", shortLabel = "HABIL.", color = COLORS.green },
+	{ key = "STATS", icon = "▥", label = "ATRIBUTOS", shortLabel = "ATRIB.", color = COLORS.orange },
+	{ key = "AWAKENING", icon = "⚡", label = "DESPERTAR", shortLabel = "DESP.", color = COLORS.magenta },
 }
 
 local DETAIL_STAT_LABELS = {
@@ -2207,6 +2222,103 @@ local DETAIL_FLAT_STATS = {
 	JumpFlat = true,
 	Shield = true,
 }
+
+local DETAIL_ABILITY_FIELDS = {
+	{ keys = { "Damage", "BaseDamage", "Dano" }, label = "DANO" },
+	{ keys = { "Cooldown", "Recarga" }, label = "RECARGA", seconds = true },
+	{ keys = { "EnergyCost", "Energy", "CustoEnergia" }, label = "ENERGIA" },
+	{ keys = { "StaminaCost", "Stamina", "CustoStamina" }, label = "STAMINA" },
+	{ keys = { "Range", "Alcance" }, label = "ALCANCE" },
+	{ keys = { "Duration", "Duracao" }, label = "DURAÇÃO", seconds = true },
+	{ keys = { "Keybind", "Key", "Tecla" }, label = "TECLA" },
+}
+
+local function readAbilityValue(tool, keys)
+	local attributes = tool:GetAttributes()
+	for _, key in ipairs(keys) do
+		local value = attributes[key]
+		if value ~= nil then
+			return value
+		end
+		local child = tool:FindFirstChild(key)
+		if child
+			and (
+				child:IsA("StringValue")
+				or child:IsA("NumberValue")
+				or child:IsA("IntValue")
+				or child:IsA("BoolValue")
+			)
+		then
+			return child.Value
+		end
+	end
+	return nil
+end
+
+local function formatAbilityValue(value, seconds)
+	if type(value) == "number" then
+		local rounded = math.floor(value)
+		local shown = math.abs(value - rounded) < 0.001 and tostring(rounded)
+			or string.format("%.1f", value)
+		return seconds and (shown .. "s") or shown
+	elseif type(value) == "boolean" then
+		return value and "SIM" or "NÃO"
+	elseif type(value) == "string" and value ~= "" then
+		return value
+	end
+	return nil
+end
+
+local function getAbilityDetails(tool)
+	local description = tool.ToolTip ~= "" and tool.ToolTip or nil
+	if not description then
+		local value = readAbilityValue(tool, { "Description", "Descricao" })
+		description = type(value) == "string" and value ~= "" and value or nil
+	end
+
+	local metrics = {}
+	for _, field in ipairs(DETAIL_ABILITY_FIELDS) do
+		local shown = formatAbilityValue(readAbilityValue(tool, field.keys), field.seconds)
+		if shown then
+			table.insert(metrics, field.label .. ": " .. shown)
+		end
+	end
+
+	return description, metrics
+end
+
+local function collectCharacterAbilityDetails(characterName)
+	local normalAbilities = {}
+	local awakenedAbilities = {}
+	local charactersFolder = ReplicatedStorage:FindFirstChild("Characters")
+	local characterFolder = charactersFolder and charactersFolder:FindFirstChild(characterName)
+	if not characterFolder then
+		return normalAbilities, awakenedAbilities
+	end
+
+	local function appendTools(folder, target)
+		if not folder then
+			return
+		end
+		for _, item in ipairs(folder:GetChildren()) do
+			if item:IsA("Tool") then
+				local description, metrics = getAbilityDetails(item)
+				table.insert(target, {
+					name = item.Name,
+					description = description,
+					metrics = metrics,
+				})
+			end
+		end
+		table.sort(target, function(a, b)
+			return string.lower(a.name) < string.lower(b.name)
+		end)
+	end
+
+	appendTools(characterFolder, normalAbilities)
+	appendTools(characterFolder:FindFirstChild("AwakenedForm"), awakenedAbilities)
+	return normalAbilities, awakenedAbilities
+end
 
 local function getDetailLayout()
 	local viewport = getViewportSize()
@@ -2406,15 +2518,54 @@ local function createDetailRow(parent, context, order, icon, text, color)
 	return row
 end
 
+local function createAbilityCard(parent, context, order, ability, awakened)
+	local accent = awakened and COLORS.magenta or COLORS.green
+	local icon = awakened and "⚡" or "⚔"
+	local detailParts = {}
+	if ability.description then
+		table.insert(detailParts, ability.description)
+	end
+	if #ability.metrics > 0 then
+		table.insert(detailParts, table.concat(ability.metrics, "  •  "))
+	end
+	local details = table.concat(detailParts, "\n")
+	if details == "" then
+		details = "Tool carregada. Esta habilidade não publica descrição ou métricas adicionais."
+	end
+
+	local section = createDetailSection(
+		parent,
+		context,
+		order,
+		#detailParts > 0 and 0.17 or 0.12,
+		accent,
+		icon .. " " .. ability.name:upper()
+	)
+	local detailLabel = Instance.new("TextLabel")
+	detailLabel.Position = UDim2.fromScale(0.03, 0.27)
+	detailLabel.Size = UDim2.fromScale(0.94, 0.65)
+	detailLabel.BackgroundTransparency = 1
+	detailLabel.Text = details
+	detailLabel.TextColor3 = awakened and COLORS.magenta:Lerp(COLORS.white, 0.42) or COLORS.ink
+	detailLabel.TextScaled = true
+	detailLabel.TextWrapped = true
+	detailLabel.Font = Enum.Font.Code
+	detailLabel.TextXAlignment = Enum.TextXAlignment.Left
+	detailLabel.TextYAlignment = Enum.TextYAlignment.Top
+	detailLabel.Parent = section
+	limitarTexto(detailLabel, 9, 17)
+	return section
+end
+
 local function loadDetailStats(characterName)
 	if not getCharacterStatsInfo then
-		return nil, {}, "EQUILIBRADO"
+		return nil, {}, "INDISPONÍVEL"
 	end
 	local ok, statsInfo = pcall(function()
 		return getCharacterStatsInfo:InvokeServer(characterName)
 	end)
 	if not ok or type(statsInfo) ~= "table" then
-		return nil, {}, "EQUILIBRADO"
+		return nil, {}, "INDISPONÍVEL"
 	end
 
 	local archetypeName = "EQUILIBRADO"
@@ -2448,12 +2599,17 @@ local function loadDetailStats(characterName)
 end
 
 local function createCharacterDetailsPopup(characterName, initialTab, suppliedAwakeningInfo)
+	activeDetailsOpenGeneration += 1
+	local openGeneration = activeDetailsOpenGeneration
 	playSound(sounds.info)
 
 	if activeDetailsGui then
 		limparContexto(activeDetailsRenderContext)
 		limparContexto(activeDetailsContext)
 		activeDetailsGui.Parent = nil
+		activeDetailsGui = nil
+		activeDetailsContext = nil
+		activeDetailsRenderContext = nil
 	end
 
 	local def = getCatalogDef(characterName) or {
@@ -2464,10 +2620,15 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 		rarity = "ROBLOXIANOS",
 		category = "Especial",
 	}
-	local toolsNormais, toolsDespertas = collectCharacterTools(characterName)
+	local _, toolsDespertas = collectCharacterTools(characterName)
+	local normalAbilities, awakenedAbilities = collectCharacterAbilityDetails(characterName)
 	local statsInfo, statLines, archetypeName = loadDetailStats(characterName)
+	if openGeneration ~= activeDetailsOpenGeneration then
+		return
+	end
 	local awakeningInfo = suppliedAwakeningInfo
 	local awakeningLoaded = suppliedAwakeningInfo ~= nil
+	local awakeningLoading = false
 	local selectedTab = initialTab or "INFO"
 	local closing = false
 
@@ -2476,11 +2637,11 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 	local context = activeDetailsContext
 
 	local infoGui = Instance.new("ScreenGui")
-	infoGui.Name = "CharacterDetailsV13"
+	infoGui.Name = "CharacterDetailsV14"
 	infoGui.DisplayOrder = 160
 	infoGui.ResetOnSpawn = false
 	infoGui.IgnoreGuiInset = true
-	infoGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	infoGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	infoGui.Parent = playerGui
 	activeDetailsGui = infoGui
 
@@ -2613,6 +2774,14 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 	tabsFrame.BorderSizePixel = 0
 	tabsFrame.ZIndex = 12
 	tabsFrame.Parent = popup
+	local tabsGrid = Instance.new("UIGridLayout")
+	tabsGrid.CellPadding = UDim2.fromScale(0, 0)
+	tabsGrid.CellSize = UDim2.fromScale(1 / #DETAIL_TABS, 1)
+	tabsGrid.FillDirection = Enum.FillDirection.Horizontal
+	tabsGrid.FillDirectionMaxCells = #DETAIL_TABS
+	tabsGrid.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	tabsGrid.SortOrder = Enum.SortOrder.LayoutOrder
+	tabsGrid.Parent = tabsFrame
 
 	local content = Instance.new("ScrollingFrame")
 	content.Name = "TabContent"
@@ -2642,6 +2811,7 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 
 	local tabButtons = {}
 	local renderSelectedTab
+	local detailRenderGeneration = 0
 
 	local function closeDetails()
 		if closing then
@@ -2711,62 +2881,133 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 			(def.description ~= nil and def.description ~= "" and def.description)
 				or "Sem descrição cadastrada."
 		)
-		order += 1
+	end
 
+	local function renderAbilities()
+		local order = 1
+		local total = #normalAbilities + #awakenedAbilities
 		createDetailRow(
 			content,
 			activeDetailsRenderContext,
 			order,
-			"🛠️",
-			string.format("FERRAMENTAS CARREGADAS (%d)", #toolsNormais + #toolsDespertas),
-			COLORS.cyan
+			"⚔",
+			string.format("HABILIDADES CARREGADAS (%d)", total),
+			COLORS.green
 		)
 		order += 1
 
-		if #toolsNormais + #toolsDespertas == 0 then
-			createDetailRow(content, activeDetailsRenderContext, order, "—", "Nenhuma ferramenta carregada.", COLORS.muted)
+		if total == 0 then
+			createTypedSection(
+				content,
+				activeDetailsRenderContext,
+				order,
+				0.28,
+				COLORS.muted,
+				"◇ NENHUMA HABILIDADE REPLICADA",
+				"Nenhuma Tool deste personagem foi carregada em ReplicatedStorage."
+			)
+			return
+		end
+
+		if #normalAbilities > 0 then
+			createDetailRow(content, activeDetailsRenderContext, order, "◈", "FORMA NORMAL", COLORS.green)
 			order += 1
-		else
-			for _, toolName in ipairs(toolsNormais) do
-				createDetailRow(content, activeDetailsRenderContext, order, "⚔️", toolName, COLORS.ink)
-				order += 1
-			end
-			for _, toolName in ipairs(toolsDespertas) do
-				createDetailRow(
-					content,
-					activeDetailsRenderContext,
-					order,
-					"⚡",
-					toolName .. "  [DESPERTA]",
-					COLORS.magenta
-				)
+			for _, ability in ipairs(normalAbilities) do
+				createAbilityCard(content, activeDetailsRenderContext, order, ability, false)
 				order += 1
 			end
 		end
 
-		if #statLines > 0 then
-			createDetailRow(content, activeDetailsRenderContext, order, "📊", "ATRIBUTOS", COLORS.yellow)
+		if #awakenedAbilities > 0 then
+			createDetailRow(content, activeDetailsRenderContext, order, "⚡", "FORMA DESPERTA", COLORS.magenta)
 			order += 1
-			for _, line in ipairs(statLines) do
-				createDetailRow(
-					content,
-					activeDetailsRenderContext,
-					order,
-					line.positive and "＋" or "－",
-					line.text,
-					line.positive and COLORS.green or COLORS.red
-				)
+			for _, ability in ipairs(awakenedAbilities) do
+				createAbilityCard(content, activeDetailsRenderContext, order, ability, true)
 				order += 1
 			end
-		elseif statsInfo == nil then
+		end
+	end
+
+	local function renderStats()
+		local order = 1
+		createDetailRow(
+			content,
+			activeDetailsRenderContext,
+			order,
+			"❤️",
+			"VIDA BASE: " .. tostring(def.health or 100),
+			COLORS.green
+		)
+		order += 1
+		createDetailRow(
+			content,
+			activeDetailsRenderContext,
+			order,
+			"⚙",
+			"ARQUÉTIPO: " .. archetypeName,
+			statsInfo and COLORS.orange or COLORS.muted
+		)
+		order += 1
+
+		if statsInfo == nil then
+			createTypedSection(
+				content,
+				activeDetailsRenderContext,
+				order,
+				0.3,
+				COLORS.muted,
+				"◇ SERVIÇO DE ATRIBUTOS INDISPONÍVEL",
+				"O servidor não retornou os atributos deste personagem. Tente abrir esta aba novamente."
+			)
+			return
+		end
+
+		local archetypeDescription = nil
+		if type(statsInfo.archetypes) == "table" then
+			for _, archetype in ipairs(statsInfo.archetypes) do
+				if archetype.id == statsInfo.archetype then
+					archetypeDescription = archetype.desc
+					break
+				end
+			end
+		end
+		if archetypeDescription and archetypeDescription ~= "" then
 			createDetailRow(
 				content,
 				activeDetailsRenderContext,
 				order,
-				"◇",
-				"Atributos especiais não disponíveis para este personagem.",
-				COLORS.muted
+				"▣",
+				archetypeDescription,
+				COLORS.orange
 			)
+			order += 1
+		end
+
+		if #statLines == 0 then
+			createTypedSection(
+				content,
+				activeDetailsRenderContext,
+				order,
+				0.28,
+				COLORS.cyan,
+				"▥ SEM MODIFICADORES EXTRAS",
+				"Este personagem usa os valores padrão e não possui bônus ou penalidades adicionais."
+			)
+			return
+		end
+
+		createDetailRow(content, activeDetailsRenderContext, order, "▥", "BÔNUS E PENALIDADES", COLORS.yellow)
+		order += 1
+		for _, line in ipairs(statLines) do
+			createDetailRow(
+				content,
+				activeDetailsRenderContext,
+				order,
+				line.positive and "＋" or "－",
+				line.text,
+				line.positive and COLORS.green or COLORS.red
+			)
+			order += 1
 		end
 	end
 
@@ -2810,20 +3051,54 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 		if awakeningLoaded then
 			return awakeningInfo
 		end
-		awakeningLoaded = true
+		if awakeningLoading then
+			return nil
+		end
+		awakeningLoading = true
 		if not checkAwakeningRemote then
 			awakeningInfo = { exists = false }
+			awakeningLoading = false
+			awakeningLoaded = true
 			return awakeningInfo
 		end
 		local ok, result = pcall(function()
 			return checkAwakeningRemote:InvokeServer(characterName)
 		end)
 		awakeningInfo = ok and type(result) == "table" and result or { exists = false }
+		awakeningLoading = false
+		awakeningLoaded = true
 		return awakeningInfo
 	end
 
 	local function renderAwakening()
+		local requestedContext = activeDetailsRenderContext
+		local requestedGeneration = detailRenderGeneration
 		local info = getAwakeningInfo()
+		if requestedContext ~= activeDetailsRenderContext
+			or requestedGeneration ~= detailRenderGeneration
+			or selectedTab ~= "AWAKENING"
+		then
+			if awakeningLoaded and selectedTab == "AWAKENING" and context.alive then
+				task.defer(function()
+					if context.alive and selectedTab == "AWAKENING" then
+						renderSelectedTab("AWAKENING")
+					end
+				end)
+			end
+			return
+		end
+		if not info and awakeningLoading then
+			createTypedSection(
+				content,
+				activeDetailsRenderContext,
+				1,
+				0.3,
+				COLORS.magenta,
+				"⚡ CARREGANDO DESPERTAR",
+				"Consultando requisitos, forma e habilidades no servidor..."
+			)
+			return
+		end
 		if not info or not info.exists then
 			createTypedSection(
 				content,
@@ -3005,10 +3280,11 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 
 	renderSelectedTab = function(tabKey)
 		selectedTab = tabKey
+		detailRenderGeneration += 1
 		limparContexto(activeDetailsRenderContext)
 		activeDetailsRenderContext = novoContexto()
 		for _, child in ipairs(content:GetChildren()) do
-			if child:IsA("Frame") or child:IsA("TextLabel") then
+			if child:IsA("GuiObject") then
 				child.Parent = nil
 			end
 		end
@@ -3031,6 +3307,10 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 
 		if tabKey == "LORE" then
 			renderLore()
+		elseif tabKey == "ABILITIES" then
+			renderAbilities()
+		elseif tabKey == "STATS" then
+			renderStats()
 		elseif tabKey == "AWAKENING" then
 			renderAwakening()
 		else
@@ -3041,18 +3321,18 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 	for index, tab in ipairs(DETAIL_TABS) do
 		local tabButton = Instance.new("TextButton")
 		tabButton.Name = "Tab_" .. tab.key
-		tabButton.Position = UDim2.new((index - 1) / #DETAIL_TABS, 0, 0, 0)
-		tabButton.Size = UDim2.new(1 / #DETAIL_TABS, 0, 1, 0)
+		tabButton.LayoutOrder = index
 		tabButton.BackgroundColor3 = COLORS.panelRaised
 		tabButton.BorderSizePixel = 0
-		tabButton.Text = tab.icon .. " " .. tab.label
+		tabButton.Text = detailLayout.portrait and (tab.icon .. "\n" .. tab.shortLabel)
+			or (tab.icon .. " " .. tab.label)
 		tabButton.TextColor3 = tab.color
 		tabButton.TextScaled = true
 		tabButton.TextWrapped = true
 		tabButton.Font = Enum.Font.Arcade
 		tabButton.ZIndex = 14
 		tabButton.Parent = tabsFrame
-		limitarTexto(tabButton, 8, 18)
+		limitarTexto(tabButton, 7, 16)
 		prepararBotaoAnimado(context, tabButton)
 		tabButtons[tab.key] = tabButton
 		conectarContexto(context, tabButton.Activated, function()
@@ -3099,7 +3379,7 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 			contentLayout.Padding = UDim.new(0, math.floor(layout.contentHeight * 0.018))
 			for _, tab in ipairs(DETAIL_TABS) do
 				local button = tabButtons[tab.key]
-				button.Text = layout.portrait and (tab.icon .. "\n" .. tab.label)
+				button.Text = layout.portrait and (tab.icon .. "\n" .. tab.shortLabel)
 					or (tab.icon .. " " .. tab.label)
 			end
 			if viewportChanged then
@@ -3138,10 +3418,10 @@ local function createCharacterDetailsPopup(characterName, initialTab, suppliedAw
 	renderSelectedTab(selectedTab)
 end
 
--- Os três pontos de entrada antigos continuam existindo para os cards e para
--- qualquer outro sistema, mas agora só escolhem qual aba o modal V13 abre.
+-- Os pontos de entrada antigos continuam existindo para os cards e para
+-- qualquer outro sistema, mas agora só escolhem qual aba o modal V14 abre.
 createAbilitiesPopup = function(characterName)
-	createCharacterDetailsPopup(characterName, "INFO", nil)
+	createCharacterDetailsPopup(characterName, "ABILITIES", nil)
 end
 
 createLorePopup = function(characterName)
