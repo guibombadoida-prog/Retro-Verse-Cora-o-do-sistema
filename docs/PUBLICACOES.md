@@ -11,6 +11,57 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-03 00:39 UTC — números de dano retro, versionados
+
+`[PUBLICAÇÃO] 2 atualizados, 2 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 60, 58, 2, 2, 0, 0]` — execução #30, `main` em `68e67ba`
+
+O jogo já mostrava número de dano, por dois scripts que rodavam no place
+**sem cópia no repositório**: `dmgindi` (servidor, 1499 bytes) e
+`dmgindicator` (cliente, 5783 bytes). Sem versão, ninguém podia corrigir nem
+melhorar nenhum dos dois.
+
+**Os dois renomeados, não duplicados.** `LEGACY_NAMES` ganhou o par, e o
+`verificar` da execução #29 confirmou antes de publicar: `2 renomeados,
+0 novos`. Sem esse registro a publicação teria criado uma segunda cópia de
+cada um, e cada golpe sairia com dois números na tela.
+
+A lista de scripts que só existem no place caiu de **11 para 9**.
+
+### `DamageIndicatorServer`
+
+Quem decide quanto apareceu é o servidor; o cliente só desenha. Deixar o
+cliente ler a vida alheia daria a ele a chance de mostrar dano que não houve.
+
+- **Acumula antes de mandar.** Dano contínuo chega em fatias de 1 ou 2 por
+  tique; um número por tique encheria a tela de "1" e esconderia a luta. As
+  fatias do mesmo alvo somam numa janela de 0,12 s e saem como um número só.
+- **Só vê quem está perto.** `FireAllClients` mandaria todo golpe do mapa para
+  todo mundo. Destinatários escolhidos por distância, raio de 140 studs.
+- **Quem bateu recebe marcado.** O `DamageAttribution` V4 já sabe quem causou
+  o dano; o dado vai junto e o cliente do atacante desenha o próprio acerto
+  diferente do dos outros.
+- Teto de 12 envios por segundo por vítima; vigia NPC e chefão também;
+  `_G.DamageIndicator.mostrar()` para quem aplica dano por conta própria.
+
+### `DamageIndicatorClient`
+
+- **Pool de 28**, sem criar e destruir. Em luta boa saem vários números por
+  segundo, e criar `BillboardGui` + `TextLabel` + `Part` por golpe vira lixo
+  para o coletor bem no momento em que o quadro não pode cair. Estourando o
+  pool, o mais velho é reciclado — perder número antigo é melhor que perder
+  quadro.
+- **Um `Heartbeat` para todos.** Um tween por número seria 28 disputando o
+  mesmo orçamento, e tween não faz arco: interpola em linha reta. O movimento
+  é balístico de verdade — velocidade inicial para cima e para o lado,
+  gravidade e arrasto integrados por quadro. Nada de `BodyVelocity`.
+- Fonte Arcade, contorno preto de pixel art, paleta do `HealthDisplay`. Cor
+  por caso: dano comum, golpe pesado, cura, o **seu** acerto, e o dano que
+  você tomou.
+- Espalhamento lateral aleatório, senão dois golpes seguidos no mesmo alvo
+  sobem na mesma linha e um esconde o outro. Some só no terço final, porque
+  apagar desde o começo tira o tempo de leitura.
+
 ## 2026-09-02 21:56 UTC — modal unificado de detalhes publicado
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
