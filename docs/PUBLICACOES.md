@@ -11,6 +11,25 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-03 02:27 UTC — detalhes de personagem V14 publicados
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 60, 59, 1, 0, 0, 0]` — execução #32, `main` em `4c324c0`
+
+**`CharacterSystemClient` V14 — merge da PR #10.** O conteúdo das abas
+Informações, Lore e Despertar volta a aparecer: o modal agora usa
+`ZIndexBehavior.Sibling`, impedindo que as seções internas sejam desenhadas
+atrás do painel.
+
+O mesmo modal ganhou as abas **Habilidades** e **Atributos**. Habilidades lê as
+`Tool`s das formas normal e desperta e mostra os metadados disponíveis;
+Atributos mostra vida base, arquétipo, bônus e penalidades do
+`CharacterStatsServer`. As cinco abas usam distribuição responsiva e rótulos
+curtos no celular em retrato.
+
+A verificação anterior, execução #31, encontrou exatamente 1 script diferente,
+0 renomeados, 0 novos e 0 problemas.
+
 ## 2026-09-03 00:39 UTC — números de dano retro, versionados
 
 `[PUBLICAÇÃO] 2 atualizados, 2 renomeados, 0 criados, 0 pastas criadas`
