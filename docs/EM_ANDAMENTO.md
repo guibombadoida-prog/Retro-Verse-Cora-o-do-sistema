@@ -30,6 +30,12 @@ combine com o dono. Ao terminar, tire a linha.
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
 
+> Os oito scripts que rodavam no place sem cópia no repositório agora são
+> **seis**: `dmgindi` e `dmgindicator` viraram `DamageIndicatorServer` e
+> `DamageIndicatorClient`, versionados e registrados em `LEGACY_NAMES`. Faltam
+> `BossConfigServer`, `Boss_CatalogGate_V1`, `Death`, `PassiveVFXServer`,
+> `PassiveVFXClient` e `SystemDiagnostic`.
+
 ## Livre e com trabalho pendente
 
 Os cinco menus abaixo

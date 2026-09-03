@@ -25,6 +25,8 @@ local LEGACY_NAMES = {
 	["StarterPlayer > StarterPlayerScripts > RetroHotbarClient"] = "RetroHotbarClient_V1",
 	["StarterPlayer > StarterPlayerScripts > TeamMenuClient_V2"] = "TeamMenuClient",
 	["StarterPlayer > StarterPlayerScripts > TutorialMenuClient_V2"] = "TutorialMenuClient",
+	["ServerScriptService > DamageIndicatorServer"] = "dmgindi",
+	["StarterPlayer > StarterPlayerScripts > DamageIndicatorClient"] = "dmgindicator",
 }
 
 local runArguments = ({ ... })[1]
