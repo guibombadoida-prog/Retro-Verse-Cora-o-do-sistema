@@ -11,6 +11,73 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-04 22:54 UTC — sistema de música: servidor robusto, cliente animado
+
+`[PUBLICAÇÃO] 2 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 60, 58, 2, 0, 0, 0]` — execução #36, `main` em `769ca93`
+
+### `MusicCatalogServer` V2 → V3
+
+**O defeito grave: falha de rede apagava a trilha de todo mundo.**
+`carregar()` fazia `faixas = {}` quando o `GetAsync` falhava, e o laço de
+reconciliação chama `carregar()` de 60 em 60 segundos. Uma única falha
+passageira do DataStore zerava a lista em memória e o servidor **mandava a
+lista vazia para todos os clientes** — a música parava na partida inteira, sem
+nada no log dizendo o motivo. Falha de leitura e catálogo vazio eram a mesma
+coisa para o código.
+
+Agora a leitura tenta três vezes com espera crescente e, ao desistir,
+**preserva** a lista anterior e devolve `false`. `pronto` só vira `true` numa
+leitura que deu certo.
+
+Mais quatro pontos de robustez:
+
+- **Edição sumia.** A reconciliação comparava só `#faixas`. Renomear uma faixa
+  não muda a contagem, então quando a mensagem do `MessagingService` se perdia
+  o servidor lia a lista nova, via o mesmo número e não avisava ninguém — os
+  jogadores ficavam com o título velho para sempre. Agora compara uma
+  assinatura do conteúdo.
+- **Escrita sem segunda chance.** Um throttle passageiro virava "Erro ao
+  salvar" e a faixa recém-digitada se perdia. Agora repete — e distingue
+  recusa de regra (lista cheia, ID repetido), que não repete, de falha de rede.
+- **Orçamento ignorado.** A reconciliação consulta
+  `GetRequestBudgetForRequestType` e pula a volta quando está no fim. Perder
+  uma releitura periódica é barato; entupir a fila do DataStore atrasa até a
+  gravação do admin.
+- **Admin sem freio.** Segurar o botão gastava cota de `MessagingService`, que
+  é por servidor e, estourada, derruba o sync para **todos**. Intervalo mínimo
+  por admin.
+
+### `MusicPlayerClient_V2` V6 → V7
+
+O arquivo tinha 13 `TweenService:Create` e **nenhum** `:Cancel()`.
+
+- **Nada reagia no celular.** Todo o retorno visual dos botões e das faixas
+  estava dentro de `if not isMobile`, preso a `MouseEnter`/`MouseLeave` — que
+  não disparam em toque. No aparelho do dono o player era inerte: nem apertar
+  mostrava que tinha apertado. Agora é `InputBegan`/`InputEnded`.
+- **O marcador corria atrás do dedo.** Volume e grave criavam um tween de
+  0,05 s a cada quadro de arrasto: cem animações por segundo na mesma
+  propriedade. Arrasto virou posição direta; tween é para transição.
+- **A música parava sozinha.** Pausar e retomar depressa deixava o fade-out
+  antigo terminar *depois* do play e pausar a faixa recém-retomada — parecia
+  bug do botão. Entrada e saída agora dividem a chave de tween e carregam uma
+  geração.
+- **Vazamento na borda.** O brilho rodava `while` criando dois tweens a cada
+  2,8 s para sempre, porque o `ScreenGui` tem `ResetOnSpawn = false`.
+
+A janela abre e fecha por mola no `Heartbeat`, o mesmo idioma dos outros
+menus. O fechamento dependia de `task.delay(0.2)` para esconder o frame:
+reabrir dentro desses 0,2 s fazia o delay velho esconder a janela
+recém-aberta.
+
+| | antes | agora |
+| --- | --- | --- |
+| `TweenService:Create` | 13 | 1 (no gerenciador) |
+| `:Cancel()` | 0 | 2 |
+| laços `while` | 2 | 1 (espera de `TimeLength`, não cria tween) |
+| `MouseEnter` | 2 | 0 |
+
 ## 2026-09-03 15:24 UTC — traço do texto do card
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
