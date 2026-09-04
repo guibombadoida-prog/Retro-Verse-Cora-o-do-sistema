@@ -1,7 +1,47 @@
 -- ============================================
--- MUSIC CATALOG SERVER V2
+-- MUSIC CATALOG SERVER V3
 -- Coloque em ServerScriptService
 -- Nome: "MusicCatalogServer"
+-- SUBSTITUI: MusicCatalogServer V2
+-- ============================================
+-- (V3) O V2 tratava falha de leitura como catálogo vazio.
+--
+-- 1. FALHA DE REDE APAGAVA A TRILHA DE TODO MUNDO. `carregar()` fazia
+--    `faixas = {}` quando o GetAsync falhava, e o laço de reconciliação
+--    chama `carregar()` de 60 em 60 segundos. Uma única falha
+--    passageira do DataStore — que acontece — zerava a lista em memória
+--    e o servidor MANDAVA essa lista vazia para todos os clientes. A
+--    música parava para a partida inteira até a próxima leitura dar
+--    certo. Agora a leitura tenta várias vezes e, se desistir, PRESERVA
+--    a lista anterior e devolve `false`; quem chama decide o que fazer.
+--    Catálogo vazio de verdade e falha de leitura deixam de ser a mesma
+--    coisa.
+--
+-- 2. EDIÇÃO SUMIA SE A MENSAGEM SE PERDESSE. A reconciliação comparava
+--    só `#faixas`. Renomear uma faixa não muda a contagem, então quando
+--    a mensagem do MessagingService se perdia o servidor lia a lista
+--    nova, via o mesmo número e NÃO avisava ninguém — os jogadores
+--    ficavam com o título velho para sempre. Agora compara uma
+--    assinatura do conteúdo.
+--
+-- 3. ESCRITA SEM SEGUNDA CHANCE. `UpdateAsync` num pcall único: um
+--    throttle do DataStore virava "Erro ao salvar" na cara do admin.
+--    Agora repete com espera crescente.
+--
+-- 4. ORÇAMENTO DO DATASTORE IGNORADO. O serviço tem cota por minuto e,
+--    estourada, ele enfileira e atrasa tudo. A reconciliação agora
+--    consulta `GetRequestBudgetForRequestType` e pula a volta quando o
+--    orçamento está no fim — perder uma releitura periódica é barato,
+--    travar a fila do DataStore não é.
+--
+-- 5. ADMIN SEM FREIO. Nada limitava a frequência das chamadas de
+--    escrita. Um admin segurando o botão gastava cota de DataStore e,
+--    pior, de MessagingService — que tem cota por servidor e, estourada,
+--    derruba o sync para TODOS. Agora há intervalo mínimo por admin.
+--
+-- 6. CONSULTA DE ASSET SEM CACHE. O mesmo ID perguntado ao
+--    MarketplaceService de novo a cada tentativa. Agora fica em cache e
+--    tem segunda chance.
 -- ============================================
 -- Catálogo de músicas em DataStore, editável DENTRO do jogo.
 --
@@ -72,6 +112,25 @@ local CONFIG = {
 	MAX_FAIXAS = 200,
 	MAX_TAMANHO_NOME = 60,
 	MAX_TAMANHO_ARTISTA = 40,
+
+	-- (V3) Tentativas de leitura antes de desistir. Desistir NÃO apaga
+	-- a lista que já estava carregada.
+	TENTATIVAS_LEITURA = 3,
+	TENTATIVAS_ESCRITA = 3,
+	ESPERA_INICIAL = 1,
+
+	-- Abaixo deste orçamento de requisições a reconciliação pula a volta.
+	-- Perder uma releitura periódica é barato; entupir a fila do
+	-- DataStore atrasa até a gravação do admin.
+	ORCAMENTO_MINIMO = 5,
+
+	-- Intervalo mínimo entre escritas do MESMO admin. Segurar o botão
+	-- não pode gastar a cota de MessagingService, que é por servidor e,
+	-- estourada, derruba o sync para todos.
+	INTERVALO_ADMIN = 1.5,
+
+	-- Quanto tempo o resultado de GetProductInfo fica em cache.
+	CACHE_ASSET = 300,
 }
 
 -- Se o AdminRegistryServer não tiver carregado, só o DONO edita.
@@ -180,24 +239,52 @@ end
 -- É aqui que o "via API" acontece: em vez de o admin digitar nome e ID
 -- na mão, o servidor pergunta ao Roblox o que é aquele ID. Se não for
 -- áudio, recusa — assim não entra ID de imagem ou de modelo na trilha.
+-- (V3) Cache + segunda chance. O mesmo ID era perguntado de novo a cada
+-- tentativa do admin, e uma falha passageira de rede virava "não
+-- consegui consultar" mesmo com o ID correto.
+local cacheAsset = {}
+
 local function consultarAsset(id)
-	local ok, info = pcall(function()
-		return MarketplaceService:GetProductInfo(id, Enum.InfoType.Asset)
-	end)
+	local emCache = cacheAsset[id]
+	if emCache and os.clock() - emCache.quando < CONFIG.CACHE_ASSET then
+		if emCache.erro then
+			return nil, emCache.erro
+		end
+		return emCache.dados
+	end
+
+	local ok, info
+	for tentativa = 1, 2 do
+		ok, info = pcall(function()
+			return MarketplaceService:GetProductInfo(id, Enum.InfoType.Asset)
+		end)
+		if ok and type(info) == "table" then
+			break
+		end
+		if tentativa < 2 then
+			task.wait(0.5)
+		end
+	end
 
 	if not ok or type(info) ~= "table" then
+		-- Falha de rede NÃO entra em cache: o ID pode estar certo e a
+		-- próxima tentativa do admin deve perguntar de novo.
 		return nil, "Não consegui consultar esse ID no Roblox."
 	end
 
 	-- AssetTypeId 3 = Audio
 	if info.AssetTypeId ~= 3 then
-		return nil, "Esse ID não é de áudio (tipo " .. tostring(info.AssetTypeId) .. ")."
+		local erro = "Esse ID não é de áudio (tipo " .. tostring(info.AssetTypeId) .. ")."
+		cacheAsset[id] = { quando = os.clock(), erro = erro }
+		return nil, erro
 	end
 
-	return {
+	local dados = {
 		nome = info.Name or ("Faixa " .. id),
 		artista = (info.Creator and info.Creator.Name) or "",
 	}
+	cacheAsset[id] = { quando = os.clock(), dados = dados }
+	return dados
 end
 
 -- =====================================
@@ -215,60 +302,137 @@ end
 local opcoesLeitura = Instance.new("DataStoreGetOptions")
 opcoesLeitura.UseCache = false
 
-local function carregar()
-	local ok, bruto = pcall(function()
-		return musicStore:GetAsync(CONFIG.CHAVE, opcoesLeitura)
+-- (V3) Assinatura do conteúdo, para a reconciliação saber que ALGO
+-- mudou mesmo quando a contagem não muda. Renomear uma faixa não altera
+-- `#faixas`, e era por isso que uma edição sumia quando a mensagem do
+-- MessagingService se perdia: o servidor lia a lista nova, via o mesmo
+-- número e não avisava ninguém.
+local function assinatura(lista)
+	local partes = table.create(#lista)
+	for i, faixa in ipairs(lista) do
+		partes[i] = string.format(
+			"%s|%s|%s",
+			tostring(faixa.id),
+			tostring(faixa.nome),
+			tostring(faixa.artista)
+		)
+	end
+	return table.concat(partes, "\n")
+end
+
+-- (V3) Orçamento do DataStore. O serviço tem cota por minuto; estourada,
+-- ele enfileira e atrasa TUDO, inclusive a gravação do admin.
+local function temOrcamento(tipo)
+	local ok, restante = pcall(function()
+		return DataStoreService:GetRequestBudgetForRequestType(tipo)
 	end)
+	if not ok or type(restante) ~= "number" then
+		-- Motor que não expõe o orçamento: seguir em frente é melhor que
+		-- travar o catálogo para sempre.
+		return true
+	end
+	return restante >= CONFIG.ORCAMENTO_MINIMO
+end
 
-	-- Roblox antigo não conhece DataStoreGetOptions: cai no GetAsync
-	-- comum em vez de deixar o catálogo sem carregar.
-	if not ok then
-		ok, bruto = pcall(function()
-			return musicStore:GetAsync(CONFIG.CHAVE)
+-- ⚠️ FALHA DE LEITURA NÃO É CATÁLOGO VAZIO.
+--
+-- O V2 fazia `faixas = {}` quando o GetAsync falhava. Como a
+-- reconciliação chama esta função de 60 em 60 segundos, UMA falha
+-- passageira zerava a lista em memória e o servidor mandava a lista
+-- vazia para todos os clientes: a música parava na partida inteira.
+--
+-- Agora a função devolve `true` só quando REALMENTE leu. Ao desistir,
+-- preserva o que já estava carregado e devolve `false` — quem chama
+-- decide, e ninguém apaga trilha por causa de rede ruim.
+local function carregar()
+	local espera = CONFIG.ESPERA_INICIAL
+	local ultimoErro
+
+	for tentativa = 1, CONFIG.TENTATIVAS_LEITURA do
+		local ok, bruto = pcall(function()
+			return musicStore:GetAsync(CONFIG.CHAVE, opcoesLeitura)
 		end)
+
+		-- Roblox antigo não conhece DataStoreGetOptions: cai no GetAsync
+		-- comum em vez de deixar o catálogo sem carregar.
+		if not ok then
+			ok, bruto = pcall(function()
+				return musicStore:GetAsync(CONFIG.CHAVE)
+			end)
+		end
+
+		if ok then
+			faixas = sanear(bruto)
+			pronto = true
+			return true
+		end
+
+		ultimoErro = bruto
+		if tentativa < CONFIG.TENTATIVAS_LEITURA then
+			task.wait(espera)
+			espera = math.min(espera * 2, 8)
+		end
 	end
 
-	if not ok then
-		warn("[MUSIC CATALOG V2] ⚠️ Falha ao carregar — começando vazio")
-		faixas = {}
-	else
-		faixas = sanear(bruto)
-	end
-
-	pronto = true
-	print(string.format("[MUSIC CATALOG V2] ✓ %d faixa(s) carregada(s)", #faixas))
+	warn(
+		string.format(
+			"[MUSIC CATALOG V3] ⚠️ Leitura falhou %d vez(es): %s — "
+				.. "MANTENDO as %d faixa(s) já carregadas",
+			CONFIG.TENTATIVAS_LEITURA,
+			tostring(ultimoErro),
+			#faixas
+		)
+	)
+	return false
 end
 
 -- UpdateAsync em vez de SetAsync: dois admins em servidores diferentes
 -- podem adicionar ao mesmo tempo, e o SetAsync faria um sobrescrever o
 -- outro.
 local function gravar(transformar)
-	local resultado, erro
+	local espera = CONFIG.ESPERA_INICIAL
+	local ultimoErro
 
-	local ok, err = pcall(function()
-		musicStore:UpdateAsync(CONFIG.CHAVE, function(atual)
-			local lista = sanear(atual)
-			local nova, problema = transformar(lista)
-			if not nova then
-				erro = problema
-				return nil -- aborta a escrita
-			end
-			resultado = nova
-			return nova
+	-- (V3) Segunda chance. No V2 um throttle passageiro do DataStore
+	-- virava "Erro ao salvar" na cara do admin, e a faixa que ele
+	-- acabara de digitar se perdia.
+	for tentativa = 1, CONFIG.TENTATIVAS_ESCRITA do
+		local resultado, recusa
+
+		local ok, err = pcall(function()
+			musicStore:UpdateAsync(CONFIG.CHAVE, function(atual)
+				local lista = sanear(atual)
+				local nova, problema = transformar(lista)
+				if not nova then
+					recusa = problema
+					return nil -- aborta a escrita
+				end
+				resultado = nova
+				return nova
+			end)
 		end)
-	end)
 
-	if not ok then
-		return nil, "Erro ao salvar: " .. tostring(err)
-	end
-	if erro then
-		return nil, erro
+		-- Recusa é decisão de regra (lista cheia, ID repetido), não
+		-- falha de rede: repetir daria o mesmo não.
+		if recusa then
+			return nil, recusa
+		end
+
+		if ok then
+			if resultado then
+				faixas = resultado
+			end
+			return faixas
+		end
+
+		ultimoErro = err
+		if tentativa < CONFIG.TENTATIVAS_ESCRITA then
+			task.wait(espera)
+			espera = math.min(espera * 2, 6)
+		end
 	end
 
-	if resultado then
-		faixas = resultado
-	end
-	return faixas
+	return nil, "Erro ao salvar depois de várias tentativas: " .. tostring(ultimoErro)
 end
 
 -- =====================================
@@ -313,12 +477,16 @@ local function tratarMensagem(data)
 		return
 	end
 
-	carregar()
+	-- (V3) Só repassa aos clientes se a leitura deu certo. Antes,
+	-- uma falha aqui mandava a lista vazia para todo mundo.
+	if not carregar() then
+		return
+	end
 	avisarClientesLocais()
 
 	print(
 		string.format(
-			"[MUSIC CATALOG V2] ↻ Sync de outro servidor: %s (%s)",
+			"[MUSIC CATALOG V3] ↻ Sync de outro servidor: %s (%s)",
 			tostring(data.acao),
 			tostring(data.titulo)
 		)
@@ -337,13 +505,13 @@ task.spawn(function()
 
 		if ok then
 			inscrito = true
-			print("[MUSIC CATALOG V2] ✓ Inscrito no sync entre servidores")
+			print("[MUSIC CATALOG V3] ✓ Inscrito no sync entre servidores")
 			return
 		end
 
 		warn(
 			string.format(
-				"[MUSIC CATALOG V2] ⚠️ Tentativa %d de inscrever no sync falhou: %s",
+				"[MUSIC CATALOG V3] ⚠️ Tentativa %d de inscrever no sync falhou: %s",
 				tentativa,
 				tostring(err)
 			)
@@ -353,7 +521,7 @@ task.spawn(function()
 	end
 
 	warn(
-		"[MUSIC CATALOG V2] ❌ NÃO consegui inscrever no MessagingService. "
+		"[MUSIC CATALOG V3] ❌ NÃO consegui inscrever no MessagingService. "
 			.. "Este servidor só verá músicas novas pela releitura periódica "
 			.. "(até "
 			.. CONFIG.INTERVALO_RECONCILIA
@@ -370,15 +538,29 @@ task.spawn(function()
 	while true do
 		task.wait(CONFIG.INTERVALO_RECONCILIA)
 
-		local antes = #faixas
-		carregar()
+		-- (V3) Pula a volta quando o orçamento do DataStore está no fim.
+		-- Perder uma releitura periódica é barato; entupir a fila atrasa
+		-- até a gravação do admin.
+		if not temOrcamento(Enum.DataStoreRequestType.GetAsync) then
+			continue
+		end
 
-		if #faixas ~= antes then
+		local antesContagem = #faixas
+		local antesAssinatura = assinatura(faixas)
+
+		if not carregar() then
+			continue
+		end
+
+		-- Compara CONTEÚDO, não contagem: renomear uma faixa não muda
+		-- `#faixas`, e no V2 essa edição nunca chegava aos jogadores
+		-- quando a mensagem do MessagingService se perdia.
+		if assinatura(faixas) ~= antesAssinatura then
 			avisarClientesLocais()
 			print(
 				string.format(
-					"[MUSIC CATALOG V2] ↻ Releitura periódica: %d → %d faixa(s)",
-					antes,
+					"[MUSIC CATALOG V3] ↻ Releitura periódica: %d → %d faixa(s), conteúdo mudou",
+					antesContagem,
 					#faixas
 				)
 			)
@@ -394,10 +576,38 @@ local function recusarNaoAdmin(player)
 	player:Kick("Tentativa não autorizada de uso de comandos admin")
 end
 
+-- (V3) FREIO POR ADMIN.
+--
+-- Nada limitava a frequência das escritas. Um admin segurando o botão
+-- gastava cota de DataStore e, pior, de MessagingService — que é por
+-- SERVIDOR e, estourada, derruba o sync entre partidas para todo mundo,
+-- não só para quem apertou. O freio é por jogador e some quando ele sai.
+local ultimaEscrita = {}
+
+local function podeEscrever(player)
+	local agora = os.clock()
+	local anterior = ultimaEscrita[player]
+	if anterior and agora - anterior < CONFIG.INTERVALO_ADMIN then
+		return false,
+			string.format("Calma — espere %.1fs.", CONFIG.INTERVALO_ADMIN - (agora - anterior))
+	end
+	ultimaEscrita[player] = agora
+	return true
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	ultimaEscrita[player] = nil
+end)
+
 adminMusicAdd.OnServerInvoke = function(player, idBruto, nomeManual, artistaManual)
 	if not isAdmin(player) then
 		recusarNaoAdmin(player)
 		return false, "Sem permissão!"
+	end
+
+	local liberado, aviso = podeEscrever(player)
+	if not liberado then
+		return false, aviso
 	end
 
 	local id = tonumber(idBruto)
@@ -454,7 +664,7 @@ adminMusicAdd.OnServerInvoke = function(player, idBruto, nomeManual, artistaManu
 
 	avisarClientesLocais()
 	publicarSync("add", player.Name, nome)
-	print(string.format("[MUSIC CATALOG V2] ✅ %s adicionou '%s' (%d)", player.Name, nome, id))
+	print(string.format("[MUSIC CATALOG V3] ✅ %s adicionou '%s' (%d)", player.Name, nome, id))
 
 	return true, "Música adicionada: " .. nome, copiar(faixas)
 end
@@ -463,6 +673,11 @@ adminMusicRemove.OnServerInvoke = function(player, idBruto)
 	if not isAdmin(player) then
 		recusarNaoAdmin(player)
 		return false, "Sem permissão!"
+	end
+
+	local liberado, aviso = podeEscrever(player)
+	if not liberado then
+		return false, aviso
 	end
 
 	local id = tonumber(idBruto)
@@ -492,7 +707,7 @@ adminMusicRemove.OnServerInvoke = function(player, idBruto)
 
 	avisarClientesLocais()
 	publicarSync("remove", player.Name, titulo)
-	print(string.format("[MUSIC CATALOG V2] 🗑️ %s removeu '%s' (%d)", player.Name, titulo, id))
+	print(string.format("[MUSIC CATALOG V3] 🗑️ %s removeu '%s' (%d)", player.Name, titulo, id))
 
 	return true, "Música removida: " .. titulo, copiar(faixas)
 end
@@ -501,6 +716,11 @@ adminMusicUpdate.OnServerInvoke = function(player, idBruto, nomeNovo, artistaNov
 	if not isAdmin(player) then
 		recusarNaoAdmin(player)
 		return false, "Sem permissão!"
+	end
+
+	local liberado, aviso = podeEscrever(player)
+	if not liberado then
+		return false, aviso
 	end
 
 	local id = tonumber(idBruto)
@@ -528,7 +748,7 @@ adminMusicUpdate.OnServerInvoke = function(player, idBruto, nomeNovo, artistaNov
 
 	avisarClientesLocais()
 	publicarSync("update", player.Name, nomeNovo)
-	print(string.format("[MUSIC CATALOG V2] ✏️ %s editou a faixa %d", player.Name, id))
+	print(string.format("[MUSIC CATALOG V3] ✏️ %s editou a faixa %d", player.Name, id))
 
 	return true, "Faixa atualizada.", copiar(faixas)
 end
@@ -544,6 +764,15 @@ getMusicCatalog.OnServerInvoke = function()
 		task.wait(0.2)
 		espera = espera + 0.2
 	end
+
+	-- (V3) Se o boot terminou sem NUNCA ter lido, tenta mais uma vez
+	-- aqui em vez de entregar vazio. `pronto` só vira true numa leitura
+	-- que deu certo, então isto cobre o servidor que subiu com o
+	-- DataStore fora do ar.
+	if not pronto then
+		carregar()
+	end
+
 	return copiar(faixas)
 end
 
@@ -583,7 +812,7 @@ _G.MusicCatalog = {
 }
 
 _G.DebugMusicCatalog = function()
-	print("\n========== DEBUG MUSIC CATALOG V2 ==========")
+	print("\n========== DEBUG MUSIC CATALOG V3 ==========")
 	print("  DataStore:", CONFIG.STORE_NAME, "| pronto:", pronto)
 	print("  sync entre servidores:", inscrito and "INSCRITO ✓" or "NÃO INSCRITO ✗ (só releitura periódica)")
 	print("  faixas:", #faixas, "de", CONFIG.MAX_FAIXAS)
@@ -604,4 +833,4 @@ end
 
 carregar()
 
-print("[MUSIC CATALOG V2] Sistema de catálogo de músicas carregado")
+print("[MUSIC CATALOG V3] Sistema de catálogo de músicas carregado")

@@ -1,8 +1,41 @@
 -- ============================================
--- MUSIC PLAYER CLIENT V6 — CATÁLOGO EM DATASTORE + VISUALIZER DE GRAVE
+-- MUSIC PLAYER CLIENT V7 — PLAYER ANIMADO E RESPONSIVO AO TOQUE
 -- Coloque em: StarterPlayer > StarterPlayerScripts
 -- Nome: "MusicPlayerClient_V2"
--- SUBSTITUI: MusicPlayerClient_V2 (V5)
+-- SUBSTITUI: MusicPlayerClient_V2 (V6)
+-- ============================================
+-- (V7) O V6 tinha 13 TweenService:Create e NENHUM :Cancel(). Quatro
+-- consequências que dava para ver jogando:
+--
+-- 1. NADA REAGIA NO CELULAR. Todo o retorno visual dos botões e das
+--    faixas da lista estava dentro de `if not isMobile`, ligado em
+--    MouseEnter/MouseLeave — eventos que NÃO disparam em toque. No
+--    aparelho do dono o player inteiro era inerte: nem apertar mostrava
+--    que tinha apertado. Agora o afundar e o realce entram por
+--    InputBegan/InputEnded, que cobrem toque e mouse pelo mesmo caminho.
+--
+-- 2. O MARCADOR CORRIA ATRÁS DO DEDO. Volume e grave criavam um tween
+--    de 0,05 s a cada quadro de arrasto: umas cem animações por segundo
+--    disputando a mesma propriedade. Arrasto é posição direta; tween é
+--    para transição. O marcador agora gruda no dedo.
+--
+-- 3. A MÚSICA PARAVA SOZINHA. FadeStop conectava Completed para dar
+--    Pause/Stop. Pausando e retomando depressa, o fade-out antigo
+--    terminava DEPOIS do play e pausava a faixa recém-retomada — parecia
+--    bug do botão. Entrada e saída agora dividem a mesma chave de tween
+--    e carregam uma geração; um fade vencido não manda mais em nada.
+--
+-- 4. VAZAMENTO NA BORDA. O brilho da janela rodava `while` criando dois
+--    tweens a cada 2,8 s, para sempre, porque o ScreenGui tem
+--    ResetOnSpawn = false. Virou um tween com RepeatCount = -1.
+--
+-- A janela também passou a abrir e fechar por mola amortecida integrada
+-- no Heartbeat, o mesmo idioma do CharacterSystemClient e do
+-- UnifiedMenuClient. O fechamento antigo dependia de um task.delay(0.2)
+-- para esconder o frame: reabrir dentro desses 0,2 s fazia o delay velho
+-- esconder a janela recém-aberta.
+-- ============================================
+-- (V6) CATÁLOGO EM DATASTORE + VISUALIZER DE GRAVE
 -- ============================================
 -- (V6) MUDANÇAS:
 -- • AS FAIXAS SAÍRAM DO STUDIO. Até o V5 cada música era um objeto
@@ -218,6 +251,159 @@ local COLORS = {
 	text = Color3.fromRGB(255, 255, 255),
 	textDim = Color3.fromRGB(180, 180, 180),
 }
+
+
+-- =====================================
+-- (V7) CAMADA DE ANIMAÇÃO
+-- =====================================
+-- O V6 tinha 13 chamadas de TweenService:Create e NENHUM :Cancel(). Em
+-- três lugares isso não era detalhe:
+--
+--   • O brilho da borda da janela rodava `while mwStroke.Parent do`
+--     criando dois tweens a cada 2,8 s, para sempre. O ScreenGui tem
+--     ResetOnSpawn = false, então o laço nunca terminava.
+--   • Os controles de volume e de grave criavam um tween NOVO a cada
+--     quadro de arrasto. Arrastar o dedo por dois segundos deixava umas
+--     cem animações disputando a mesma propriedade, e o marcador ficava
+--     atrás do dedo em vez de acompanhar.
+--   • Nenhum retorno visual funcionava no celular: só MouseEnter.
+--
+-- Mesmo idioma do CharacterSystemClient e do UnifiedMenuClient: um
+-- contexto dono das conexões e dos tweens, um tween por chave com o
+-- anterior cancelado.
+
+local animConexoes = {}
+local animTweens = {}
+
+local function conectarAnim(signal, callback)
+	local conexao = signal:Connect(callback)
+	table.insert(animConexoes, conexao)
+	return conexao
+end
+
+local function tocarTween(chave, instancia, tweenInfo, propriedades)
+	if not instancia or not instancia.Parent then
+		return nil
+	end
+	local anterior = animTweens[chave]
+	if anterior then
+		anterior:Cancel()
+	end
+	local tween = TweenService:Create(instancia, tweenInfo, propriedades)
+	animTweens[chave] = tween
+	tween:Play()
+	return tween
+end
+
+-- Reação ao toque. MouseEnter/MouseLeave NÃO disparam em toque, e o dono
+-- joga no celular: preso a eles, o botão fica inerte no aparelho dele.
+-- InputBegan/InputEnded cobrem toque e mouse pelo mesmo caminho.
+local function reagirAoToque(botao, chave, normal, pressionado)
+	local escala = botao:FindFirstChildOfClass("UIScale")
+	if not escala then
+		escala = Instance.new("UIScale")
+		escala.Scale = normal
+		escala.Parent = botao
+	end
+
+	local function ir(valor, duracao, estilo)
+		tocarTween(
+			chave,
+			escala,
+			TweenInfo.new(duracao, estilo or Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Scale = valor }
+		)
+	end
+
+	conectarAnim(botao.InputBegan, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			ir(pressionado, 0.09)
+		end
+	end)
+
+	conectarAnim(botao.InputEnded, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			ir(normal, 0.22, Enum.EasingStyle.Back)
+		end
+	end)
+
+	return escala
+end
+
+-- Mola amortecida para abrir e fechar a janela. Física visual integrada
+-- por quadro: nada de BodyVelocity, e nada de task.delay para esconder
+-- depois — o próprio assentamento avisa quando terminou.
+local function criarMolaJanela(frame, aoEsconder)
+	local escala = Instance.new("UIScale")
+	escala.Scale = 0.88
+	escala.Parent = frame
+
+	local estado = { pos = 0.88, vel = 0, alvo = 0.88, ativo = false, fechando = false }
+	local controle = {}
+
+	function controle.abrir()
+		if not frame.Parent then
+			return
+		end
+		frame.Visible = true
+		estado.pos = math.min(estado.pos, 0.92)
+		estado.vel = 0
+		estado.alvo = 1
+		estado.fechando = false
+		estado.ativo = true
+	end
+
+	function controle.fechar()
+		if not frame.Visible then
+			return
+		end
+		estado.alvo = 0.88
+		estado.fechando = true
+		estado.ativo = true
+	end
+
+	conectarAnim(RunService.Heartbeat, function(delta)
+		if not estado.ativo or not frame.Parent then
+			return
+		end
+
+		-- dt limitado: numa queda de FPS um passo grande faria a mola
+		-- estourar em vez de assentar.
+		local dt = math.min(delta, 1 / 30)
+		local rigidez = 230
+		local amortecimento = 25
+		local aceleracao = (estado.alvo - estado.pos) * rigidez - estado.vel * amortecimento
+		estado.vel += aceleracao * dt
+		estado.pos += estado.vel * dt
+		estado.pos = math.clamp(estado.pos, 0.84, 1.06)
+
+		escala.Scale = estado.pos
+		frame.Rotation = math.clamp((1 - estado.pos) * -7, -2, 1)
+
+		if math.abs(estado.alvo - estado.pos) < 0.002 and math.abs(estado.vel) < 0.02 then
+			estado.pos = estado.alvo
+			estado.vel = 0
+			escala.Scale = estado.alvo
+			frame.Rotation = 0
+			estado.ativo = false
+			if estado.fechando then
+				estado.fechando = false
+				frame.Visible = false
+				if aoEsconder then
+					aoEsconder()
+				end
+			end
+		end
+	end)
+
+	return controle
+end
 
 -- =====================================
 -- MUSIC HOLDER
@@ -733,17 +919,35 @@ local function makeButton(parent, text, color, size, pos)
 	btn.Font = Enum.Font.Arcade
 	btn.AutoButtonColor = false
 	btn.Parent = parent
-	-- hover PC
-	if not isMobile then
-		btn.MouseEnter:Connect(function()
-			TweenService
-				:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = Color3.new(1, 1, 1) })
-				:Play()
-		end)
-		btn.MouseLeave:Connect(function()
-			TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = color }):Play()
-		end)
-	end
+
+	-- (V7) O V6 embrulhava TODO o retorno visual num `if not isMobile`.
+	-- No celular — o aparelho do dono — o botão não reagia a nada: nem
+	-- ao toque, nem depois dele. Agora o afundar vale nos dois, e o
+	-- realce por cor entra por InputBegan/InputEnded, que cobrem toque e
+	-- mouse pelo mesmo caminho.
+	local chave = "btn_" .. tostring(btn)
+	reagirAoToque(btn, chave .. "_escala", 1, 0.93)
+
+	conectarAnim(btn.InputBegan, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			tocarTween(chave, btn, TweenInfo.new(0.12), { BackgroundColor3 = Color3.new(1, 1, 1) })
+		end
+	end)
+
+	conectarAnim(btn.InputEnded, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			tocarTween(chave, btn, TweenInfo.new(0.12), { BackgroundColor3 = color })
+		end
+	end)
+
 	return btn
 end
 
@@ -802,7 +1006,10 @@ local function createMusicInterface()
 	background.Name = "Background"
 	background.Size = UDim2.new(1, 0, 1, 0)
 	background.BackgroundColor3 = Color3.new(0, 0, 0)
-	background.BackgroundTransparency = 0.5
+	-- (V7) Começa transparente: quem escurece é o tween de entrada.
+	-- Com 0.5 fixo o fundo aparecia seco no primeiro quadro, antes de a
+	-- janela ter sequer começado a crescer.
+	background.BackgroundTransparency = 1
 	background.BorderSizePixel = 0
 	background.Visible = false
 	background.Parent = musicGui
@@ -841,19 +1048,17 @@ local function createMusicInterface()
 	mwStroke.Transparency = 0.1
 	mwStroke.Parent = mainWindow
 
-	-- Brilho "respirando" na borda (efeito retro, sem random)
-	task.spawn(function()
-		while mwStroke.Parent do
-			TweenService:Create(mwStroke, TweenInfo.new(1.4, Enum.EasingStyle.Sine), {
-				Transparency = 0.55,
-			}):Play()
-			task.wait(1.4)
-			TweenService:Create(mwStroke, TweenInfo.new(1.4, Enum.EasingStyle.Sine), {
-				Transparency = 0.1,
-			}):Play()
-			task.wait(1.4)
-		end
-	end)
+	-- (V7) Brilho "respirando" em UM tween.
+	-- O laço antigo criava dois tweens a cada 2,8 s e nunca parava: o
+	-- ScreenGui tem ResetOnSpawn = false, então rodava a sessão inteira
+	-- deixando objetos de tween abandonados. RepeatCount = -1 com
+	-- Reverses = true dá o mesmo vai-e-volta com um objeto só.
+	tocarTween(
+		"brilhoJanela",
+		mwStroke,
+		TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Transparency = 0.55 }
+	)
 
 	-- Header da janela
 	local windowHeader = makeHeader(mainWindow, "♪  MUSIC PLAYER", COLORS.music)
@@ -1583,6 +1788,14 @@ local function createMusicInterface()
 	-- =====================================
 
 	-- Abertura/fechamento pelo MENU UNIFICADO (sem botão flutuante próprio)
+	-- (V7) A janela abre e fecha por mola amortecida, o mesmo idioma dos
+	-- outros menus do jogo. O fechamento antigo dependia de um
+	-- task.delay(0.2) para esconder o frame: se o jogador reabrisse
+	-- dentro desses 0,2 s, o delay antigo ainda disparava e escondia a
+	-- janela recém-aberta. A mola avisa sozinha quando assentou.
+	mainWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
+	local molaJanela = criarMolaJanela(mainWindow)
+
 	local function openWindow()
 		if isMenuOpen then
 			return
@@ -1590,13 +1803,13 @@ local function createMusicInterface()
 		playSound(sounds.open)
 		isMenuOpen = true
 		background.Visible = true
-		mainWindow.Visible = true
-		mainWindow.Position = UDim2.new(0.5, 0, 0.6, 0)
-		TweenService:Create(
-			mainWindow,
-			TweenInfo.new(0.25, Enum.EasingStyle.Back),
-			{ Position = UDim2.new(0.5, 0, 0.5, 0) }
-		):Play()
+		molaJanela.abrir()
+		tocarTween(
+			"fundoJanela",
+			background,
+			TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ BackgroundTransparency = 0.45 }
+		)
 	end
 
 	local function closeWindow()
@@ -1605,15 +1818,16 @@ local function createMusicInterface()
 		end
 		playSound(sounds.close)
 		isMenuOpen = false
-		background.Visible = false
-		TweenService:Create(
-			mainWindow,
-			TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{ Position = UDim2.new(0.5, 0, 0.6, 0) }
-		):Play()
-		task.delay(0.2, function()
+		molaJanela.fechar()
+		tocarTween(
+			"fundoJanela",
+			background,
+			TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ BackgroundTransparency = 1 }
+		)
+		task.defer(function()
 			if not isMenuOpen then
-				mainWindow.Visible = false
+				background.Visible = false
 			end
 		end)
 	end
@@ -1705,6 +1919,19 @@ local function ReturnNext()
 	return ReturnSequential()
 end
 
+-- (V7) Geração por som. Sem isto, pausar e retomar depressa deixava o
+-- fade-OUT antigo terminar DEPOIS do play e chamar Pause() na faixa que
+-- o jogador acabara de retomar — a música parava sozinha e parecia bug
+-- do botão. Cada fade anota sua geração; o Completed só age se ainda
+-- for o mais recente daquele som.
+local geracaoFade = setmetatable({}, { __mode = "k" })
+
+local function proximaGeracao(sound)
+	local proxima = (geracaoFade[sound] or 0) + 1
+	geracaoFade[sound] = proxima
+	return proxima
+end
+
 local function FadeStop(sound, pause)
 	if not sound then
 		return
@@ -1713,15 +1940,24 @@ local function FadeStop(sound, pause)
 	-- (V6) a sonda de grave morre junto com a faixa
 	PararSonda()
 
-	local tw = TweenService:Create(sound, TweenInfo.new(0.6), { Volume = 0 })
-	tw.Completed:Connect(function()
+	local minha = proximaGeracao(sound)
+	local tw = tocarTween("fade_" .. tostring(sound), sound, TweenInfo.new(0.6), { Volume = 0 })
+	if not tw then
+		return
+	end
+
+	tw.Completed:Connect(function(estado)
+		-- Cancelado por um fade mais novo, ou já não é a geração atual:
+		-- quem manda agora é o outro.
+		if estado ~= Enum.PlaybackState.Completed or geracaoFade[sound] ~= minha then
+			return
+		end
 		if pause then
 			sound:Pause()
 		else
 			sound:Stop()
 		end
 	end)
-	tw:Play()
 end
 
 -- =====================================
@@ -1858,7 +2094,15 @@ local function PlaySong(sound)
 
 	sound.Volume = 0
 	local base = sound:FindFirstChild("BaseVolume") and sound.BaseVolume.Value or 0.5
-	TweenService:Create(sound, TweenInfo.new(0.8), { Volume = base * PlayerVolume }):Play()
+	-- Mesma chave do fade-out: entrar cancela a saída em vez de as duas
+	-- animarem o mesmo Volume ao mesmo tempo.
+	proximaGeracao(sound)
+	tocarTween(
+		"fade_" .. tostring(sound),
+		sound,
+		TweenInfo.new(0.8),
+		{ Volume = base * PlayerVolume }
+	)
 
 	-- (V6) sonda de grave acompanha a faixa que acabou de entrar
 	PrepararSonda(sound)
@@ -1911,16 +2155,29 @@ local function CreatePlaylistItem(name, songCount, color)
 	countL.TextSize = isMobile and 11 or 12
 	countL.TextXAlignment = Enum.TextXAlignment.Left
 
-	if not isMobile then
-		item.MouseEnter:Connect(function()
-			TweenService:Create(item, TweenInfo.new(0.1), { BackgroundColor3 = COLORS.header })
-				:Play()
-		end)
-		item.MouseLeave:Connect(function()
-			TweenService:Create(item, TweenInfo.new(0.1), { BackgroundColor3 = COLORS.panel })
-				:Play()
-		end)
-	end
+	-- (V7) Mesma correção dos botões: a faixa da lista era inerte no
+	-- celular, então não havia como saber qual delas o dedo pegou.
+	local chaveItem = "item_" .. tostring(item)
+
+	conectarAnim(item.InputBegan, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			tocarTween(chaveItem, item, TweenInfo.new(0.1), { BackgroundColor3 = COLORS.header })
+		end
+	end)
+
+	conectarAnim(item.InputEnded, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			tocarTween(chaveItem, item, TweenInfo.new(0.1), { BackgroundColor3 = COLORS.panel })
+		end
+	end)
 end
 
 -- =====================================
@@ -2187,13 +2444,19 @@ if ReverbToggleBtn and ReverbToggleBG then
 		playSound(sounds.click)
 		ReverbEnabled = not ReverbEnabled
 		if ReverbEnabled then
-			TweenService
-				:Create(ReverbToggleBG, TweenInfo.new(0.15), { BackgroundColor3 = COLORS.music })
-				:Play()
-			TweenService:Create(ReverbToggleBtn, TweenInfo.new(0.15), {
+			-- (V7) Chave fixa: apertar o interruptor depressa fazia os
+			-- tweens de ON e de OFF animarem a MESMA posição ao mesmo
+			-- tempo, e o botãozinho parava no meio do trilho.
+			tocarTween(
+				"reverbFundo",
+				ReverbToggleBG,
+				TweenInfo.new(0.15),
+				{ BackgroundColor3 = COLORS.music }
+			)
+			tocarTween("reverbBotao", ReverbToggleBtn, TweenInfo.new(0.15), {
 				Position = UDim2.new(1, -(ReverbToggleBtn.Size.X.Offset + 2), 0, 2),
 				BackgroundColor3 = COLORS.background,
-			}):Play()
+			})
 			ReverbToggleBtn.Text = "ON"
 			if CurrentSong and (not ReverbEffect or not ReverbEffect.Parent) then
 				ReverbEffect = Instance.new("ReverbSoundEffect", CurrentSong)
@@ -2201,18 +2464,18 @@ if ReverbToggleBtn and ReverbToggleBG then
 				ReverbEffect.WetLevel = 0
 			end
 		else
-			TweenService
-				:Create(
-					ReverbToggleBG,
-					TweenInfo.new(0.15),
-					{ BackgroundColor3 = COLORS.background }
-				)
-				:Play()
-			TweenService:Create(
+			tocarTween(
+				"reverbFundo",
+				ReverbToggleBG,
+				TweenInfo.new(0.15),
+				{ BackgroundColor3 = COLORS.background }
+			)
+			tocarTween(
+				"reverbBotao",
 				ReverbToggleBtn,
 				TweenInfo.new(0.15),
 				{ Position = UDim2.new(0, 1, 0, 2), BackgroundColor3 = COLORS.disabled }
-			):Play()
+			)
 			ReverbToggleBtn.Text = "OFF"
 			if ReverbEffect and ReverbEffect.Parent then
 				ReverbEffect.Parent = nil
@@ -2257,14 +2520,17 @@ if BassKnob and BassSlider then
 		local sPos = BassSlider.AbsolutePosition.X
 		local sSize = BassSlider.AbsoluteSize.X
 		local pct = math.clamp((posX - sPos) / sSize, 0, 1)
-		TweenService:Create(BassKnob, TweenInfo.new(0.05), {
-			Position = UDim2.new(
-				pct,
-				-BassKnob.Size.X.Offset / 2,
-				0.5,
-				-BassKnob.Size.Y.Offset / 2
-			),
-		}):Play()
+		-- (V7) O marcador segue o dedo DIRETO, sem tween.
+		-- O V6 criava um tween de 0,05 s a cada quadro de arrasto: umas
+		-- cem animações por segundo disputando a mesma propriedade, e o
+		-- resultado era o marcador correndo atrás do dedo em vez de
+		-- grudar nele. Arrasto é posição direta; tween é para transição.
+		BassKnob.Position = UDim2.new(
+			pct,
+			-BassKnob.Size.X.Offset / 2,
+			0.5,
+			-BassKnob.Size.Y.Offset / 2
+		)
 		if CurrentSong then
 			if not BassEffect or not BassEffect.Parent then
 				BassEffect = Instance.new("EqualizerSoundEffect", CurrentSong)
@@ -2283,7 +2549,9 @@ local function UpdateVolume(posX)
 	local pct =
 		math.clamp((posX - VolumeSlider.AbsolutePosition.X) / VolumeSlider.AbsoluteSize.X, 0, 1)
 	PlayerVolume = pct
-	TweenService:Create(VolumeFill, TweenInfo.new(0.1), { Size = UDim2.new(pct, 0, 1, 0) }):Play()
+	-- (V7) Mesma razão do grave: durante o arrasto a barra acompanha o
+	-- dedo sem tween. Um tween por quadro deixava a barra atrasada.
+	VolumeFill.Size = UDim2.new(pct, 0, 1, 0)
 	VolumePercent.Text = math.floor(pct * 100) .. "%"
 	if CurrentSong then
 		local base = CurrentSong:FindFirstChild("BaseVolume") and CurrentSong.BaseVolume.Value
