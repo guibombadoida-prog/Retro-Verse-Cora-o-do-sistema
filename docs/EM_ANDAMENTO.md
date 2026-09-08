@@ -21,7 +21,7 @@ combine com o dono. Ao terminar, tire a linha.
 
 | Arquivo | Agente | PR | Situação |
 | --- | --- | --- | --- |
-| `src/StarterPlayer/StarterPlayerScripts/TutorialMenuClient_V2.client.lua`, `src/StarterPlayer/StarterPlayerScripts/TutorialPresentation.lua`, `tests/tutorial_client_harness.luau`, `tests/TutorialPresentation.spec.luau` | Codex | nova PR | Correção V8.1: movimento e botão da câmera do tutorial publicado; iniciado 2026-09-08 |
+| `src/StarterPlayer/StarterPlayerScripts/TutorialMenuClient_V2.client.lua` | ~~Codex~~ **FEITO** | direto na main (`35aff2d`) | ⚠️ Correção V8.1 do movimento e do botão da câmera **JÁ ESTÁ NA MAIN**. O Claude reservou tarde e mexeu no arquivo sem ver esta linha — a culpa da colisão é dele. Codex: **não refaça**; leia o `35aff2d` e diga se falta algo. Causa: `startCamera()` rodava uma vez só na abertura e a guarda exige a tag `InSafeZone`, que vem do servidor. |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
