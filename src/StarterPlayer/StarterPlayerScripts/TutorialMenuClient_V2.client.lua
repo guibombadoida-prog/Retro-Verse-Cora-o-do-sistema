@@ -1,6 +1,22 @@
 -- Nome: TutorialMenuClient_V2
 -- Coloque em: StarterPlayer > StarterPlayerScripts
--- V8 — tutorial cinematográfico retrô, responsivo, com 24 etapas.
+-- V8.1 — tutorial cinematográfico retrô, responsivo, com 24 etapas.
+--
+-- (V8.1) A CÂMERA NUNCA ASSUMIA E O BOTÃO PARECIA MORTO — uma causa só.
+-- startCamera() rodava UMA VEZ, na abertura. A guarda exige a tag
+-- `InSafeZone`, que quem põe no personagem é o servidor (SpawnSystem):
+-- abrir o tutorial um segundo cedo demais, ou de fora do lobby, fazia a
+-- recusa valer para a sessão inteira, em silêncio. E o botão MOV. só
+-- chamava a mesma startCamera(), que recusava de novo — daí a impressão
+-- de botão sem função. Agora ele tenta de novo a cada 0,5 s enquanto o
+-- tutorial está aberto, então a cena assume sozinha assim que o jogador
+-- entra na base, e o botão mostra o MOTIVO da recusa em vez de um
+-- "CÂMERA: LIVRE" que não explicava nada.
+--
+-- Junto vai uma garantia: sem cena em andamento, o bloqueio de movimento
+-- é desfeito todo quadro. Travar o personagem é o pior estrago que este
+-- script consegue causar, e não vale depender de um único caminho de
+-- saída para desfazer isso.
 -- Atualiza o MESMO LocalScript V7; mantém as APIs do menu unificado e os remotes.
 -- Câmera apenas na zona segura, com devolução no fechamento/respawn/interrupção.
 -- Typewriter por grafemas, páginas legíveis e animações canceláveis.
@@ -299,6 +315,7 @@ local function motionReduced()
 	return state.reducedMotion or GuiService.ReducedMotionEnabled or VRService.VREnabled
 end
 
+
 -- Une référence par canal; un nouveau mouvement annule son prédécesseur.
 local function animate(key, object, properties, duration, style)
 	local old = tweens[key]
@@ -514,6 +531,43 @@ local function livingCharacter()
 	end
 	return nil
 end
+-- (V8.1) POR QUE A CÂMERA NÃO ASSUMIU.
+--
+-- O V8 chamava startCamera() uma vez só, ao abrir, e a guarda exige a tag
+-- `InSafeZone` — que quem põe no personagem é o SERVIDOR, pelo SpawnSystem.
+-- Se o tutorial abrisse antes de a tag chegar, ou com o jogador fora do
+-- lobby, a câmera era recusada e NUNCA mais tentava: ficava livre a sessão
+-- inteira, sem uma palavra explicando. E o botão parecia morto, porque
+-- apertá-lo só chamava a mesma startCamera() que recusava de novo.
+--
+-- Agora a recusa tem nome, e o nome vai para o botão.
+local function cameraBlockReason()
+	if motionReduced() then
+		return VRService.VREnabled and "vr"
+			or (GuiService.ReducedMotionEnabled and "sistema" or "desligado")
+	end
+	if not state.open then
+		return "fechado"
+	end
+	local character = livingCharacter()
+	if not character then
+		return "sem personagem"
+	end
+	if not character:FindFirstChild("InSafeZone") then
+		return "fora da base"
+	end
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return "sem camera"
+	end
+	if camera:GetAttribute("RetroVerseCameraOwner") ~= nil then
+		return "outro sistema"
+	end
+	if camera.CameraType == Enum.CameraType.Scriptable then
+		return "camera ocupada"
+	end
+	return nil
+end
 
 local function releaseCamera(restore)
 	local old = lease
@@ -694,7 +748,17 @@ local function updateNavigation()
 	ui.prev.TextTransparency = (state.step == 1 and state.page == 1) and 0.55 or 0
 	ui.prev.Selectable = state.step > 1 or state.page > 1
 	ui.skip.Text = STEPS[state.step].isLast and "FECHAR" or "PULAR"
-	ui.motion.Text = motionReduced() and "MOV.: OFF" or (lease and "CÂMERA: ON" or "CÂMERA: LIVRE")
+	-- (V8.1) "CÂMERA: LIVRE" não dizia nada: o jogador via o mesmo texto
+	-- estando fora da base, sem personagem ou com a câmera tomada por
+	-- outro sistema. Agora o botão mostra o motivo real da recusa.
+	if motionReduced() then
+		ui.motion.Text = "MOV.: OFF"
+	elseif lease then
+		ui.motion.Text = "CÂMERA: ON"
+	else
+		local motivo = cameraBlockReason()
+		ui.motion.Text = motivo and ("CÂMERA: " .. string.upper(motivo)) or "CÂMERA: LIVRE"
+	end
 end
 
 local function revealAll()
@@ -752,6 +816,31 @@ local closeTutorial
 local function runAnimation(dt)
 	if not state.alive or not ui.gui.Parent then return end
 	state.elapsed = state.elapsed + dt
+
+	-- (V8.1) RETENTATIVA. O V8 tentava tomar a câmera uma vez só, no
+	-- instante da abertura. A guarda exige a tag `InSafeZone`, que quem
+	-- põe é o servidor: abrir o tutorial um segundo cedo demais, ou de
+	-- fora do lobby, recusava para sempre. Aqui ele tenta de novo, de
+	-- meio em meio segundo, enquanto o tutorial estiver aberto e a
+	-- câmera livre — então assim que o jogador entra na base a cena
+	-- assume sozinha, sem precisar fechar e reabrir.
+	if not lease then
+		-- Sem cena em andamento, o bloqueio de movimento não pode existir.
+		-- É barato reafirmar isso todo quadro, e fecha de vez a classe de
+		-- bug em que o jogador fica preso porque o desbind se perdeu num
+		-- caminho de saída que ninguém previu — travar o personagem é o
+		-- pior estrago que este script consegue fazer.
+		ContextActionService:UnbindAction(CONTROL_BIND)
+
+		if state.open then
+			state.cameraRetry = (state.cameraRetry or 0) + dt
+			if state.cameraRetry >= 0.5 then
+				state.cameraRetry = 0
+				startCamera()
+				updateNavigation()
+			end
+		end
+	end
 	if state.typing then
 		state.textClock = state.textClock + dt
 		local emitted = 0
