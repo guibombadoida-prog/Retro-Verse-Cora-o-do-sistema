@@ -1,110 +1,40 @@
--- ============================================
--- TUTORIAL MENU CLIENT V7 — TODOS OS SISTEMAS ATUAIS
--- Coloque em StarterPlayer > StarterPlayerScripts
--- Nome: "TutorialMenuClient_V2"
--- SUBSTITUI: TutorialMenuClient_V2 (V6)
--- ============================================
--- ⚠️ As linhas 'Coloque em' e 'Nome:' ficam LOGO ABAIXO do título de
--- propósito: o tools/promover.sh lê o cabeçalho nas 20 primeiras linhas.
--- Explicação longa antes delas empurra o 'Nome:' para fora dessa janela,
--- e o destino passa a ser deduzido do título — foi assim que este
--- arquivo virou 'TutorialMenuClient' e perdeu o _V2.
--- ============================================
--- (V7) O tutorial estava desatualizado e, no caso do Despertar,
--- ENSINANDO ERRADO: dizia para procurar o botão ⚡ no card e desbloquear
--- com Badge ou Gamepass. Esse sistema não existe mais — o Despertar
--- virou forma temporária conquistada em combate.
---
--- Foram de 15 para 24 passos, cobrindo o que o jogo tem hoje:
---   • Energia, hotbar e nível POR PERSONAGEM
---   • Passivas, com a regra de só editar desequipado ou no lobby
---   • Despertar em 4 passos: como funciona, como encher a barra, a
---     transformação de 3s / forma de 3min30, e o card de informação
---   • Jornada do Recruta
---   • Chefão em place separada
---   • Player de música com visualizer de grave
---   • Bounty/Procurado, missões, conquistas, diárias, times, duelos e
---     trocas
---
--- O contador de passos já lia #STEPS; só os textos fixos "15" foram
--- corrigidos.
--- ============================================
--- (V6) ALTERAÇÕES: fontes unificadas em estilo retro (Arcade/Code)
--- ============================================
--- CORREÇÃO V5 (bug):
--- • Typewriter tinha RACE CONDITION (flag 'isTyping' compartilhada +
---   'typeConn' nunca usado) — ao avançar passo rápido, o texto antigo
---   "ressuscitava" e embaralhava com o novo. Agora usa TOKEN de geração:
---   cada digitação tem ID único e a anterior é cancelada de verdade.
--- ============================================
--- Mantém: mascote RPG, setas, barra de progresso,
---         auto-show p/ novos jogadores, sem botão próprio (menu unificado).
--- ============================================
+-- Nome: TutorialMenuClient_V2
+-- Coloque em: StarterPlayer > StarterPlayerScripts
+-- V8 — tutorial cinematográfico retrô, responsivo, com 24 etapas.
+-- Atualiza o MESMO LocalScript V7; mantém as APIs do menu unificado e os remotes.
+-- Câmera apenas na zona segura, com devolução no fechamento/respawn/interrupção.
+-- Typewriter por grafemas, páginas legíveis e animações canceláveis.
+-- Economia e conclusão continuam exclusivamente no TutorialSystemServer.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
+local ContextActionService = game:GetService("ContextActionService")
+local SoundService = game:GetService("SoundService")
+local VRService = game:GetService("VRService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-
--- =====================================
--- DETECÇÃO DE PLATAFORMA
--- =====================================
-
-local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-local isTablet = isMobile and (workspace.CurrentCamera.ViewportSize.X > 600)
-
--- =====================================
--- SONS
--- =====================================
-
-local function playSound(id)
-	pcall(function()
-		local s = Instance.new("Sound")
-		s.SoundId = id
-		s.Volume = 0.45
-		s.Parent = SoundService
-		s:Play()
-		s.Ended:Connect(function()
-			s.Parent = nil
-		end)
-	end)
-end
-
-local SFX = {
-	click = "rbxassetid://156785206",
-	open = "rbxassetid://157167203",
-	close = "rbxassetid://157167205",
-	next = "rbxassetid://156785206",
-	complete = "rbxassetid://5031873608",
-	type_char = "rbxassetid://9118416910",
-}
-
--- =====================================
--- AGUARDAR REMOTES
--- =====================================
-
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local getTutorialProgress = remotes:WaitForChild("GetTutorialProgress", 10)
-local completeTutorial = remotes:WaitForChild("CompleteTutorial", 10)
-
-if not getTutorialProgress or not completeTutorial then
-	warn("[TUTORIAL V4] ❌ Remotes não encontrados!")
+local module = script.Parent:WaitForChild("TutorialPresentation", 20)
+if not module then
+	warn("[TUTORIAL V8] TutorialPresentation ausente; publique o pacote completo.")
 	return
 end
-
--- =====================================
--- CORES
--- =====================================
+local Presentation = require(module)
+local remotes = ReplicatedStorage:WaitForChild("Remotes", 30)
+local getTutorialProgress = remotes and remotes:WaitForChild("GetTutorialProgress", 15)
+local completeTutorial = remotes and remotes:WaitForChild("CompleteTutorial", 15)
+if not getTutorialProgress or not completeTutorial then
+	warn("[TUTORIAL V8] Remotes não encontrados.")
+	return
+end
 
 local C = {
 	bg = Color3.fromRGB(12, 12, 18),
 	panel = Color3.fromRGB(22, 22, 32),
-	border = Color3.fromRGB(255, 255, 255),
 	gold = Color3.fromRGB(255, 215, 0),
 	cyan = Color3.fromRGB(0, 200, 255),
 	green = Color3.fromRGB(0, 220, 100),
@@ -114,14 +44,6 @@ local C = {
 	dimText = Color3.fromRGB(180, 180, 200),
 	white = Color3.new(1, 1, 1),
 }
-
--- =====================================
--- PASSOS DO TUTORIAL
--- arrowX / arrowY  = posição Scale da seta na tela
--- arrowDir         = direção para onde a seta aponta (up/down/left/right)
--- arrowText        = texto sobre a seta
--- mascotColor      = cor do header do mascote neste passo
--- =====================================
 
 local STEPS = {
 	-- ── PASSO 1 ───────────────────────────────────────────────
@@ -241,7 +163,7 @@ local STEPS = {
 		title = "📖 VENDO O DESPERTAR",
 		mascot = "🔎",
 		mascotColor = C.cyan,
-		dialogue = "No card do personagem tem o botão ⚡ VER DESPERTAR.\n\nEle NÃO equipa nada — abre a imagem, o nome, a história, o HP e as habilidades da forma desperta. Funciona mesmo bloqueado, para você saber o que existe e o que falta.",
+		dialogue = "Abra os detalhes do personagem e escolha a aba DESPERTAR.\n\nEle NÃO equipa nada — abre a imagem, o nome, a história, o HP e as habilidades da forma desperta. Funciona mesmo bloqueado, para você saber o que existe e o que falta.",
 		arrow = true,
 	},
 	-- ── PASSO 16 ───────────────────────────────────────────────
@@ -313,726 +235,786 @@ local STEPS = {
 		title = "✅ TUTORIAL COMPLETO!",
 		mascot = "🏆",
 		mascotColor = C.green,
-		dialogue = "PARABÉNS! Você ganhou 💰 100 MOEDAS de bônus!\n\nO ciclo é este:\n🛡️ Preparar → 🎭 Equipar → ⚔️ Lutar → ⚡ Despertar → 💰 Ganhar → 📈 Evoluir\n\nO menu ☰ tem tudo, e este tutorial fica lá para reler quando quiser. Boa sorte, guerreiro! 🎮",
+		dialogue = "PARABÉNS! Conclua para solicitar ao servidor o bônus de 100 moedas, disponível apenas na primeira conclusão.\n\nO ciclo é este:\n🛡️ Preparar → 🎭 Equipar → ⚔️ Lutar → ⚡ Despertar → 💰 Ganhar → 📈 Evoluir\n\nO menu ☰ tem tudo, e este tutorial fica lá para reler quando quiser. Boa sorte, guerreiro! 🎮",
 		arrow = false,
 		isLast = true,
 	},
 }
 
--- =====================================
--- VARIÁVEIS DE ESTADO
--- =====================================
+-- Cada capítulo tem um enquadramento; o alvo da UI é resolvido por instâncias
+-- reais, nunca por uma seta fixa que promete "clique aqui" no vazio.
+local SCENES = {
+	{ shot = "wide", hint = "NOOB GUIA // INICIANDO TRANSMISSÃO" },
+	{ shot = "lobby", hint = "ZONA SEGURA // PREPARE SEU PERSONAGEM" },
+	{ target = "menu", hint = "MENU PRINCIPAL // TODOS OS SISTEMAS" },
+	{ shot = "hero", hint = "PERSONAGENS // CADA UM TEM SEU ESTILO" },
+	{ target = "menu", hint = "MENU > LOJA" },
+	{ target = "menu", hint = "MENU > INVENTÁRIO" },
+	{ shot = "hero", hint = "COMBATE // ATAQUE, DEFESA E RESISTÊNCIA" },
+	{ target = "energy", hint = "ENERGIA // ABAIXO DA VIDA" },
+	{ target = "hotbar", hint = "HABILIDADES // VISÍVEIS QUANDO EQUIPADAS" },
+	{ shot = "hero", hint = "EVOLUÇÃO // NÍVEL INDIVIDUAL" },
+	{ target = "menu", hint = "MENU > PASSIVAS" },
+	{ target = "awaken", hint = "DESPERTAR // BARRA ROXA DO HUD" },
+	{ target = "awaken", hint = "DESPERTAR // CARGA EM COMBATE" },
+	{ shot = "hero", hint = "DESPERTAR // FORMA TEMPORÁRIA" },
+	{ target = "menu", hint = "PERSONAGEM > DETALHES > DESPERTAR" },
+	{ shot = "wide", hint = "RECOMPENSAS // PLANEJE SEU PRÓXIMO PASSO" },
+	{ target = "menu", hint = "BOUNTY // SUA REPUTAÇÃO" },
+	{ target = "menu", hint = "MENU > RECRUTA" },
+	{ target = "menu", hint = "MENU > MISSÕES E CONQUISTAS" },
+	{ target = "menu", hint = "MENU > DIÁRIAS" },
+	{ shot = "lobby", hint = "MENU > TIMES, DUELOS E TROCAS" },
+	{ target = "menu", hint = "MENU > CHEFÃO" },
+	{ target = "menu", hint = "MENU > MÚSICA" },
+	{ shot = "hero", hint = "TRANSMISSÃO CONCLUÍDA // SUA JORNADA COMEÇA" },
+}
+local TARGETS = {
+	menu = { "UnifiedMenuV1", "MenuButton" },
+	energy = { "RetroHealthDisplay", "HudRoot", "MainContainer", "EnergyBackground" },
+	awaken = { "RetroHealthDisplay", "HudRoot", "MainContainer", "AwakenBackground" },
+	hotbar = { "RetroHotbar", "HotbarContainer" },
+}
+local CAMERA_OWNER = "TutorialV8"
+local CAMERA_BIND = "RetroVerseTutorialCamera"
+local CONTROL_BIND = "RetroVerseTutorialMovement"
+local state = {
+	open = false, alive = true, interacted = false, generation = 0,
+	step = 1, page = 1, pages = {}, typing = false, glyphs = {},
+	revealed = 0, textClock = 0, elapsed = 0, scanClock = 0,
+	reducedMotion = false, fastText = false, sound = true,
+	mascotPosition = 1, mascotVelocity = 0, completionSent = false,
+}
+local ui, connections, tweens, buttonScales = {}, {}, {}, {}
+local lease, viewportConnection, characterConnection = nil, nil, nil
+local heartbeatConnection = nil
+local layout = Presentation.layout(1280, 720)
 
-local tutorialGui = nil
-local isOpen = false
-local currentStep = 1
-local isTyping = false
-local typeToken = 0 -- ID de geração do typewriter (cancela o anterior de verdade)
-local arrowToken = 0 -- geração do loop da seta (cancela o anterior sem :Disconnect)
+local function track(connection)
+	table.insert(connections, connection)
+	return connection
+end
 
--- =====================================
--- CRIAR INTERFACE
--- =====================================
+local function motionReduced()
+	return state.reducedMotion or GuiService.ReducedMotionEnabled or VRService.VREnabled
+end
 
-local function createTutorialInterface()
-	if tutorialGui then
-		tutorialGui.Parent = nil
+-- Une référence par canal; un nouveau mouvement annule son prédécesseur.
+local function animate(key, object, properties, duration, style)
+	local old = tweens[key]
+	if old then
+		old:Cancel()
+		tweens[key] = nil
 	end
-
-	tutorialGui = Instance.new("ScreenGui")
-	tutorialGui.Name = "TutorialMenuV4"
-	tutorialGui.ResetOnSpawn = false
-	tutorialGui.IgnoreGuiInset = true
-	tutorialGui.DisplayOrder = 205 -- acima dos menus normais (50) mas abaixo de notificações admin (300)
-	tutorialGui.Parent = playerGui
-
-	-- =====================================
-	-- 1. SETA ANIMADA
-	-- =====================================
-
-	local arrowContainer = Instance.new("Frame")
-	arrowContainer.Name = "ArrowContainer"
-	arrowContainer.Size = UDim2.new(0, isMobile and 160 or 180, 0, isMobile and 70 or 80)
-	arrowContainer.AnchorPoint = Vector2.new(0.5, 0.5)
-	arrowContainer.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
-	arrowContainer.BorderColor3 = C.gold
-	arrowContainer.BorderSizePixel = 3
-	arrowContainer.Visible = false
-	arrowContainer.ZIndex = 20
-	arrowContainer.Parent = tutorialGui
-
-	local arrowCorner = Instance.new("UICorner")
-	arrowCorner.CornerRadius = UDim.new(0.15, 0)
-	arrowCorner.Parent = arrowContainer
-
-	-- Símbolo grande de direção
-	local arrowSymbol = Instance.new("TextLabel")
-	arrowSymbol.Name = "ArrowSymbol"
-	arrowSymbol.Size = UDim2.new(0.28, 0, 1, 0)
-	arrowSymbol.BackgroundTransparency = 1
-	arrowSymbol.Text = "⬅"
-	arrowSymbol.TextColor3 = C.gold
-	arrowSymbol.TextScaled = true
-	arrowSymbol.Font = Enum.Font.Arcade
-	arrowSymbol.ZIndex = 21
-	arrowSymbol.Parent = arrowContainer
-
-	-- Texto de dica
-	local arrowHint = Instance.new("TextLabel")
-	arrowHint.Name = "ArrowHint"
-	arrowHint.Size = UDim2.new(0.70, 0, 1, 0)
-	arrowHint.Position = UDim2.new(0.28, 0, 0, 0)
-	arrowHint.BackgroundTransparency = 1
-	arrowHint.Text = "CLIQUE AQUI!"
-	arrowHint.TextColor3 = C.white
-	arrowHint.TextScaled = true
-	arrowHint.Font = Enum.Font.Arcade
-	arrowHint.TextWrapped = true
-	arrowHint.ZIndex = 21
-	arrowHint.Parent = arrowContainer
-
-	-- =====================================
-	-- 2. CAIXA DE DIÁLOGO (parte inferior)
-	-- =====================================
-
-	local dialogH = isMobile and 0.30 or 0.27
-	local dialogFrame = Instance.new("Frame")
-	dialogFrame.Name = "DialogFrame"
-	dialogFrame.Size = UDim2.new(isMobile and 0.96 or 0.88, 0, dialogH, 0)
-	dialogFrame.Position = UDim2.new(0.5, 0, 1.4, 0) -- começa fora da tela
-	dialogFrame.AnchorPoint = Vector2.new(0.5, 1)
-	dialogFrame.BackgroundColor3 = C.bg
-	dialogFrame.BorderColor3 = C.cyan
-	dialogFrame.BorderSizePixel = 3
-	dialogFrame.Visible = false
-	dialogFrame.ZIndex = 15
-	dialogFrame.Parent = tutorialGui
-
-	local dialogCorner = Instance.new("UICorner")
-	dialogCorner.CornerRadius = UDim.new(0.025, 0)
-	dialogCorner.Parent = dialogFrame
-
-	-- ── Header: mascote + nome + step counter ──────────────────
-
-	local headerH = isMobile and 0.22 or 0.20
-	local headerBar = Instance.new("Frame")
-	headerBar.Size = UDim2.new(1, 0, headerH, 0)
-	headerBar.BackgroundColor3 = C.cyan -- será atualizado por passo
-	headerBar.BorderSizePixel = 0
-	headerBar.ZIndex = 16
-	headerBar.Parent = dialogFrame
-
-	local headerCorner = Instance.new("UICorner")
-	headerCorner.CornerRadius = UDim.new(0.05, 0)
-	headerCorner.Parent = headerBar
-
-	-- Mascote (emoji)
-	local mascotLabel = Instance.new("TextLabel")
-	mascotLabel.Name = "MascotLabel"
-	mascotLabel.Size = UDim2.new(0.09, 0, 1.0, 0)
-	mascotLabel.Position = UDim2.new(0.01, 0, 0, 0)
-	mascotLabel.BackgroundTransparency = 1
-	mascotLabel.Text = "😁"
-	mascotLabel.TextScaled = true
-	mascotLabel.Font = Enum.Font.Arcade
-	mascotLabel.ZIndex = 17
-	mascotLabel.Parent = headerBar
-
-	-- Nome do mascote
-	local mascotName = Instance.new("TextLabel")
-	mascotName.Name = "MascotName"
-	mascotName.Size = UDim2.new(0.40, 0, 0.55, 0)
-	mascotName.Position = UDim2.new(0.11, 0, 0.05, 0)
-	mascotName.BackgroundTransparency = 1
-	mascotName.Text = "NOOB GUIA"
-	mascotName.TextColor3 = C.bg
-	mascotName.TextScaled = true
-	mascotName.Font = Enum.Font.Arcade
-	mascotName.TextXAlignment = Enum.TextXAlignment.Left
-	mascotName.ZIndex = 17
-	mascotName.Parent = headerBar
-
-	-- Título do passo
-	local stepTitleLabel = Instance.new("TextLabel")
-	stepTitleLabel.Name = "StepTitle"
-	stepTitleLabel.Size = UDim2.new(0.40, 0, 0.45, 0)
-	stepTitleLabel.Position = UDim2.new(0.11, 0, 0.52, 0)
-	stepTitleLabel.BackgroundTransparency = 1
-	stepTitleLabel.Text = ""
-	stepTitleLabel.TextColor3 = C.bg
-	stepTitleLabel.TextScaled = true
-	stepTitleLabel.Font = Enum.Font.Arcade
-	stepTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	stepTitleLabel.ZIndex = 17
-	stepTitleLabel.Parent = headerBar
-
-	-- Contador passo X/N (o total sai de #STEPS, nunca cravado)
-	local stepCounter = Instance.new("TextLabel")
-	stepCounter.Name = "StepCounter"
-	stepCounter.Size = UDim2.new(0.20, 0, 0.55, 0)
-	stepCounter.Position = UDim2.new(0.62, 0, 0.05, 0)
-	stepCounter.BackgroundTransparency = 1
-	stepCounter.Text = "1 / " .. #STEPS
-	stepCounter.TextColor3 = C.bg
-	stepCounter.TextScaled = true
-	stepCounter.Font = Enum.Font.Arcade
-	stepCounter.TextXAlignment = Enum.TextXAlignment.Right
-	stepCounter.ZIndex = 17
-	stepCounter.Parent = headerBar
-
-	-- Barra de progresso (dentro do header à direita)
-	local progressBG = Instance.new("Frame")
-	progressBG.Size = UDim2.new(0.16, 0, 0.28, 0)
-	progressBG.Position = UDim2.new(0.63, 0, 0.62, 0)
-	progressBG.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	progressBG.BackgroundTransparency = 0.5
-	progressBG.BorderSizePixel = 0
-	progressBG.ZIndex = 17
-	progressBG.Parent = headerBar
-
-	local progressFill = Instance.new("Frame")
-	progressFill.Name = "ProgressFill"
-	progressFill.Size = UDim2.new(0, 0, 1, 0)
-	progressFill.BackgroundColor3 = C.bg
-	progressFill.BackgroundTransparency = 0.15
-	progressFill.BorderSizePixel = 0
-	progressFill.ZIndex = 18
-	progressFill.Parent = progressBG
-
-	-- Botão fechar (X)
-	local closeBtn = Instance.new("TextButton")
-	closeBtn.Size = UDim2.new(0.06, 0, 0.80, 0)
-	closeBtn.Position = UDim2.new(0.93, 0, 0.10, 0)
-	closeBtn.BackgroundColor3 = C.red
-	closeBtn.BorderSizePixel = 0
-	closeBtn.Text = "X"
-	closeBtn.TextColor3 = C.white
-	closeBtn.TextScaled = true
-	closeBtn.Font = Enum.Font.Arcade
-	closeBtn.ZIndex = 17
-	closeBtn.Parent = headerBar
-
-	local closeBtnCorner = Instance.new("UICorner")
-	closeBtnCorner.CornerRadius = UDim.new(0.3, 0)
-	closeBtnCorner.Parent = closeBtn
-
-	-- ── Área do diálogo ────────────────────────────────────────
-
-	local dialogTextArea = Instance.new("Frame")
-	dialogTextArea.Size = UDim2.new(0.97, 0, 0.52, 0)
-	dialogTextArea.Position = UDim2.new(0.015, 0, headerH + 0.01, 0)
-	dialogTextArea.BackgroundColor3 = C.panel
-	dialogTextArea.BorderColor3 = Color3.fromRGB(60, 60, 80)
-	dialogTextArea.BorderSizePixel = 1
-	dialogTextArea.ZIndex = 16
-	dialogTextArea.Parent = dialogFrame
-
-	local dialogTextCorner = Instance.new("UICorner")
-	dialogTextCorner.CornerRadius = UDim.new(0.04, 0)
-	dialogTextCorner.Parent = dialogTextArea
-
-	local dialogTextLabel = Instance.new("TextLabel")
-	dialogTextLabel.Name = "DialogText"
-	dialogTextLabel.Size = UDim2.new(0.96, 0, 0.94, 0)
-	dialogTextLabel.Position = UDim2.new(0.02, 0, 0.03, 0)
-	dialogTextLabel.BackgroundTransparency = 1
-	dialogTextLabel.Text = ""
-	dialogTextLabel.TextColor3 = C.white
-	dialogTextLabel.TextSize = isMobile and 13 or 15
-	dialogTextLabel.Font = Enum.Font.Code
-	dialogTextLabel.TextWrapped = true
-	dialogTextLabel.TextXAlignment = Enum.TextXAlignment.Left
-	dialogTextLabel.TextYAlignment = Enum.TextYAlignment.Top
-	dialogTextLabel.ZIndex = 17
-	dialogTextLabel.Parent = dialogTextArea
-
-	-- "pressione para avançar" hint (piscante)
-	local pressHint = Instance.new("TextLabel")
-	pressHint.Name = "PressHint"
-	pressHint.Size = UDim2.new(0.40, 0, 0.85, 0)
-	pressHint.Position = UDim2.new(0.59, 0, 0.08, 0)
-	pressHint.BackgroundTransparency = 1
-	pressHint.Text = "▶ clique para avançar"
-	pressHint.TextColor3 = C.dimText
-	pressHint.TextSize = isMobile and 11 or 12
-	pressHint.Font = Enum.Font.Code
-	pressHint.TextXAlignment = Enum.TextXAlignment.Right
-	pressHint.TextYAlignment = Enum.TextYAlignment.Bottom
-	pressHint.Visible = false
-	pressHint.ZIndex = 17
-	pressHint.Parent = dialogTextArea
-
-	-- piscar hint quando digitação acabar
-	task.spawn(function()
-		while pressHint.Parent do
-			TweenService:Create(
-				pressHint,
-				TweenInfo.new(0.9, Enum.EasingStyle.Sine),
-				{ TextTransparency = 0.5 }
-			):Play()
-			task.wait(0.9)
-			TweenService
-				:Create(
-					pressHint,
-					TweenInfo.new(0.9, Enum.EasingStyle.Sine),
-					{ TextTransparency = 0 }
-				)
-				:Play()
-			task.wait(0.9)
+	if motionReduced() then
+		for name, value in pairs(properties) do
+			object[name] = value
 		end
-	end)
-
-	-- ── Navegação ──────────────────────────────────────────────
-
-	local navY = headerH + 0.01 + 0.52 + 0.02
-	local navFrame = Instance.new("Frame")
-	navFrame.Size = UDim2.new(0.97, 0, 1 - navY - 0.01, 0)
-	navFrame.Position = UDim2.new(0.015, 0, navY, 0)
-	navFrame.BackgroundTransparency = 1
-	navFrame.ZIndex = 16
-	navFrame.Parent = dialogFrame
-
-	local prevBtn = Instance.new("TextButton")
-	prevBtn.Name = "PrevBtn"
-	prevBtn.Size = UDim2.new(0.24, 0, 1, 0)
-	prevBtn.Position = UDim2.new(0, 0, 0, 0)
-	prevBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-	prevBtn.BorderColor3 = Color3.fromRGB(100, 100, 140)
-	prevBtn.BorderSizePixel = 2
-	prevBtn.Text = "◀ VOLTAR"
-	prevBtn.TextColor3 = C.dimText
-	prevBtn.TextScaled = true
-	prevBtn.Font = Enum.Font.Arcade
-	prevBtn.ZIndex = 17
-	prevBtn.Parent = navFrame
-
-	local prevCorner = Instance.new("UICorner")
-	prevCorner.CornerRadius = UDim.new(0.25, 0)
-	prevCorner.Parent = prevBtn
-
-	local nextBtn = Instance.new("TextButton")
-	nextBtn.Name = "NextBtn"
-	nextBtn.Size = UDim2.new(0.38, 0, 1, 0)
-	nextBtn.Position = UDim2.new(0.31, 0, 0, 0)
-	nextBtn.BackgroundColor3 = C.green
-	nextBtn.BorderSizePixel = 0
-	nextBtn.Text = "AVANÇAR ▶"
-	nextBtn.TextColor3 = C.bg
-	nextBtn.TextScaled = true
-	nextBtn.Font = Enum.Font.Arcade
-	nextBtn.ZIndex = 17
-	nextBtn.Parent = navFrame
-
-	local nextCorner = Instance.new("UICorner")
-	nextCorner.CornerRadius = UDim.new(0.25, 0)
-	nextCorner.Parent = nextBtn
-
-	local skipBtn = Instance.new("TextButton")
-	skipBtn.Name = "SkipBtn"
-	skipBtn.Size = UDim2.new(0.26, 0, 1, 0)
-	skipBtn.Position = UDim2.new(0.74, 0, 0, 0)
-	skipBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
-	skipBtn.BorderColor3 = Color3.fromRGB(80, 80, 100)
-	skipBtn.BorderSizePixel = 1
-	skipBtn.Text = "PULAR"
-	skipBtn.TextColor3 = C.dimText
-	skipBtn.TextScaled = true
-	skipBtn.Font = Enum.Font.Code
-	skipBtn.ZIndex = 17
-	skipBtn.Parent = navFrame
-
-	local skipCorner = Instance.new("UICorner")
-	skipCorner.CornerRadius = UDim.new(0.25, 0)
-	skipCorner.Parent = skipBtn
-
-	-- =====================================
-	-- FUNÇÕES DE CONTROLE
-	-- =====================================
-
-	-- Mapeia direção → símbolo Unicode
-	local DIR_SYMBOL = {
-		left = "⬅",
-		right = "➡",
-		up = "⬆",
-		down = "⬇",
-		none = "🎯",
-	}
-
-	-- Posiciona e configura a seta
-	local function setArrow(step)
-		-- Para o bounce anterior incrementando o token (o loop antigo sai sozinho).
-		-- BUGFIX: antes usava arrowBounceConn:Disconnect() numa THREAD (task.spawn),
-		-- o que causava "attempt to index thread with 'Disconnect'".
-		arrowToken = arrowToken + 1
-		local myToken = arrowToken
-
-		if not step.arrow then
-			arrowContainer.Visible = false
-			return
-		end
-
-		-- Posição (mobile vs PC)
-		local ax = (isMobile and step.arrowXM) or step.arrowX or 0.5
-		local ay = (isMobile and step.arrowYM) or step.arrowY or 0.3
-
-		arrowContainer.Position = UDim2.new(ax, 0, ay, 0)
-		arrowSymbol.Text = DIR_SYMBOL[step.arrowDir or "left"]
-		arrowHint.Text = step.arrowText or "CLIQUE AQUI!"
-		arrowContainer.Visible = true
-
-		-- Animação bounce — pulso de cor na borda
-		task.spawn(function()
-			while
-				arrowContainer
-				and arrowContainer.Parent
-				and arrowContainer.Visible
-				and myToken == arrowToken
-			do
-				TweenService:Create(
-					arrowContainer,
-					TweenInfo.new(0.5, Enum.EasingStyle.Sine),
-					{ BorderColor3 = Color3.fromRGB(255, 255, 100) }
-				):Play()
-				task.wait(0.5)
-				TweenService:Create(
-					arrowContainer,
-					TweenInfo.new(0.5, Enum.EasingStyle.Sine),
-					{ BorderColor3 = C.gold }
-				):Play()
-				TweenService:Create(
-					arrowSymbol,
-					TweenInfo.new(0.5, Enum.EasingStyle.Sine),
-					{ TextTransparency = 0.3 }
-				):Play()
-				task.wait(0.5)
-				TweenService:Create(
-					arrowSymbol,
-					TweenInfo.new(0.5, Enum.EasingStyle.Sine),
-					{ TextTransparency = 0 }
-				):Play()
-			end
-		end)
+		return nil
 	end
+	local tween = TweenService:Create(object,
+		TweenInfo.new(duration or 0.22, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		properties)
+	tweens[key] = tween
+	tween:Play()
+	return tween
+end
 
-	-- Efeito typewriter no diálogo
-	local function typeText(fullText, onDone)
-		-- Cancela qualquer typewriter anterior gerando um novo token.
-		typeToken = typeToken + 1
-		local myToken = typeToken
-		isTyping = true
-		pressHint.Visible = false
-		dialogTextLabel.Text = ""
-
-		task.spawn(function()
-			local i = 0
-			-- Só continua enquanto ESTE typewriter for o atual (sem race condition).
-			while i < #fullText and myToken == typeToken do
-				i = i + 1
-				dialogTextLabel.Text = string.sub(fullText, 1, i)
-				task.wait(0.022)
-			end
-			-- Se foi substituído por outro passo, não toca em mais nada.
-			if myToken ~= typeToken then
-				return
-			end
-			-- garantir texto completo
-			dialogTextLabel.Text = fullText
-			isTyping = false
-			pressHint.Visible = true
-			if onDone then
-				onDone()
-			end
-		end)
+local function cancelAnimations()
+	for key, tween in pairs(tweens) do
+		tween:Cancel()
+		tweens[key] = nil
 	end
+end
 
-	-- Atualiza a interface para o passo atual
-	local function showStep(n)
-		local step = STEPS[n]
-		if not step then
-			return
-		end
-
-		-- Parar typewriter em andamento (incrementa token = cancela na hora)
-		typeToken = typeToken + 1
-		isTyping = false
-
-		-- Atualizar header
-		TweenService:Create(headerBar, TweenInfo.new(0.3), { BackgroundColor3 = step.mascotColor })
-			:Play()
-
-		mascotLabel.Text = step.mascot
-		stepTitleLabel.Text = step.title
-		stepCounter.Text = string.format("%d / %d", n, #STEPS)
-
-		-- Progresso
-		local pct = (n - 1) / (#STEPS - 1)
-		TweenService:Create(
-			progressFill,
-			TweenInfo.new(0.4, Enum.EasingStyle.Quad),
-			{ Size = UDim2.new(pct, 0, 1, 0) }
-		):Play()
-
-		-- Seta
-		setArrow(step)
-
-		-- Botão VOLTAR
-		prevBtn.Visible = n > 1
-
-		-- Botão AVANÇAR / CONCLUIR
-		if step.isLast then
-			nextBtn.Text = "✅ CONCLUIR"
-			nextBtn.BackgroundColor3 = C.gold
-			nextBtn.TextColor3 = C.bg
-		else
-			nextBtn.Text = "AVANÇAR ▶"
-			nextBtn.BackgroundColor3 = C.green
-			nextBtn.TextColor3 = C.bg
-		end
-
-		-- Pular fica invisível no último passo
-		skipBtn.Visible = not step.isLast
-
-		-- Texto com typewriter
-		typeText(step.dialogue)
-
-		playSound(SFX.next)
+local function make(class, parent, name, properties)
+	local object = Instance.new(class)
+	object.Name = name
+	for key, value in pairs(properties or {}) do
+		object[key] = value
 	end
+	object.Parent = parent
+	return object
+end
 
-	-- Abrir / fechar (slide in/out)
-	local function openTutorial()
-		if isOpen then
-			return
-		end
-		isOpen = true
-		currentStep = 1
+local function frame(parent, name, size, position, color)
+	return make("Frame", parent, name, {
+		Size = size, Position = position or UDim2.fromScale(0, 0),
+		BackgroundColor3 = color or C.panel, BorderSizePixel = 0,
+	})
+end
 
-		dialogFrame.Visible = true
-		dialogFrame.Position = UDim2.new(0.5, 0, 1.4, 0)
+local function text(parent, name, value, size, position, maxSize)
+	local label = make("TextLabel", parent, name, {
+		Size = size, Position = position, BackgroundTransparency = 1,
+		Text = value, TextColor3 = C.white, Font = Enum.Font.Code,
+		TextScaled = true, TextWrapped = true,
+	})
+	make("UITextSizeConstraint", label, "Legibility", { MinTextSize = 10, MaxTextSize = maxSize or 24 })
+	return label
+end
 
-		TweenService:Create(
-			dialogFrame,
-			TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-			{ Position = UDim2.new(0.5, 0, 0.995, 0) }
-		):Play()
+local function border(object, color, thickness)
+	return make("UIStroke", object, "RetroBorder", {
+		Color = color, Thickness = thickness or 2, Transparency = 0.15,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+end
 
-		playSound(SFX.open)
-		showStep(currentStep)
-	end
+local function square(object)
+	make("UIAspectRatioConstraint", object, "Square", {
+		AspectRatio = 1, DominantAxis = Enum.DominantAxis.Height,
+	})
+end
 
-	local function closeTutorial()
-		if not isOpen then
-			return
-		end
-		isOpen = false
-		isTyping = false
-
-		-- Esconder seta (para o bounce via token, sem :Disconnect numa thread)
-		arrowContainer.Visible = false
-		arrowToken = arrowToken + 1
-
-		TweenService:Create(
-			dialogFrame,
-			TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{ Position = UDim2.new(0.5, 0, 1.4, 0) }
-		):Play()
-
-		task.delay(0.35, function()
-			if not isOpen and dialogFrame.Parent then
-				dialogFrame.Visible = false
-			end
-		end)
-
-		playSound(SFX.close)
-	end
-
-	local function completeTutorialAction()
-		closeTutorial()
-		completeTutorial:FireServer()
-		playSound(SFX.complete)
-	end
-
-	-- ── Avançar passo (clique em qualquer lugar da área de texto)
-	local function advanceOrSkipType()
-		if isTyping then
-			-- Mostrar texto completo imediatamente (para o typewriter via token)
-			typeToken = typeToken + 1
-			isTyping = false
-			local step = STEPS[currentStep]
-			if step then
-				dialogTextLabel.Text = step.dialogue
-				pressHint.Visible = true
-			end
-		end
-	end
-
-	dialogTextArea.InputBegan:Connect(function(input)
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
+local function button(parent, name, label, width, color)
+	local object = make("TextButton", parent, name, {
+		Size = UDim2.fromScale(width, 1), BackgroundColor3 = color or C.panel,
+		BorderSizePixel = 0, AutoButtonColor = false, Text = label,
+		TextColor3 = C.white, TextScaled = true, Font = Enum.Font.Code,
+		Selectable = true,
+	})
+	make("UITextSizeConstraint", object, "Legibility", { MinTextSize = 10, MaxTextSize = 21 })
+	border(object, C.cyan, 1)
+	local scale = make("UIScale", object, "PressSpring", { Scale = 1 })
+	local motion = { scale = scale, x = 1, v = 0, target = 1 }
+	table.insert(buttonScales, motion)
+	local function press(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch
-		then
-			advanceOrSkipType()
+			or input.KeyCode == Enum.KeyCode.ButtonA then
+			motion.target = 0.94
+			if motionReduced() then scale.Scale = 0.97 end
 		end
-	end)
+	end
+	track(object.InputBegan:Connect(press))
+	track(object.InputEnded:Connect(function()
+		motion.target = 1
+		if motionReduced() then scale.Scale = 1 end
+	end))
+	track(object.MouseEnter:Connect(function() motion.target = 1.025 end))
+	track(object.MouseLeave:Connect(function() motion.target = 1 end))
+	track(object.SelectionGained:Connect(function() motion.target = 1.025 end))
+	track(object.SelectionLost:Connect(function() motion.target = 1 end))
+	return object
+end
 
-	-- ── Botão AVANÇAR
-	nextBtn.MouseButton1Click:Connect(function()
-		playSound(SFX.click)
-		if STEPS[currentStep] and STEPS[currentStep].isLast then
-			completeTutorialAction()
+-- Sons reutilizados: digitar não cria um Sound por letra. Falha no asset é inofensiva.
+local clickSound = make("Sound", SoundService, "TutorialClickV8", {
+	SoundId = "rbxassetid://156785206", Volume = 0.18,
+})
+local typeSound = make("Sound", SoundService, "TutorialVoiceV8", {
+	SoundId = "rbxassetid://9118416910", Volume = 0.08, PlaybackSpeed = 1.25,
+})
+local function click()
+	if state.sound then clickSound:Play() end
+end
+
+local previousGui = playerGui:FindFirstChild("TutorialMenuV4")
+if previousGui then previousGui.Parent = nil end
+ui.gui = make("ScreenGui", playerGui, "TutorialMenuV4", {
+	ResetOnSpawn = false, IgnoreGuiInset = false, Enabled = false,
+	DisplayOrder = 205, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+})
+ui.root = frame(ui.gui, "SafeRoot", UDim2.fromScale(1, 1))
+ui.root.BackgroundTransparency = 1
+ui.shade = frame(ui.root, "ScreenShade", UDim2.fromScale(1, 1), nil, C.bg)
+ui.shade.BackgroundTransparency = 1
+ui.topBar = frame(ui.root, "CinemaTop", UDim2.fromScale(1, 0), nil, C.bg)
+ui.bottomBar = frame(ui.root, "CinemaBottom", UDim2.fromScale(1, 0), UDim2.fromScale(0, 1), C.bg)
+ui.bottomBar.AnchorPoint = Vector2.new(0, 1)
+ui.caption = text(ui.root, "SceneCaption", "", UDim2.fromScale(0.72, 0.055), UDim2.fromScale(0.14, 0.11), 19)
+ui.caption.TextColor3 = C.cyan
+ui.caption.TextTransparency = 1
+
+ui.target = frame(ui.root, "LiveTarget", UDim2.fromScale(0, 0))
+ui.target.BackgroundTransparency = 1
+ui.target.Visible = false
+ui.targetBorder = border(ui.target, C.gold, 3)
+
+ui.panel = frame(ui.root, "DialogFrame", UDim2.fromScale(0.9, 0.4), UDim2.fromScale(0.5, 1.6), C.bg)
+ui.panel.AnchorPoint = Vector2.new(0.5, 1)
+ui.panel.Active = true
+ui.panel.ZIndex = 5
+ui.panelBorder = border(ui.panel, C.cyan)
+ui.panelScale = make("UIScale", ui.panel, "EntranceScale", { Scale = 0.96 })
+ui.accent = frame(ui.panel, "ChapterAccent", UDim2.fromScale(1, 0.015), nil, C.cyan)
+
+ui.header = frame(ui.panel, "Header", UDim2.fromScale(0.96, 0.18), UDim2.fromScale(0.02, 0.03))
+ui.header.BackgroundTransparency = 1
+ui.speaker = text(ui.header, "Speaker", "NOOB GUIA", UDim2.fromScale(0.59, 0.48), UDim2.fromScale(0, 0), 22)
+ui.speaker.Font = Enum.Font.Arcade
+ui.speaker.TextColor3 = C.cyan
+ui.speaker.TextXAlignment = Enum.TextXAlignment.Left
+ui.title = text(ui.header, "StepTitle", "", UDim2.fromScale(0.72, 0.46), UDim2.fromScale(0, 0.52), 18)
+ui.title.TextXAlignment = Enum.TextXAlignment.Left
+ui.counter = text(ui.header, "StepCounter", "", UDim2.fromScale(0.15, 0.48), UDim2.fromScale(0.72, 0), 19)
+ui.close = button(ui.header, "Close", "X", 0.07, C.red)
+ui.close.AnchorPoint = Vector2.new(1, 0)
+ui.close.Position = UDim2.fromScale(1, 0)
+square(ui.close)
+
+ui.body = frame(ui.panel, "DialogueBody", UDim2.fromScale(0.96, 0.43), UDim2.fromScale(0.02, 0.235))
+border(ui.body, Color3.fromRGB(55, 65, 85), 1)
+ui.mascot = frame(ui.body, "PixelNoob", UDim2.fromScale(0.15, 0.74), UDim2.fromScale(0.095, 0.5), C.bg)
+ui.mascot.AnchorPoint = Vector2.new(0.5, 0.5)
+square(ui.mascot)
+ui.mascotScale = make("UIScale", ui.mascot, "SpeechSpring", { Scale = 1 })
+border(ui.mascot, C.gold, 1)
+ui.face = frame(ui.mascot, "Face", UDim2.fromScale(0.76, 0.76), UDim2.fromScale(0.12, 0.12), C.gold)
+ui.eyeL = frame(ui.face, "EyeLeft", UDim2.fromScale(0.12, 0.18), UDim2.fromScale(0.22, 0.24), C.bg)
+ui.eyeR = frame(ui.face, "EyeRight", UDim2.fromScale(0.12, 0.18), UDim2.fromScale(0.66, 0.24), C.bg)
+ui.mouth = frame(ui.face, "Mouth", UDim2.fromScale(0.40, 0.07), UDim2.fromScale(0.3, 0.65), C.bg)
+ui.dialogue = make("TextButton", ui.body, "DialogText", {
+	Size = UDim2.fromScale(0.77, 0.86), Position = UDim2.fromScale(0.21, 0.07),
+	BackgroundTransparency = 1, AutoButtonColor = false, Text = "",
+	TextColor3 = C.white, Font = Enum.Font.Code, TextScaled = true, TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center,
+	MaxVisibleGraphemes = -1, Selectable = false,
+})
+make("UITextSizeConstraint", ui.dialogue, "Legibility", { MinTextSize = 12, MaxTextSize = 25 })
+
+ui.hint = text(ui.panel, "ReadingHint", "", UDim2.fromScale(0.96, 0.07), UDim2.fromScale(0.02, 0.68), 15)
+ui.hint.TextColor3 = C.dimText
+ui.nav = frame(ui.panel, "Navigation", UDim2.fromScale(0.96, 0.18), UDim2.fromScale(0.02, 0.77))
+ui.nav.BackgroundTransparency = 1
+make("UIListLayout", ui.nav, "Buttons", {
+	FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder,
+	VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0.025, 0),
+})
+ui.prev = button(ui.nav, "Previous", "< VOLTAR", 0.23)
+ui.next = button(ui.nav, "Next", "LER TUDO >", 0.44, Color3.fromRGB(0, 93, 117))
+ui.skip = button(ui.nav, "Skip", "PULAR", 0.28)
+ui.prev.LayoutOrder, ui.next.LayoutOrder, ui.skip.LayoutOrder = 1, 2, 3
+
+ui.progressBG = frame(ui.panel, "ProgressTrack", UDim2.fromScale(1, 0.015), UDim2.fromScale(0, 0.985), C.panel)
+ui.progress = frame(ui.progressBG, "ProgressFill", UDim2.fromScale(0, 1), nil, C.cyan)
+ui.wipe = frame(ui.panel, "ChapterSweep", UDim2.fromScale(0.2, 0.015), nil, C.white)
+ui.wipe.BackgroundTransparency = 1
+
+ui.options = frame(ui.root, "Options", UDim2.fromScale(0.55, 0.06), UDim2.fromScale(0.98, 0.025))
+ui.options.AnchorPoint = Vector2.new(1, 0)
+ui.options.BackgroundTransparency = 1
+ui.options.ZIndex = 6
+make("UIListLayout", ui.options, "Buttons", {
+	FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0.02, 0),
+})
+ui.motion = button(ui.options, "Motion", "CÂMERA: ON", 0.38)
+ui.speed = button(ui.options, "TextSpeed", "TEXTO: NORMAL", 0.36)
+ui.sound = button(ui.options, "Voice", "SOM: ON", 0.22)
+ui.motion.LayoutOrder, ui.speed.LayoutOrder, ui.sound.LayoutOrder = 1, 2, 3
+
+local function livingCharacter()
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if humanoid and root and humanoid.Health > 0 then
+		return character, humanoid, root
+	end
+	return nil
+end
+
+local function releaseCamera(restore)
+	local old = lease
+	lease = nil
+	RunService:UnbindFromRenderStep(CAMERA_BIND)
+	ContextActionService:UnbindAction(CONTROL_BIND)
+	if not old then return end
+	local camera = old.camera
+	-- Só restauramos o que ainda é nosso. Outro sistema pode ter iniciado uma cutscene.
+	if camera.Parent and camera:GetAttribute("RetroVerseCameraOwner") == CAMERA_OWNER then
+		camera:SetAttribute("RetroVerseCameraOwner", nil)
+		if restore and camera.CameraType == Enum.CameraType.Scriptable then
+			camera.FieldOfView = old.fov
+			if old.subject and old.subject.Parent then
+				camera.CameraSubject = old.subject
+			end
+			camera.CFrame = old.cframe
+			camera.Focus = old.focus
+			camera.CameraType = old.kind
+		end
+	end
+end
+
+local function findTarget()
+	local path = TARGETS[(SCENES[state.step] or {}).target]
+	if not path then return nil end
+	local target = playerGui
+	for _, name in ipairs(path) do
+		target = target:FindFirstChild(name)
+		if not target then return nil end
+	end
+	local ancestor = target
+	while ancestor and ancestor ~= playerGui do
+		if ancestor:IsA("GuiObject") and not ancestor.Visible then return nil end
+		if ancestor:IsA("ScreenGui") and not ancestor.Enabled then return nil end
+		ancestor = ancestor.Parent
+	end
+	return target:IsA("GuiObject") and target or nil
+end
+
+local function updateHighlight()
+	local target = findTarget()
+	if not target or ui.root.AbsoluteSize.X < 1 or ui.root.AbsoluteSize.Y < 1 then
+		ui.target.Visible = false
+		return
+	end
+	local size, position = target.AbsoluteSize, target.AbsolutePosition - ui.root.AbsolutePosition
+	local viewport = ui.root.AbsoluteSize
+	local panelTop = ui.panel.AbsolutePosition.Y - ui.root.AbsolutePosition.Y
+	local panelBottom = panelTop + ui.panel.AbsoluteSize.Y
+	if size.X < 1 or size.Y < 1 or position.Y < 0
+		or position.Y + size.Y > viewport.Y
+		or (position.Y < panelBottom and position.Y + size.Y > panelTop) then
+		ui.target.Visible = false
+		return
+	end
+	ui.target.Position = UDim2.fromScale(position.X / viewport.X, position.Y / viewport.Y)
+	ui.target.Size = UDim2.fromScale(size.X / viewport.X, size.Y / viewport.Y)
+	ui.target.Visible = true
+end
+
+local function startCamera()
+	if lease then return end
+	local camera = workspace.CurrentCamera
+	local character, humanoid, root = livingCharacter()
+	if not Presentation.canTakeCamera({
+		open = state.open, alive = character ~= nil,
+		safe = character ~= nil and character:FindFirstChild("InSafeZone") ~= nil,
+		cameraAvailable = camera ~= nil,
+		foreignOwner = camera and camera:GetAttribute("RetroVerseCameraOwner") ~= nil,
+		scriptable = camera and camera.CameraType == Enum.CameraType.Scriptable,
+		reducedMotion = motionReduced(), vr = VRService.VREnabled,
+	}) then return end
+	local saved = {
+		camera = camera, kind = camera.CameraType, subject = camera.CameraSubject,
+		cframe = camera.CFrame, focus = camera.Focus, fov = camera.FieldOfView,
+		character = character, root = root, heading = root.CFrame - root.Position,
+		lastHealth = humanoid.Health, elapsed = 0, rootStart = root.Position, angle = 0.35,
+	}
+	lease = saved
+	camera:SetAttribute("RetroVerseCameraOwner", CAMERA_OWNER)
+	camera.CameraType = Enum.CameraType.Scriptable
+	-- Bloqueia só as ações de movimento deste tutorial; não altera WalkSpeed,
+	-- Anchored ou PlayerModule e não dá proteção fora do servidor.
+	ContextActionService:BindActionAtPriority(CONTROL_BIND, function()
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value,
+		Enum.PlayerActions.CharacterForward, Enum.PlayerActions.CharacterBackward,
+		Enum.PlayerActions.CharacterLeft, Enum.PlayerActions.CharacterRight, Enum.PlayerActions.CharacterJump)
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { character }
+	rayParams.RespectCanCollide = true
+	local function collisionSafe(focus, wanted)
+		local delta = wanted - focus
+		if delta.Magnitude < 0.01 then return wanted end
+		local hit = workspace:Raycast(focus, delta, rayParams)
+		return hit and hit.Position + hit.Normal * 1.2 or wanted
+	end
+	RunService:BindToRenderStep(CAMERA_BIND, Enum.RenderPriority.Camera.Value + 1, function(dt)
+		if not state.open or not state.alive or not ui.gui.Parent
+			or workspace.CurrentCamera ~= camera or not root.Parent
+			or not character:FindFirstChild("InSafeZone") or humanoid.Health <= 0
+			or motionReduced() then
+			releaseCamera(true)
 			return
 		end
-		currentStep = math.min(currentStep + 1, #STEPS)
-		showStep(currentStep)
-	end)
-
-	-- ── Botão VOLTAR
-	prevBtn.MouseButton1Click:Connect(function()
-		playSound(SFX.click)
-		currentStep = math.max(currentStep - 1, 1)
-		showStep(currentStep)
-	end)
-
-	-- ── Botão PULAR
-	skipBtn.MouseButton1Click:Connect(function()
-		playSound(SFX.click)
-		completeTutorialAction()
-	end)
-
-	-- ── Botão X (fechar sem concluir)
-	closeBtn.MouseButton1Click:Connect(function()
-		closeTutorial()
-	end)
-
-	-- ── Hover PC nos botões de navegação
-	if not isMobile then
-		local function addHover(btn, baseColor, hoverColor)
-			btn.MouseEnter:Connect(function()
-				TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = hoverColor })
-					:Play()
-			end)
-			btn.MouseLeave:Connect(function()
-				TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = baseColor })
-					:Play()
-			end)
+		if camera:GetAttribute("RetroVerseCameraOwner") ~= CAMERA_OWNER
+			or camera.CameraType ~= Enum.CameraType.Scriptable
+			or camera.CameraSubject ~= saved.subject then
+			releaseCamera(false)
+			return
 		end
-		addHover(prevBtn, Color3.fromRGB(50, 50, 70), Color3.fromRGB(70, 70, 100))
-		addHover(nextBtn, C.green, Color3.fromRGB(0, 255, 130))
-		addHover(skipBtn, Color3.fromRGB(45, 45, 60), Color3.fromRGB(65, 65, 85))
-		addHover(closeBtn, C.red, Color3.fromRGB(255, 70, 70))
-	end
-
-	-- =====================================
-	-- EXPOR FUNÇÕES GLOBAIS
-	-- =====================================
-
-	_G.OpenTutorialMenu = function()
-		openTutorial()
-	end
-
-	_G.CloseTutorialMenu = function()
-		closeTutorial()
-	end
-
-	-- =====================================
-	-- CARREGAR PROGRESSO E AUTO-SHOW
-	-- =====================================
-
-	task.spawn(function()
-		task.wait(2) -- aguardar carregamento da UI principal
-
-		local ok, progress = pcall(function()
-			return getTutorialProgress:InvokeServer()
-		end)
-
-		if ok and progress then
-			-- Auto-show para quem nunca completou
-			if progress.shouldAutoShow then
-				task.wait(1.5) -- aguardar outros sistemas abrirem
-				openTutorial()
+		-- Ataque/teleporte interrompe a câmera; não manter uma cutscene no combate.
+		if humanoid.Health < saved.lastHealth or (root.Position - saved.rootStart).Magnitude > 30 then
+			releaseCamera(true)
+			return
+		end
+		saved.lastHealth = humanoid.Health
+		saved.elapsed = saved.elapsed + math.min(dt, 0.1)
+		local shot = (SCENES[state.step] or {}).shot or "wide"
+		local focus = root.Position + Vector3.new(0, 1.5, 0)
+		local distance, elevation, fov = 15, 6, 64
+		if shot == "hero" then
+			distance, elevation, fov = 11, 3, 58
+		elseif shot == "lobby" then
+			local lobby = workspace:FindFirstChild("LobbyStructure")
+			local center = lobby and lobby:GetAttribute("SafeZoneCenter")
+			if typeof(center) == "Vector3" and (center - root.Position).Magnitude < 96 then
+				focus = center + Vector3.new(0, 5, 0)
 			end
-		else
-			warn("[TUTORIAL V4] ❌ Erro ao carregar progresso")
+			distance, elevation, fov = 38, 21, 68
+		end
+		local targetAngle = (shot == "hero" and 2.7 or 0.35) + math.sin(saved.elapsed * 0.22) * 0.09
+		saved.angle = saved.angle + (targetAngle - saved.angle) * (1 - math.exp(-2 * math.min(dt, 0.1)))
+		local angle = saved.angle
+		local offset = saved.heading:VectorToWorldSpace(Vector3.new(math.sin(angle) * distance, elevation, math.cos(angle) * distance))
+		local wanted = collisionSafe(focus, focus + offset)
+		local alpha = 1 - math.exp(-3.5 * math.min(dt, 0.1))
+		local blended = camera.CFrame.Position:Lerp(wanted, alpha)
+		blended = collisionSafe(focus, blended)
+		if (blended - focus).Magnitude > 0.1 then
+			local destination = CFrame.lookAt(blended, focus)
+			-- Recalcula a posição depois do Lerp: a câmera também respeita paredes na transição.
+			local rotated = camera.CFrame:Lerp(destination, alpha)
+			camera.CFrame = CFrame.new(blended) * (rotated - rotated.Position)
+		end
+		camera.Focus = CFrame.new(focus)
+		camera.FieldOfView = camera.FieldOfView + (fov - camera.FieldOfView) * alpha
+	end)
+end
+
+local function panelPosition()
+	-- A hotbar fica livre durante sua explicação.
+	return UDim2.fromScale(0.5, state.step == 9 and math.min(0.74, 0.18 + layout.height) or layout.bottom)
+end
+
+local function updateLayout()
+	local camera = workspace.CurrentCamera
+	local size = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	layout = Presentation.layout(size.X, size.Y)
+	ui.panel.Size = UDim2.fromScale(layout.width, layout.height)
+	if state.open then animate("panelPosition", ui.panel, { Position = panelPosition() }, 0.25) end
+	ui.mascot.Visible = not layout.portrait
+	ui.dialogue.Size = UDim2.fromScale(layout.portrait and 0.94 or 0.77, 0.86)
+	ui.dialogue.Position = UDim2.fromScale(layout.portrait and 0.03 or 0.21, 0.07)
+	ui.options.Size = UDim2.fromScale(layout.portrait and 0.94 or 0.59, math.clamp(44 / math.max(1, size.Y), 0.045, 0.13))
+	updateHighlight()
+end
+
+local function updateNavigation()
+	local lastPage = state.page == #state.pages
+	ui.counter.Text = string.format("%02d / %02d", state.step, #STEPS)
+	ui.hint.Text = string.format("%d/%d • %s", state.page, #state.pages,
+		state.typing and "Toque no texto para revelar tudo" or "Toque no texto ou em AVANÇAR")
+	ui.next.Text = state.typing and "LER TUDO >"
+		or (not lastPage and "CONTINUAR >" or (STEPS[state.step].isLast and "CONCLUIR" or "AVANÇAR >"))
+	ui.prev.TextTransparency = (state.step == 1 and state.page == 1) and 0.55 or 0
+	ui.prev.Selectable = state.step > 1 or state.page > 1
+	ui.skip.Text = STEPS[state.step].isLast and "FECHAR" or "PULAR"
+	ui.motion.Text = motionReduced() and "MOV.: OFF" or (lease and "CÂMERA: ON" or "CÂMERA: LIVRE")
+end
+
+local function revealAll()
+	state.typing = false
+	state.revealed = #state.glyphs
+	ui.dialogue.MaxVisibleGraphemes = -1
+	typeSound:Stop()
+	updateNavigation()
+end
+
+local function showPage()
+	state.generation = state.generation + 1
+	state.glyphs = {}
+	state.revealed, state.textClock = 0, 0
+	local pageText = state.pages[state.page] or ""
+	-- Text fica completo desde o começo, mantendo layout/tamanho constantes.
+	-- utf8.graphemes também preserva emojis unidos por ZWJ e acentos combinados.
+	for first, last in utf8.graphemes(pageText) do
+		table.insert(state.glyphs, pageText:sub(first, last))
+	end
+	ui.dialogue.Text = pageText
+	ui.dialogue.MaxVisibleGraphemes = 0
+	state.typing = #state.glyphs > 0
+	state.mascotVelocity = 1.1
+	ui.dialogue.TextTransparency = motionReduced() and 0 or 0.4
+	animate("dialogueFade", ui.dialogue, { TextTransparency = 0 }, 0.24)
+	if motionReduced() then revealAll() end
+	updateNavigation()
+end
+
+local function showStep(index)
+	state.step = math.clamp(index, 1, #STEPS)
+	state.page = 1
+	-- Limite fixado na abertura: girar o aparelho não reinicia nem perde a página.
+	state.pages = Presentation.pages(STEPS[state.step].dialogue, state.pageLimit or 140)
+	local step = STEPS[state.step]
+	ui.title.Text = step.title
+	ui.caption.Text = SCENES[state.step].hint
+	ui.speaker.TextColor3 = step.mascotColor
+	animate("accent", ui.accent, { BackgroundColor3 = step.mascotColor }, 0.3)
+	animate("border", ui.panelBorder, { Color = step.mascotColor }, 0.3)
+	animate("progress", ui.progress, {
+		Size = UDim2.fromScale((state.step - 1) / (#STEPS - 1), 1),
+		BackgroundColor3 = step.mascotColor,
+	}, 0.35)
+	animate("panelPosition", ui.panel, { Position = panelPosition() }, 0.3)
+	ui.wipe.Position = UDim2.fromScale(0, 0)
+	ui.wipe.BackgroundTransparency = motionReduced() and 1 or 0.15
+	animate("chapterSweep", ui.wipe, { Position = UDim2.fromScale(0.8, 0), BackgroundTransparency = 1 }, 0.6, Enum.EasingStyle.Sine)
+	showPage()
+	updateHighlight()
+end
+
+local closeTutorial
+local function runAnimation(dt)
+	if not state.alive or not ui.gui.Parent then return end
+	state.elapsed = state.elapsed + dt
+	if state.typing then
+		state.textClock = state.textClock + dt
+		local emitted = 0
+		while state.revealed < #state.glyphs and emitted < 12 do
+			local delay = Presentation.characterDelay(state.glyphs[state.revealed + 1], state.fastText)
+			if state.textClock < delay then break end
+			state.textClock = state.textClock - delay
+			state.revealed = state.revealed + 1
+			emitted = emitted + 1
+		end
+		ui.dialogue.MaxVisibleGraphemes = state.revealed
+		if state.sound and emitted > 0 and state.elapsed - (state.lastVoice or 0) > 0.085 then
+			state.lastVoice = state.elapsed
+			typeSound:Play()
+		end
+		if state.revealed >= #state.glyphs then revealAll() end
+	end
+	if not motionReduced() then
+		local target = state.typing and (1.02 + math.sin(state.elapsed * 10) * 0.015) or 1
+		state.mascotPosition, state.mascotVelocity = Presentation.spring(state.mascotPosition, state.mascotVelocity, target, 16, dt)
+		ui.mascotScale.Scale = state.mascotPosition
+		ui.mascot.Rotation = math.sin(state.elapsed * 1.5) * 1.3
+		ui.mouth.Size = UDim2.fromScale(0.4, state.typing and (0.08 + math.abs(math.sin(state.elapsed * 16)) * 0.16) or 0.07)
+		local blink = state.elapsed % 4.7 > 4.56
+		ui.eyeL.Size = UDim2.fromScale(0.12, blink and 0.035 or 0.18)
+		ui.eyeR.Size = ui.eyeL.Size
+		ui.targetBorder.Transparency = 0.12 + (math.sin(state.elapsed * 3) + 1) * 0.12
+		for _, motion in ipairs(buttonScales) do
+			motion.x, motion.v = Presentation.spring(motion.x, motion.v, motion.target, 24, dt)
+			motion.scale.Scale = motion.x
+		end
+	end
+	state.scanClock = state.scanClock + dt
+	if state.scanClock >= 0.25 then
+		state.scanClock = 0
+		updateHighlight()
+		updateNavigation()
+	end
+end
+
+local function openTutorial()
+	state.interacted = true
+	if not state.alive or state.open then return end
+	state.generation = state.generation + 1
+	state.open = true
+	state.completionSent = false
+	ui.gui.Enabled = true
+	ui.panel.Position = UDim2.fromScale(0.5, 1.6)
+	ui.panelScale.Scale = 0.96
+	updateLayout()
+	-- Páginas conservadoras também para quem girar para uma tela estreita depois.
+	state.pageLimit = math.min(layout.pageLimit, 140)
+	showStep(1)
+	startCamera()
+	updateNavigation()
+	animate("panelPosition", ui.panel, { Position = panelPosition() }, 0.45, Enum.EasingStyle.Back)
+	animate("panelScale", ui.panelScale, { Scale = 1 }, 0.38, Enum.EasingStyle.Back)
+	animate("shade", ui.shade, { BackgroundTransparency = 0.88 }, 0.3, Enum.EasingStyle.Sine)
+	animate("caption", ui.caption, { TextTransparency = 0 }, 0.35)
+	animate("topBar", ui.topBar, { Size = UDim2.fromScale(1, 0.018) }, 0.35)
+	animate("bottomBar", ui.bottomBar, { Size = UDim2.fromScale(1, 0.018) }, 0.35)
+	if heartbeatConnection then heartbeatConnection:Disconnect() end
+	heartbeatConnection = RunService.Heartbeat:Connect(runAnimation)
+	if UserInputService.GamepadEnabled then
+		state.previousSelection = GuiService.SelectedObject
+		GuiService.SelectedObject = ui.next
+	end
+	click()
+end
+
+closeTutorial = function(immediate)
+	if not state.open then return end
+	state.open = false
+	state.generation = state.generation + 1
+	local generation = state.generation
+	state.typing = false
+	typeSound:Stop()
+	if heartbeatConnection then heartbeatConnection:Disconnect(); heartbeatConnection = nil end
+	releaseCamera(true)
+	ui.target.Visible = false
+	if GuiService.SelectedObject and GuiService.SelectedObject:IsDescendantOf(ui.gui) then
+		local previous = state.previousSelection
+		GuiService.SelectedObject = previous and previous.Parent and previous or nil
+	end
+	cancelAnimations()
+	if immediate or motionReduced() then
+		ui.gui.Enabled = false
+		return
+	end
+	animate("panelPosition", ui.panel, { Position = UDim2.fromScale(0.5, 1.6) }, 0.26)
+	animate("shade", ui.shade, { BackgroundTransparency = 1 }, 0.26)
+	animate("caption", ui.caption, { TextTransparency = 1 }, 0.2)
+	animate("topBar", ui.topBar, { Size = UDim2.fromScale(1, 0) }, 0.25)
+	animate("bottomBar", ui.bottomBar, { Size = UDim2.fromScale(1, 0) }, 0.25)
+	task.delay(0.28, function()
+		if state.alive and not state.open and state.generation == generation then
+			ui.gui.Enabled = false
+			cancelAnimations()
 		end
 	end)
 end
 
--- =====================================
--- INICIALIZAÇÃO AO ENTRAR/RESPAWNAR
--- =====================================
-
-player.CharacterAdded:Connect(function()
-	task.wait(2)
-	if not tutorialGui or not tutorialGui.Parent then
-		createTutorialInterface()
-	end
-end)
-
-if player.Character then
-	createTutorialInterface()
-else
-	task.spawn(function()
-		task.wait(1)
-		createTutorialInterface()
-	end)
+local function complete()
+	if not state.open or state.completionSent then return end
+	state.completionSent = true
+	-- A UI não concede moedas nem presume que ganhou ao reler.
+	completeTutorial:FireServer()
+	closeTutorial()
 end
 
--- =====================================
--- REGISTRAR NO MENU UNIFICADO
--- =====================================
+local function nextPage()
+	if not state.open then return end
+	click()
+	if state.typing then
+		revealAll()
+	elseif state.page < #state.pages then
+		state.page = state.page + 1
+		showPage()
+	elseif STEPS[state.step].isLast then
+		complete()
+	else
+		showStep(state.step + 1)
+	end
+end
+
+track(ui.dialogue.Activated:Connect(nextPage))
+track(ui.next.Activated:Connect(nextPage))
+track(ui.prev.Activated:Connect(function()
+	if not state.open then return end
+	click()
+	if state.page > 1 then
+		state.page = state.page - 1
+		showPage()
+	elseif state.step > 1 then
+		showStep(state.step - 1)
+	end
+end))
+track(ui.close.Activated:Connect(function() click(); closeTutorial() end))
+track(ui.skip.Activated:Connect(function()
+	click()
+	if STEPS[state.step].isLast then closeTutorial() else complete() end
+end))
+local function applyMotionPreference()
+	if motionReduced() then
+		releaseCamera(true)
+		cancelAnimations()
+		ui.mascotScale.Scale, ui.mascot.Rotation = 1, 0
+		ui.mouth.Size = UDim2.fromScale(0.4, 0.07)
+		ui.wipe.BackgroundTransparency = 1
+		for _, motion in ipairs(buttonScales) do motion.scale.Scale = 1 end
+		if state.open then
+			ui.panel.Position = panelPosition()
+			ui.panelScale.Scale = 1
+			ui.dialogue.TextTransparency = 0
+			revealAll()
+		end
+	elseif state.open then
+		startCamera()
+	end
+	updateNavigation()
+end
+track(ui.motion.Activated:Connect(function()
+	state.reducedMotion = not state.reducedMotion
+	applyMotionPreference()
+end))
+track(GuiService:GetPropertyChangedSignal("ReducedMotionEnabled"):Connect(applyMotionPreference))
+track(VRService:GetPropertyChangedSignal("VREnabled"):Connect(applyMotionPreference))
+track(ui.speed.Activated:Connect(function()
+	state.fastText = not state.fastText
+	ui.speed.Text = state.fastText and "TEXTO: RÁPIDO" or "TEXTO: NORMAL"
+end))
+track(ui.sound.Activated:Connect(function()
+	state.sound = not state.sound
+	ui.sound.Text = state.sound and "SOM: ON" or "SOM: OFF"
+	if not state.sound then typeSound:Stop(); clickSound:Stop() end
+end))
+
+local function bindViewport()
+	if viewportConnection then viewportConnection:Disconnect() end
+	releaseCamera(true)
+	local camera = workspace.CurrentCamera
+	viewportConnection = camera and camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateLayout) or nil
+	updateLayout()
+	-- Uma câmera recém-substituída pode pertencer a outra cutscene. Não tomar posse automaticamente.
+end
+track(workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(bindViewport))
+local function bindCharacter(character)
+	if characterConnection then characterConnection:Disconnect() end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		characterConnection = humanoid.Died:Connect(function() closeTutorial(true) end)
+	end
+end
+track(player.CharacterRemoving:Connect(function() closeTutorial(true) end))
+track(player.CharacterAdded:Connect(function(character)
+	closeTutorial(true)
+	bindCharacter(character)
+end))
+track(GuiService.MenuOpened:Connect(function() closeTutorial(true) end))
+if player.Character then bindCharacter(player.Character) end
+bindViewport()
+
+_G.OpenTutorialMenu = openTutorial
+_G.CloseTutorialMenu = closeTutorial
+
+local function cleanup()
+	if not state.alive then return end
+	closeTutorial(true)
+	state.alive = false
+	releaseCamera(true)
+	cancelAnimations()
+	if heartbeatConnection then heartbeatConnection:Disconnect() end
+	if viewportConnection then viewportConnection:Disconnect() end
+	if characterConnection then characterConnection:Disconnect() end
+	for _, connection in ipairs(connections) do connection:Disconnect() end
+	table.clear(connections)
+	clickSound:Stop()
+	typeSound:Stop()
+	clickSound.Parent, typeSound.Parent = nil, nil
+	if _G.OpenTutorialMenu == openTutorial then _G.OpenTutorialMenu = nil end
+	if _G.CloseTutorialMenu == closeTutorial then _G.CloseTutorialMenu = nil end
+	ui.gui.Parent = nil
+end
+track(ui.gui.AncestryChanged:Connect(function()
+	if not ui.gui:IsDescendantOf(playerGui) then cleanup() end
+end))
+track(ui.gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+	if state.open and not ui.gui.Enabled then closeTutorial(true) end
+end))
+track(script.AncestryChanged:Connect(function()
+	if not script:IsDescendantOf(game) then cleanup() end
+end))
 
 task.spawn(function()
-	local timeout = 0
-	while not _G.RegisterMenuCategory and timeout < 15 do
-		task.wait(0.5)
-		timeout = timeout + 0.5
-	end
-
-	if _G.RegisterMenuCategory then
-		_G.RegisterMenuCategory("TUTORIAL", "❓", function()
-			if _G.OpenTutorialMenu then
-				_G.OpenTutorialMenu()
-			end
-		end, function()
-			if _G.CloseTutorialMenu then
-				_G.CloseTutorialMenu()
-			end
-		end, 8)
-
-		print("[TUTORIAL V4] ✓ Registrado no Menu Unificado: TUTORIAL")
-	else
-		warn("[TUTORIAL V4] ⚠️ Menu Unificado não encontrado — RegisterMenuCategory ausente")
+	local deadline = os.clock() + 30
+	while state.alive and not _G.RegisterMenuCategory and os.clock() < deadline do task.wait(0.25) end
+	if state.alive and _G.RegisterMenuCategory then
+		_G.RegisterMenuCategory("TUTORIAL", "❓", openTutorial, closeTutorial, 8)
 	end
 end)
 
-print([[
-╔════════════════════════════════════════════════════╗
-║  ✅ TUTORIAL MENU CLIENT V4 CARREGADO             ║
-╠════════════════════════════════════════════════════╣
-║  SUBSTITUI: TUTORIAL_MENU_CLIENT_V3               ║
-║  REMOVER:   TUTORIAL_MENU_CLIENT_V3               ║
-╠════════════════════════════════════════════════════╣
-║  NOVIDADES V4:                                     ║
-║  • 15 passos interativos cobrindo todos sistemas  ║
-║  • Mascote NOOB GUIA com caixa de diálogo RPG     ║
-║  • Efeito typewriter (texto digitado na tela)     ║
-║  • Seta animada apontando para elementos da UI    ║
-║  • Barra de progresso visual (0% → 100%)          ║
-║  • Slide-in / Slide-out suave na caixa            ║
-║  • Auto-show para novos jogadores                 ║
-║  • Sem botão próprio — usa Menu Unificado (☰)     ║
-╠════════════════════════════════════════════════════╣
-║  PASSOS COBERTOS:                                  ║
-║  1  Bem-vindo        9  Recomp. por kill          ║
-║  2  Zona Segura     10  Drop de moedas            ║
-║  3  Botão ☰         11  Personagens Bounty        ║
-║  4  Personagens     12  Sistema de Times          ║
-║  5  Loja            13  Recompensas Diárias       ║
-║  6  Inventário      14  Despertar                 ║
-║  7  Ir ao Mapa      15  Conclusão (+100 moedas)   ║
-║  8  Combate                                        ║
-╠════════════════════════════════════════════════════╣
-║  API Global:                                       ║
-║  • _G.OpenTutorialMenu()                          ║
-║  • _G.CloseTutorialMenu()                         ║
-╚════════════════════════════════════════════════════╝
-]])
+task.spawn(function()
+	local ok, progress = pcall(function() return getTutorialProgress:InvokeServer() end)
+	if not ok or type(progress) ~= "table" then
+		warn("[TUTORIAL V8] Progresso indisponível; o tutorial continua acessível pelo menu.")
+		return
+	end
+	if not progress.shouldAutoShow then return end
+	-- Espera o carregamento REAL; não cobre a LoadingScreen nem rouba a câmera dela.
+	local deadline = os.clock() + 90
+	while state.alive and not state.interacted and os.clock() < deadline do
+		local loading = playerGui:FindFirstChild("LoadingScreen")
+		local character = livingCharacter()
+		local menu = playerGui:FindFirstChild("UnifiedMenuV1")
+		local hub = menu and menu:FindFirstChild("HubFrame")
+		local loadingDone = game:IsLoaded() and (not loading or not loading.Enabled)
+		if loadingDone and character and character:FindFirstChild("InSafeZone")
+			and not GuiService.MenuIsOpen and not (hub and hub.Visible) then
+			openTutorial()
+			return
+		end
+		task.wait(0.3)
+	end
+end)
+
+print("[TUTORIAL V8] Câmera dinâmica + diálogo por grafemas + 24 etapas. Use o menu TUTORIAL.")

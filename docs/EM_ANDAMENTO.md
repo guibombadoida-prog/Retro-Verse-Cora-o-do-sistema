@@ -21,7 +21,6 @@ combine com o dono. Ao terminar, tire a linha.
 
 | Arquivo | Agente | PR | Situação |
 | --- | --- | --- | --- |
-| `src/StarterPlayer/StarterPlayerScripts/TutorialMenuClient_V2.client.lua`, `tests/TutorialPresentation.spec.luau`, `tests/tutorial_client_harness.luau` | Codex | nova PR | Tutorial V8: câmera dinâmica, transições e diálogo responsivo; iniciado 2026-09-07 |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
