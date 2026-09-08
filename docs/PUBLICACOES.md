@@ -11,6 +11,49 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-08 22:24 UTC — HOTFIX: câmera do tutorial nunca assumia
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 61, 60, 1, 0, 0, 0]` — execução #40, `main` em `b23f21b`
+
+**`TutorialMenuClient_V2` V8 → V8.1.** O dono relatou logo depois da
+publicação #38: *"o movimento e o botão da câmera não funciona"*.
+
+### Uma causa, dois sintomas
+
+`startCamera()` rodava **uma vez**, no instante da abertura. A guarda
+`canTakeCamera` exige a tag `InSafeZone` — que quem põe no personagem é o
+**servidor**, pelo `SpawnSystem`. Abrir o tutorial um segundo cedo demais,
+antes de a tag replicar, ou estando fora do lobby, fazia a recusa valer para a
+**sessão inteira**. Sem retentativa e sem uma palavra explicando.
+
+O botão MOV. parecia morto pela mesma razão: apertá-lo alternava
+`state.reducedMotion` e chamava a mesma `startCamera()`, que recusava de novo
+pela mesma guarda. Nada mudava na tela.
+
+### O que entra
+
+- **Retentativa** a cada 0,5 s dentro do `Heartbeat` que já existia, enquanto o
+  tutorial está aberto e a câmera livre. A cena assume sozinha assim que o
+  jogador entra na base, sem precisar fechar e reabrir.
+- **Motivo no botão.** `"CÂMERA: LIVRE"` era o mesmo texto para estar fora da
+  base, sem personagem, com a câmera tomada por outro sistema ou já
+  `Scriptable`. Agora o botão diz qual é.
+- **Garantia de movimento.** Sem cena em andamento, o bloqueio de movimento é
+  desfeito todo quadro. Travar o personagem é o pior estrago que este script
+  consegue causar, e não vale depender de um único caminho de saída.
+
+> **Armadilha de Lua que quase passou:** `cameraBlockReason()` nasceu na linha
+> 312 mas chama `livingCharacter()`, declarado só na 546. Isso não é erro de
+> sintaxe — vira leitura de um global inexistente e quebra em tempo de
+> execução. O `validar.sh` não pega esse tipo de defeito. Movido para depois
+> da dependência antes de publicar.
+
+> **Colisão de agente:** o Codex tinha reservado este mesmo arquivo para esta
+> mesma correção em `EM_ANDAMENTO.md`, e o Claude mexeu sem ler a tabela antes
+> — que é justamente o que o `AGENTS.md` manda fazer. A tabela foi atualizada
+> avisando que o hotfix já está na `main`, para ele revisar em vez de refazer.
+
 ## 2026-09-08 16:19 UTC — tutorial V8 cinematográfico
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 1 criados, 0 pastas criadas`
