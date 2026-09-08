@@ -11,6 +11,48 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-08 16:19 UTC — tutorial V8 cinematográfico
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 1 criados, 0 pastas criadas`
+Retorno: `["published", 61, 59, 1, 0, 1, 0]` — execução #38, `main` em `c941c8c`
+
+Merge da PR #11 do Codex, **auditado antes de publicar**. O código estava na
+`main` desde 13:12 mas a execução #37 tinha sido `[VERIFICAÇÃO]`, não
+publicação — o jogo continuava com o tutorial antigo até agora.
+
+**`TutorialMenuClient_V2` V8** — câmera com enquadramento de personagem e
+lobby, órbita discreta, FOV suavizado e raycast para não atravessar parede. A
+câmera é devolvida ao fechar, pular, morrer, sair do lobby, tomar dano,
+teleportar, abrir o menu do Roblox ou remover a GUI; outro dono de câmera não
+é sobrescrito, e VR ou a preferência de movimento reduzido desligam a parte
+cinematográfica.
+
+**`TutorialPresentation` (criado)** — ModuleScript com a matemática pura de
+mola e paginação, separada do resto justamente para poder ser testada sem o
+jogo rodando. É o `1 criados` desta publicação.
+
+### Auditoria antes de publicar
+
+O Codex evitou as cinco armadilhas do projeto:
+
+| | resultado |
+| --- | --- |
+| `TweenService:Create` / `:Cancel()` | 1 (no gerenciador) / 2 |
+| toque | `InputBegan`/`InputEnded`; `MouseEnter` só como extra |
+| `ZIndexBehavior` | `Sibling` |
+| aritmética com `uiScale` | nenhuma |
+| `BodyVelocity` / `:Destroy()` | zero |
+
+Os quatro laços `while` do arquivo são legítimos — subida de ancestrais,
+revelação de texto limitada a 12 glifos por quadro e duas esperas com prazo.
+Nenhum cria tween. `validar.sh` limpo, 67 scripts no repositório.
+
+> **Pendência conhecida:** a PR trouxe `tests/TutorialPresentation.spec.luau`,
+> `tests/tutorial_client_harness.luau` e `tools/test_tutorial.py`, mas o
+> `validate-code.yml` só executa `tests/PassiveCatalog.spec.luau`. Os testes
+> novos **não rodam em lugar nenhum** e vão apodrecer se ninguém os ligar ao
+> CI. Reportado ao dono; ele decidiu publicar primeiro.
+
 ## 2026-09-04 22:54 UTC — sistema de música: servidor robusto, cliente animado
 
 `[PUBLICAÇÃO] 2 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
