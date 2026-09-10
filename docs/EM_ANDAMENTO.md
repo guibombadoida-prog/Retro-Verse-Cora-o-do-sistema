@@ -30,6 +30,7 @@ combine com o dono. Ao terminar, tire a linha.
 | `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | Codex | #7 | V8, HUD responsivo |
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
+| `.github/workflows/validate-code.yml` (etapa de testes) | Claude | direto na main | ⚠️ Conferido antes de mexer: o PR #6 altera este arquivo mas **não toca a etapa de testes** — só o `find` e o bloco reutilizável. A etapa passou a rodar os três testes do repositório. Se o #6 for mesclado, os dois trechos convivem. |
 
 > Os oito scripts que rodavam no place sem cópia no repositório agora são
 > **seis**: `dmgindi` e `dmgindicator` viraram `DamageIndicatorServer` e

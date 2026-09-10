@@ -95,8 +95,25 @@ jobs:
           print(f"Cliente Open Cloud válido: tarefa com {len(source.encode('utf-8'))} bytes")
           PY
 
-      - name: Rodar teste de lógica pura
-        run: luau tests/PassiveCatalog.spec.luau
+      - name: Rodar os testes do repositório
+        shell: bash
+        run: |
+          # `set -e` importa aqui: com vários comandos num `run:`, sem ele
+          # só o último decide o resultado da etapa e um teste vermelho no
+          # meio passaria despercebido.
+          set -euo pipefail
+
+          # Lógica pura das passivas.
+          luau tests/PassiveCatalog.spec.luau
+
+          # Matemática de mola e paginação do tutorial.
+          luau tests/TutorialPresentation.spec.luau
+
+          # Regressões de ciclo de vida: este roda o LocalScript REAL do
+          # tutorial dentro de um Roblox falso, então pega coisa que
+          # nenhum teste de módulo puro pegaria — câmera que não é
+          # devolvida, movimento que fica bloqueado, conexão que vaza.
+          python3 tools/test_tutorial.py --luau luau
 
       - name: Montar o place e o pacote de código
         shell: bash
