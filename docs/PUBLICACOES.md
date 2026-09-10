@@ -11,6 +11,51 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-10 22:02 UTC — HUD do HP pequeno no canto superior direito
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 61, 60, 1, 0, 0, 0]` — execução #42, `main` em `da7a976`
+
+**`HealthDisplay` V8.5 → V9.** O dono pediu a UI inteira pequena e no canto
+superior direito.
+
+### Quem mandava no celular era o piso, não as frações
+
+Medido antes de mexer: em **todo** aparelho de celular o HUD estava travado no
+piso `ESCALA_MIN = 0.46`. O resultado de `min(largura, altura)` caía abaixo de
+0.46 e o clamp puxava de volta.
+
+Ou seja, baixar `FRACAO_ALTURA` sozinho — que é exatamente o que o comentário
+do V8.2 mandava fazer — **não mudaria nada** no celular. Isso também explica
+por que os acertos do V8.1 e do V8.2 renderam menos do que os números
+prometiam: eles mexeram nas frações, e no celular quem decidia era o piso.
+
+Para encolher de verdade é preciso baixar as frações **e** o piso juntos, e
+junto deles os mínimos do `UITextSizeConstraint` — senão a caixa encolhe, o
+texto bate no próprio mínimo e transborda.
+
+| tela | antes | agora |
+| --- | --- | --- |
+| celular deitado | 193 px — 25.4% | **126 px — 16.6%** |
+| celular do print | 193 px — 21.5% | **126 px — 14.0%** |
+| tablet | 274 px — 23.0% | **185 px — 15.5%** |
+| desktop | 357 px — 18.6% | **231 px — 12.0%** |
+
+### Posição
+
+Âncora `(0.5, 0)` → `(1, 0)`, posição na borda direita menos a margem. A
+âncora no canto importa por causa do `UIScale`: ele encolhe o HUD **em direção
+ao ponto ancorado**, então o canto superior direito fica parado em qualquer
+escala, em vez de a caixa deslizar de aparelho para aparelho.
+
+De quebra o HUD sai de cima do aviso de alvo do `WantedClient`, que é
+centralizado no topo — a sobreposição registrada no V8.4 como efeito colateral
+conhecido deixa de existir.
+
+> O comentário de afinação foi reescrito. Ele dizia para **não** descer o piso
+> abaixo de 0.46, orientação que agora está errada e faria o próximo agente
+> desfazer esta mudança achando que estava consertando algo.
+
 ## 2026-09-08 22:24 UTC — HOTFIX: câmera do tutorial nunca assumia
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
