@@ -27,7 +27,7 @@ combine com o dono. Ao terminar, tire a linha.
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
 | `src/ServerScriptService/SpawnSystem.server.lua` | Claude | #5 | **PRONTO** — V9, base da zona segura |
 | `src/ServerScriptService/DuelSystemServer.server.lua` | Claude | #5 | **PRONTO** — V3, arena + arquibancada |
-| `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | Codex | #7 | V8, HUD responsivo |
+| `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | ~~Codex~~ livre | ~~#7~~ mesclado | Entrada velha: o PR #7 foi mesclado em 02/09. O Claude fez o V9 (HUD pequeno no canto superior direito) direto na main. |
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
 | `.github/workflows/validate-code.yml` (etapa de testes) | Claude | direto na main | ⚠️ Conferido antes de mexer: o PR #6 altera este arquivo mas **não toca a etapa de testes** — só o `find` e o bloco reutilizável. A etapa passou a rodar os três testes do repositório. Se o #6 for mesclado, os dois trechos convivem. |

@@ -1,5 +1,5 @@
 -- ============================================
--- HEALTH DISPLAY V8.5 - HUD RESPONSIVO E ANIMADO
+-- HEALTH DISPLAY V9 - HUD PEQUENO NO CANTO SUPERIOR DIREITO
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "HealthDisplay"
 -- SUBSTITUI: HealthDisplay V7
@@ -58,14 +58,35 @@ local HUD_HEIGHT = MAIN_HEIGHT + HUD_GAP + AWAKEN_HEIGHT
 -- pequeno ao desktop. O V8.1 deixava entre 26% e 30%, que ainda era
 -- grande demais para uma barra de vida: HUD é canto de tela, não painel.
 --
--- Para deixar menor, baixe FRACAO_ALTURA — é ela que costuma limitar em
--- celular deitado. Não desça o piso de ESCALA_MIN muito abaixo de 0.46:
--- o texto tem UITextSizeConstraint com mínimo de 8 a 9 px e para de
--- caber.
-local FRACAO_LARGURA = 0.23
-local FRACAO_ALTURA = 0.16
-local ESCALA_MIN = 0.46
-local ESCALA_MAX = 0.85
+-- (V9) HUD PEQUENO NO CANTO SUPERIOR DIREITO.
+--
+-- ⚠️ QUEM MANDA NO CELULAR É O PISO, NÃO AS FRAÇÕES.
+--
+-- Medido antes de mexer, em todo aparelho de celular o resultado do
+-- min() caía ABAIXO de ESCALA_MIN e era puxado de volta para 0.46 pelo
+-- clamp. Ou seja: baixar FRACAO_ALTURA sozinho não mudava NADA no
+-- celular — o piso comia o ajuste. Foi por isso que os acertos do V8.1
+-- e do V8.2 renderam menos do que os números prometiam.
+--
+-- Para encolher de verdade é preciso baixar as frações E o piso juntos,
+-- e junto deles os mínimos do UITextSizeConstraint — senão a caixa
+-- encolhe, o texto bate no próprio mínimo e transborda.
+--
+--   tela                     antes            agora
+--   celular deitado          193 px  25.4%    126 px  16.6%
+--   celular do print         193 px  21.5%    126 px  14.0%
+--   tablet                   274 px  23.0%    185 px  15.5%
+--   desktop                  357 px  18.6%    231 px  12.0%
+--
+-- Para afinar de novo: as frações governam telas grandes, o piso governa
+-- celular. Mexer no piso sem mexer nos mínimos de texto quebra a fonte.
+local FRACAO_LARGURA = 0.15
+local FRACAO_ALTURA = 0.10
+local ESCALA_MIN = 0.30
+local ESCALA_MAX = 0.55
+
+-- Distância até as bordas de cima e da direita.
+local MARGEM = 8
 
 
 -- Evita HUD duplicado quando o script é recarregado durante um teste.
@@ -86,7 +107,12 @@ HealthGui.Parent = PlayerGui
 -- alinhamento e espaçamento idênticos em qualquer proporção de tela.
 local HudRoot = Instance.new("Frame")
 HudRoot.Name = "HudRoot"
-HudRoot.AnchorPoint = Vector2.new(0.5, 0)
+-- (V9) Âncora no canto superior DIREITO. Isso importa por causa do
+-- UIScale: ele encolhe o HUD em direção ao ponto ancorado, então o canto
+-- fica parado em qualquer escala, em vez de a caixa deslizar conforme o
+-- aparelho. De quebra sai de cima do aviso de alvo do WantedClient, que
+-- é centralizado no topo.
+HudRoot.AnchorPoint = Vector2.new(1, 0)
 HudRoot.Size = UDim2.fromOffset(HUD_WIDTH, HUD_HEIGHT)
 HudRoot.BackgroundTransparency = 1
 HudRoot.Parent = HealthGui
@@ -131,8 +157,8 @@ TitleLabel.TextStrokeColor3 = COLORS.background
 TitleLabel.Parent = HeaderBar
 
 local TitleConstraint = Instance.new("UITextSizeConstraint")
-TitleConstraint.MinTextSize = 10
-TitleConstraint.MaxTextSize = 18
+TitleConstraint.MinTextSize = 7
+TitleConstraint.MaxTextSize = 13
 TitleConstraint.Parent = TitleLabel
 
 local BarBackground = Instance.new("Frame")
@@ -175,8 +201,8 @@ HealthText.TextStrokeColor3 = COLORS.background
 HealthText.Parent = MainContainer
 
 local HealthTextConstraint = Instance.new("UITextSizeConstraint")
-HealthTextConstraint.MinTextSize = 9
-HealthTextConstraint.MaxTextSize = 17
+HealthTextConstraint.MinTextSize = 8
+HealthTextConstraint.MaxTextSize = 13
 HealthTextConstraint.Parent = HealthText
 
 -- (V8.1) O indicador ficava POR CIMA da barra de vida.
@@ -242,8 +268,8 @@ EnergyText.Visible = false
 EnergyText.Parent = MainContainer
 
 local EnergyTextConstraint = Instance.new("UITextSizeConstraint")
-EnergyTextConstraint.MinTextSize = 8
-EnergyTextConstraint.MaxTextSize = 15
+EnergyTextConstraint.MinTextSize = 6
+EnergyTextConstraint.MaxTextSize = 11
 EnergyTextConstraint.Parent = EnergyText
 
 local AwakenBackground = Instance.new("Frame")
@@ -283,8 +309,8 @@ AwakenText.ZIndex = 3
 AwakenText.Parent = AwakenBackground
 
 local AwakenTextConstraint = Instance.new("UITextSizeConstraint")
-AwakenTextConstraint.MinTextSize = 8
-AwakenTextConstraint.MaxTextSize = 14
+AwakenTextConstraint.MinTextSize = 6
+AwakenTextConstraint.MaxTextSize = 10
 AwakenTextConstraint.Parent = AwakenText
 
 -- =====================================
@@ -371,7 +397,7 @@ local function applyResponsiveLayout()
 	local heightScale = math.max(1, viewport.Y * FRACAO_ALTURA) / HUD_HEIGHT
 	ResponsiveScale.Scale =
 		math.clamp(math.min(widthScale, heightScale), ESCALA_MIN, ESCALA_MAX)
-	HudRoot.Position = UDim2.new(0.5, 0, 0, getTopInset() + 8)
+	HudRoot.Position = UDim2.new(1, -MARGEM, 0, getTopInset() + MARGEM)
 end
 
 local function bindViewport()
