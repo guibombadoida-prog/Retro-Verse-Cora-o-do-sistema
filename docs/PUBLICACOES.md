@@ -11,6 +11,44 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-10 22:06 UTC — câmera do tutorial parou de tremer
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 61, 60, 1, 0, 0, 0]` — execução #44, `main` em `8b9d1eb`
+
+**`TutorialMenuClient_V2` V8.1 → V8.2.** O dono relatou a câmera dinâmica de
+movimentação bugada no tutorial.
+
+### A rotação era suavizada duas vezes
+
+Cada quadro fazia, nesta ordem:
+
+```
+blended = lerp(posição atual, posição desejada, alpha)   -- posição suavizada
+destino = lookAt(blended, focus)                          -- rotação CERTA
+rotated = lerp(rotação atual, destino, alpha)             -- suavizada DE NOVO
+```
+
+A câmera acabava **na posição nova olhando para uma direção entre a antiga e a
+nova**. O atraso dependia de `alpha`, que vem do `dt`; num celular com FPS
+variável o `dt` varia a cada quadro, então o atraso variava junto e o
+personagem balançava dentro do quadro em vez de ficar parado no centro.
+
+A posição já é suavizada pelo `blended`. Aplicar o `lerp` de novo na rotação
+suaviza um valor que já estava suavizado. O V8.2 aponta direto:
+
+```lua
+camera.CFrame = CFrame.lookAt(blended, focus)
+```
+
+### Verificação
+
+- `tools/test_tutorial.py` — 31 regressões de ciclo de vida passaram. Esse teste
+  carrega o LocalScript de verdade, então confirma que a câmera continua sendo
+  devolvida em toda saída.
+- `TutorialPresentation.spec.luau` — 520 verificações passaram.
+- `verificar` (execução #43): 1 diferente, 0 novos, 0 renomeados, 0 problemas.
+
 ## 2026-09-10 22:02 UTC — HUD do HP pequeno no canto superior direito
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
