@@ -1,6 +1,12 @@
 -- Nome: TutorialMenuClient_V2
 -- Coloque em: StarterPlayer > StarterPlayerScripts
--- V8.1 — tutorial cinematográfico retrô, responsivo, com 24 etapas.
+-- V8.2 — tutorial cinematográfico retrô, responsivo, com 24 etapas.
+--
+-- (V8.2) A CÂMERA TREMIA. A posição era suavizada e a rotação era
+-- suavizada OUTRA VEZ por cima da posição já suavizada, então a câmera
+-- ficava na posição nova olhando para uma direção antiga. O atraso
+-- dependia do dt, e com FPS variável o personagem balançava dentro do
+-- enquadramento a cada quadro.
 --
 -- (V8.1) A CÂMERA NUNCA ASSUMIA E O BOTÃO PARECIA MORTO — uma causa só.
 -- startCamera() rodava UMA VEZ, na abertura. A guarda exige a tag
@@ -710,10 +716,24 @@ local function startCamera()
 		local blended = camera.CFrame.Position:Lerp(wanted, alpha)
 		blended = collisionSafe(focus, blended)
 		if (blended - focus).Magnitude > 0.1 then
-			local destination = CFrame.lookAt(blended, focus)
-			-- Recalcula a posição depois do Lerp: a câmera também respeita paredes na transição.
-			local rotated = camera.CFrame:Lerp(destination, alpha)
-			camera.CFrame = CFrame.new(blended) * (rotated - rotated.Position)
+			-- (V8.2) A ROTAÇÃO ERA SUAVIZADA DUAS VEZES.
+			--
+			-- `blended` já é a posição suavizada deste quadro. O V8
+			-- calculava lookAt(blended, focus) — que é a rotação CERTA
+			-- para essa posição — e então dava mais um Lerp nela a
+			-- partir da rotação anterior. Resultado: a câmera ficava
+			-- NA posição nova olhando para um ponto entre a direção
+			-- velha e a nova, ou seja, a rotação corria atrás da
+			-- posição.
+			--
+			-- O quanto ela atrasava dependia de `alpha`, que depende do
+			-- dt. Com FPS variável — celular — o atraso mudava a cada
+			-- quadro e o personagem balançava dentro do enquadramento.
+			-- Era esse o tremor da câmera.
+			--
+			-- A suavização já aconteceu na posição. Daqui a câmera só
+			-- precisa olhar para o foco, direto.
+			camera.CFrame = CFrame.lookAt(blended, focus)
 		end
 		camera.Focus = CFrame.new(focus)
 		camera.FieldOfView = camera.FieldOfView + (fov - camera.FieldOfView) * alpha
