@@ -11,6 +11,86 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-12 19:18 UTC — console de comandos retro
+
+`[PUBLICAÇÃO] 2 atualizados, 0 renomeados, 1 criados, 0 pastas criadas`
+Retorno: `["published", 79, 76, 2, 0, 1, 0]` — execução #50, `main` em `bc60ef9`
+
+`Resumo: 79 scripts; 76 iguais; 2 diferentes; 0 renomeados; 1 novos; 0 pastas
+novas; 9 só no place; 0 problemas`
+
+Merge do PR #14. Motor de comandos próprio do RetroVerse, formato inspirado no
+Adonis. Decisões: [`CONSOLE_ADMIN.md`](CONSOLE_ADMIN.md).
+
+- **`RetroCommands`** (novo, ModuleScript) — tabela de 34 comandos + dispatcher.
+- **`AdminSystemServer`** V8 → **V9** — monta o contexto, resolve o nível,
+  entrega o resultado na tela.
+- **`AdminMenuClient`** V12 → **V13** — aba CONSOLE.
+
+Os três foram publicados **juntos de propósito**: o V13 usa os remotes
+`AdminListCommands` e `AdminRunCommand`, que só existem no V9. O client degrada
+com aviso na tela se o servidor for antigo; o contrário não.
+
+### Os quatro defeitos do V8 que isto conserta
+
+1. **Silêncio.** `Players:FindFirstChild(args[2])` devolvendo `nil` caía no fim
+   do `if` e **nada acontecia** — nem erro, nem aviso. O admin não distinguia
+   "errei o nome" de "o jogador saiu" de "esse comando não existe".
+2. **Nome exato obrigatório.** Sem `me`, `all`, `others` nem prefixo parcial. O
+   dono joga no celular: digitar o username inteiro com a capitalização certa
+   era a diferença entre o comando existir e não existir.
+3. **`;help` imprimia no F9.** No celular não há F9 — a lista de comandos era
+   invisível justamente para quem mais precisava dela.
+4. **Comando era código.** O painel não podia listar o que existe, então a lista
+   vivia duplicada à mão nos dois lados.
+
+O contrato central: **todo caminho do dispatcher devolve mensagem.** O teste
+roda os 34 comandos sem argumento e depois todos com alvo inexistente, cobrando
+mensagem não vazia em cada um. Alvo ambíguo é **recusado** com a lista de quem
+casou, nunca resolvido por conta própria — escolher errado num `;kill` é pior do
+que não fazer nada.
+
+### Mudança de permissão, uma só
+
+**`;reset` subiu para DONO.** Apaga dados sem desfazer, e no V8 qualquer admin
+rodava em qualquer conta. `addadmin`/`deladmin` ficaram em CHEFE por paridade
+com o V8 e com a aba ADMINS do painel. Admin do `_G.AdminRegistry` entra como
+CHEFE, então **todo comando que ele já tinha continua na mão dele**.
+
+### Bug de UI achado no caminho
+
+A régua das abas do painel era fixa (`tabStep = 0.165`). Com a sétima aba,
+7 × 0.165 = 1.155 — ela **sairia do painel**. Passou a ser derivada de
+`#tabNames`, então a oitava não quebra.
+
+### O `verificar` de novo foi o que deu a garantia
+
+Execução #49, na branch: `["check", 79, 76, 2, 0, 1, 0]` — 1 novo, 2 diferentes,
+**0 renomeados, 0 problemas**, e os 9 scripts que só existem no place seguem os
+mesmos nove, nenhum parecido com o console. Depois do merge, `git diff` provou
+que o `src/` da `main` era idêntico ao que a #49 aprovou, antes de publicar.
+
+### Duas coisas aprendidas quebrando
+
+Registradas no `AGENTS.md`:
+
+- **Backtick não passa em `src/`.** A checagem 7 do `validar.sh` usa o `luac` do
+  Lua 5.4, que não parseia interpolação Luau. Todo backtick que existe em `src/`
+  está dentro de comentário, e é por isso.
+- `string.format("achei "%s" aqui", x)` — aspas internas sem escape — **passa**
+  pelo `luac`, porque lê como `"achei " % s("aqui")`: sintaxe válida, erro em
+  runtime. O validador aprovou; **quem pegou foi o teste.**
+
+### Rede de proteção
+
+`tests/RetroCommands.spec.luau`, ligado no CI: **876 verificações, 34 comandos.**
+Verificado contra quatro regressões plantadas — ambiguidade escolhendo o
+primeiro, `;reset` rebaixado, comando voltando calado e `listarPara` vazando a
+função — e reprovou todas. A terceira só reprovou depois de fechar um buraco no
+próprio teste: nenhum comando real devolve mensagem vazia, então o caminho do
+fallback nunca era exercido.
+
+
 ## 2026-09-12 17:00 UTC — Adonis admin no jogo
 
 `[PUBLICAÇÃO] 0 atualizados, 0 renomeados, 17 criados, 7 pastas criadas`

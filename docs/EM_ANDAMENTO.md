@@ -21,7 +21,7 @@ combine com o dono. Ao terminar, tire a linha.
 
 | Arquivo | Agente | PR | Situação |
 | --- | --- | --- | --- |
-| `src/ServerScriptService/RetroCommands.lua` (novo), `src/ServerScriptService/AdminSystemServer.server.lua` (V9), `src/StarterPlayer/StarterPlayerScripts/AdminMenuClient.client.lua` (V13) | Claude | #14 | **PRONTO, NÃO PUBLICADO** — console de comandos retro. Ver o recado abaixo. Doc: [`CONSOLE_ADMIN.md`](CONSOLE_ADMIN.md). |
+| `src/ServerScriptService/RetroCommands.lua` (novo), `src/ServerScriptService/AdminSystemServer.server.lua` (V9), `src/StarterPlayer/StarterPlayerScripts/AdminMenuClient.client.lua` (V13) | Claude | ~~#14~~ mesclado | **NO AR** — console publicado na execução #50 (2 atualizados, 1 criado). Ver o recado abaixo. Doc: [`CONSOLE_ADMIN.md`](CONSOLE_ADMIN.md). |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
