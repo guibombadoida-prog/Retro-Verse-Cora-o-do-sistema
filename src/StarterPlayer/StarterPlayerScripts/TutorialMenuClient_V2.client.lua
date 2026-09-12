@@ -1,6 +1,8 @@
 -- Nome: TutorialMenuClient_V2
 -- Coloque em: StarterPlayer > StarterPlayerScripts
--- V8.2 — tutorial cinematográfico retrô, responsivo, com 24 etapas.
+-- V8.3 — tutorial cinematográfico retrô, responsivo, com 24 etapas.
+-- V8.3: retentativa somente para um pedido pendente, nunca após interrupção.
+-- CÂMERA e ANIM. são opções independentes; andar/pular devolve a câmera normal.
 --
 -- (V8.2) A CÂMERA TREMIA. A posição era suavizada e a rotação era
 -- suavizada OUTRA VEZ por cima da posição já suavizada, então a câmera
@@ -14,15 +16,10 @@
 -- abrir o tutorial um segundo cedo demais, ou de fora do lobby, fazia a
 -- recusa valer para a sessão inteira, em silêncio. E o botão MOV. só
 -- chamava a mesma startCamera(), que recusava de novo — daí a impressão
--- de botão sem função. Agora ele tenta de novo a cada 0,5 s enquanto o
--- tutorial está aberto, então a cena assume sozinha assim que o jogador
--- entra na base, e o botão mostra o MOTIVO da recusa em vez de um
--- "CÂMERA: LIVRE" que não explicava nada.
+-- de botão sem função. V8.1 adicionou retentativa a cada 0,5 s;
+-- V8.3 limita essa espera a um pedido pendente e mostra o motivo na UI.
 --
--- Junto vai uma garantia: sem cena em andamento, o bloqueio de movimento
--- é desfeito todo quadro. Travar o personagem é o pior estrago que este
--- script consegue causar, e não vale depender de um único caminho de
--- saída para desfazer isso.
+-- V8.3 remove o bloqueio de movimento: os controles nativos continuam ativos.
 -- Atualiza o MESMO LocalScript V7; mantém as APIs do menu unificado e os remotes.
 -- Câmera apenas na zona segura, com devolução no fechamento/respawn/interrupção.
 -- Typewriter por grafemas, páginas legíveis e animações canceláveis.
@@ -305,6 +302,7 @@ local state = {
 	step = 1, page = 1, pages = {}, typing = false, glyphs = {},
 	revealed = 0, textClock = 0, elapsed = 0, scanClock = 0,
 	reducedMotion = false, fastText = false, sound = true,
+	cameraEnabled = true, cameraPending = false, cameraRetry = 0,
 	mascotPosition = 1, mascotVelocity = 0, completionSent = false,
 }
 local ui, connections, tweens, buttonScales = {}, {}, {}, {}
@@ -322,7 +320,7 @@ local function motionReduced()
 end
 
 
--- Une référence par canal; un nouveau mouvement annule son prédécesseur.
+-- Uma referência por canal; a animação nova cancela a anterior.
 local function animate(key, object, properties, duration, style)
 	local old = tweens[key]
 	if old then
@@ -523,10 +521,15 @@ make("UIListLayout", ui.options, "Buttons", {
 	FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder,
 	Padding = UDim.new(0.02, 0),
 })
-ui.motion = button(ui.options, "Motion", "CÂMERA: ON", 0.38)
-ui.speed = button(ui.options, "TextSpeed", "TEXTO: NORMAL", 0.36)
-ui.sound = button(ui.options, "Voice", "SOM: ON", 0.22)
-ui.motion.LayoutOrder, ui.speed.LayoutOrder, ui.sound.LayoutOrder = 1, 2, 3
+ui.motion = button(ui.options, "Motion", "CÂMERA: ON", 0.30)
+ui.animations = button(ui.options, "AnimationMotion", "ANIM.: ON", 0.22)
+ui.speed = button(ui.options, "TextSpeed", "TEXTO: 1x", 0.24)
+ui.sound = button(ui.options, "Voice", "SOM: ON", 0.18)
+ui.motion.LayoutOrder, ui.animations.LayoutOrder, ui.speed.LayoutOrder, ui.sound.LayoutOrder = 1, 2, 3, 4
+ui.cameraHint = text(ui.root, "CameraStatus", "", UDim2.fromScale(0.59, 0.04), UDim2.fromScale(0.98, 0.1), 16)
+ui.cameraHint.AnchorPoint = Vector2.new(1, 0)
+ui.cameraHint.TextXAlignment = Enum.TextXAlignment.Right
+ui.cameraHint.TextColor3 = C.cyan
 
 local function livingCharacter()
 	local character = player.Character
@@ -546,31 +549,37 @@ end
 -- inteira, sem uma palavra explicando. E o botão parecia morto, porque
 -- apertá-lo só chamava a mesma startCamera() que recusava de novo.
 --
--- Agora a recusa tem nome, e o nome vai para o botão.
+-- V8.3 mostra o motivo abaixo dos botões para preservar a legibilidade.
+local function movementRequested(humanoid)
+	-- MoveDirection vem dos controles reais: teclado, controle e joystick de toque.
+	return humanoid and (humanoid.MoveDirection.Magnitude > 0.05 or humanoid.Jump)
+end
+
 local function cameraBlockReason()
 	if motionReduced() then
-		return VRService.VREnabled and "vr"
-			or (GuiService.ReducedMotionEnabled and "sistema" or "desligado")
+		return VRService.VREnabled and "Câmera livre no modo VR"
+			or (GuiService.ReducedMotionEnabled and "Movimento reduzido nas configurações do Roblox"
+				or "Ative ANIM. para usar a câmera cinematográfica")
 	end
 	if not state.open then
-		return "fechado"
+		return "Tutorial fechado"
 	end
 	local character = livingCharacter()
 	if not character then
-		return "sem personagem"
+		return "Aguardando seu personagem"
 	end
 	if not character:FindFirstChild("InSafeZone") then
-		return "fora da base"
+		return "A câmera cinematográfica funciona na zona segura"
 	end
 	local camera = workspace.CurrentCamera
 	if not camera then
-		return "sem camera"
+		return "Aguardando a câmera do jogo"
 	end
 	if camera:GetAttribute("RetroVerseCameraOwner") ~= nil then
-		return "outro sistema"
+		return "Outro sistema está usando a câmera"
 	end
 	if camera.CameraType == Enum.CameraType.Scriptable then
-		return "camera ocupada"
+		return "Aguardando a outra cena terminar"
 	end
 	return nil
 end
@@ -578,7 +587,9 @@ end
 local function releaseCamera(restore)
 	local old = lease
 	lease = nil
+	state.cameraPending, state.cameraRetry = false, 0
 	RunService:UnbindFromRenderStep(CAMERA_BIND)
+	-- Limpa a ação antiga deste tutorial. V8.3 não cria bloqueio de movimento.
 	ContextActionService:UnbindAction(CONTROL_BIND)
 	if not old then return end
 	local camera = old.camera
@@ -636,9 +647,14 @@ local function updateHighlight()
 end
 
 local function startCamera()
-	if lease then return end
+	if lease or not state.cameraEnabled or not state.cameraPending
+		or not state.alive or not ui.gui.Enabled or GuiService.MenuIsOpen then return end
 	local camera = workspace.CurrentCamera
 	local character, humanoid, root = livingCharacter()
+	if movementRequested(humanoid) then
+		state.cameraPending = false
+		return
+	end
 	if not Presentation.canTakeCamera({
 		open = state.open, alive = character ~= nil,
 		safe = character ~= nil and character:FindFirstChild("InSafeZone") ~= nil,
@@ -654,15 +670,9 @@ local function startCamera()
 		lastHealth = humanoid.Health, elapsed = 0, rootStart = root.Position, angle = 0.35,
 	}
 	lease = saved
+	state.cameraPending, state.cameraRetry = false, 0
 	camera:SetAttribute("RetroVerseCameraOwner", CAMERA_OWNER)
 	camera.CameraType = Enum.CameraType.Scriptable
-	-- Bloqueia só as ações de movimento deste tutorial; não altera WalkSpeed,
-	-- Anchored ou PlayerModule e não dá proteção fora do servidor.
-	ContextActionService:BindActionAtPriority(CONTROL_BIND, function()
-		return Enum.ContextActionResult.Sink
-	end, false, Enum.ContextActionPriority.High.Value,
-		Enum.PlayerActions.CharacterForward, Enum.PlayerActions.CharacterBackward,
-		Enum.PlayerActions.CharacterLeft, Enum.PlayerActions.CharacterRight, Enum.PlayerActions.CharacterJump)
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 	rayParams.FilterDescendantsInstances = { character }
@@ -677,7 +687,7 @@ local function startCamera()
 		if not state.open or not state.alive or not ui.gui.Parent
 			or workspace.CurrentCamera ~= camera or not root.Parent
 			or not character:FindFirstChild("InSafeZone") or humanoid.Health <= 0
-			or motionReduced() then
+			or motionReduced() or movementRequested(humanoid) then
 			releaseCamera(true)
 			return
 		end
@@ -755,6 +765,10 @@ local function updateLayout()
 	ui.dialogue.Size = UDim2.fromScale(layout.portrait and 0.94 or 0.77, 0.86)
 	ui.dialogue.Position = UDim2.fromScale(layout.portrait and 0.03 or 0.21, 0.07)
 	ui.options.Size = UDim2.fromScale(layout.portrait and 0.94 or 0.59, math.clamp(44 / math.max(1, size.Y), 0.045, 0.13))
+	local optionHeight = ui.options.Size.Y.Scale
+	ui.cameraHint.Size = UDim2.fromScale(ui.options.Size.X.Scale, optionHeight * 0.6)
+	ui.cameraHint.Position = UDim2.fromScale(0.98, 0.025 + optionHeight * 1.1)
+	ui.caption.Position = UDim2.fromScale(0.14, 0.04 + optionHeight * 1.8)
 	updateHighlight()
 end
 
@@ -770,14 +784,18 @@ local function updateNavigation()
 	ui.skip.Text = STEPS[state.step].isLast and "FECHAR" or "PULAR"
 	-- (V8.1) "CÂMERA: LIVRE" não dizia nada: o jogador via o mesmo texto
 	-- estando fora da base, sem personagem ou com a câmera tomada por
-	-- outro sistema. Agora o botão mostra o motivo real da recusa.
-	if motionReduced() then
-		ui.motion.Text = "MOV.: OFF"
-	elseif lease then
+	-- outro sistema. Agora a linha de estado mostra o motivo real da recusa.
+	ui.animations.Text = motionReduced() and "ANIM.: OFF" or "ANIM.: ON"
+	if lease then
 		ui.motion.Text = "CÂMERA: ON"
+		ui.cameraHint.Text = "Para assumir o controle, mova-se ou desligue a CÂMERA"
+	elseif not state.cameraEnabled then
+		ui.motion.Text = "CÂMERA: OFF"
+		ui.cameraHint.Text = "Câmera livre • o diálogo continua"
 	else
 		local motivo = cameraBlockReason()
-		ui.motion.Text = motivo and ("CÂMERA: " .. string.upper(motivo)) or "CÂMERA: LIVRE"
+		ui.motion.Text = state.cameraPending and "CÂMERA: ESPERA" or "CÂMERA: LIGAR"
+		ui.cameraHint.Text = motivo or "Câmera livre • toque em CÂMERA para iniciar a cena"
 	end
 end
 
@@ -837,27 +855,17 @@ local function runAnimation(dt)
 	if not state.alive or not ui.gui.Parent then return end
 	state.elapsed = state.elapsed + dt
 
-	-- (V8.1) RETENTATIVA. O V8 tentava tomar a câmera uma vez só, no
-	-- instante da abertura. A guarda exige a tag `InSafeZone`, que quem
-	-- põe é o servidor: abrir o tutorial um segundo cedo demais, ou de
-	-- fora do lobby, recusava para sempre. Aqui ele tenta de novo, de
-	-- meio em meio segundo, enquanto o tutorial estiver aberto e a
-	-- câmera livre — então assim que o jogador entra na base a cena
-	-- assume sozinha, sem precisar fechar e reabrir.
-	if not lease then
-		-- Sem cena em andamento, o bloqueio de movimento não pode existir.
-		-- É barato reafirmar isso todo quadro, e fecha de vez a classe de
-		-- bug em que o jogador fica preso porque o desbind se perdeu num
-		-- caminho de saída que ninguém previu — travar o personagem é o
-		-- pior estrago que este script consegue fazer.
-		ContextActionService:UnbindAction(CONTROL_BIND)
-
-		if state.open then
-			state.cameraRetry = (state.cameraRetry or 0) + dt
+	-- Preserva a espera da V8.1 pela tag da zona segura. Devolver a câmera
+	-- cancela o pedido: não retomar após dano, movimento ou troca de câmera.
+	if state.open and state.cameraPending and not lease then
+		local _, humanoid = livingCharacter()
+		if movementRequested(humanoid) then
+			state.cameraPending = false
+		else
+			state.cameraRetry = state.cameraRetry + dt
 			if state.cameraRetry >= 0.5 then
 				state.cameraRetry = 0
 				startCamera()
-				updateNavigation()
 			end
 		end
 	end
@@ -907,6 +915,7 @@ local function openTutorial()
 	state.generation = state.generation + 1
 	state.open = true
 	state.completionSent = false
+	state.cameraPending, state.cameraRetry = state.cameraEnabled, 0
 	ui.gui.Enabled = true
 	ui.panel.Position = UDim2.fromScale(0.5, 1.6)
 	ui.panelScale.Scale = 0.96
@@ -1018,11 +1027,25 @@ local function applyMotionPreference()
 			revealAll()
 		end
 	elseif state.open then
+		-- Só atende um pedido explícito pendente; não rearma uma cena interrompida.
 		startCamera()
 	end
 	updateNavigation()
 end
 track(ui.motion.Activated:Connect(function()
+	if not state.open then return end
+	click()
+	if lease or state.cameraPending then
+		state.cameraEnabled = false
+		releaseCamera(true)
+	else
+		state.cameraEnabled, state.cameraPending, state.cameraRetry = true, true, 0
+		startCamera()
+	end
+	updateNavigation()
+end))
+track(ui.animations.Activated:Connect(function()
+	if not state.open then return end
 	state.reducedMotion = not state.reducedMotion
 	applyMotionPreference()
 end))
@@ -1030,7 +1053,7 @@ track(GuiService:GetPropertyChangedSignal("ReducedMotionEnabled"):Connect(applyM
 track(VRService:GetPropertyChangedSignal("VREnabled"):Connect(applyMotionPreference))
 track(ui.speed.Activated:Connect(function()
 	state.fastText = not state.fastText
-	ui.speed.Text = state.fastText and "TEXTO: RÁPIDO" or "TEXTO: NORMAL"
+	ui.speed.Text = state.fastText and "TEXTO: 2x" or "TEXTO: 1x"
 end))
 track(ui.sound.Activated:Connect(function()
 	state.sound = not state.sound
