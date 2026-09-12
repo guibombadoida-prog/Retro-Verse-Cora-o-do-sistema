@@ -11,6 +11,92 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-12 17:00 UTC — Adonis admin no jogo
+
+`[PUBLICAÇÃO] 0 atualizados, 0 renomeados, 17 criados, 7 pastas criadas`
+Retorno: `["published", 78, 61, 0, 0, 17, 0]` — execução #48, `main` em `e01b55a`
+
+`Resumo: 78 scripts; 61 iguais; 0 diferentes; 0 renomeados; 17 novos; 7 pastas
+novas; 9 só no place; 0 problemas`
+
+**Adonis** (carregador oficial, asset `7510622625`) em
+`ServerScriptService > Adonis_Loader`. Merge do PR #13. Decisões, justificativas
+e como atualizar: [`ADONIS.md`](ADONIS.md).
+
+Nenhum script existente foi tocado — **0 atualizados**. As 7 pastas criadas são
+exatamente as que o carregador exige: `Adonis_Loader`, `Config`,
+`Config/Settings`, `Config/Plugins`, `Config/Themes`,
+`Config/InGameSettingsEditorSettings` e `Loader`.
+
+### O `verificar` foi o que garantiu que não nasceu um Adonis duplicado
+
+Execução #47, na branch: `["check", 78, 61, 0, 0, 17, 0]` — 17 novos, **0
+diferentes, 0 renomeados, 0 problemas**. O `0 diferentes` é a prova: se já
+houvesse um carregador do Adonis nesses caminhos, ele casaria por nome e
+apareceria como igual ou diferente, nunca como novo.
+
+Nessa execução o log da tarefa Roblox veio "(nenhuma mensagem)" e a lista `?`
+não chegou item por item — cruzei com a da execução #44. A publicação trouxe a
+lista completa e confirmou: os 9 scripts que só existem no place seguem sendo
+`BossConfigServer`, `Boss_CatalogGate_V1`, `Death`, `PassiveVFXServer`,
+`SystemDiagnostic`, `PassiveVFXClient`, `PlayerModule`, `PlayerScriptsLoader` e
+`RbxCharacterSounds`. Nenhum é Adonis.
+
+### Remontado como pastas porque o Model não passa pelo pipeline
+
+O modelo do autor é `Model` → `Configuration` → `Folder`, com um `NumberValue` e
+uma `Camera`. A publicação só leva `Script`, `LocalScript`, `ModuleScript` e as
+`Folder` do caminho. Funciona porque o carregador nunca usa nada específico de
+`Model`: navega por `script.Parent.Parent` e só faz operações de `Instance`.
+
+Consequência aceita: `LoaderVersion` fica `nil`, porque `Version` é um
+`NumberValue`. O Adonis perde só o aviso de "carregador desatualizado".
+
+### O que foi endurecido antes de subir
+
+Cada desvio está marcado com `[RETROVERSE]` no código. Os que mais importam:
+
+- **`HideScript` `true` → `false`.** O autor manda desligar quando o jogo usa
+  `AssetService:SavePlaceAsync()`, e é o que esta publicação faz. Com `true`, o
+  Adonis faz `model.Parent = nil` ao subir, e um salvamento nesse estado
+  gravaria a place **sem** o Adonis.
+- **`DataStoreKey` sorteada** (era `"CHANGE_THIS"`). O repositório é público,
+  então a chave é pública — ela é só o sal do DataStore do Adonis, não dá acesso
+  a nada, e abusar dela exigiria já ter acesso de leitura ao DataStore.
+- **`TopBarShift` → `true`**: as notificações do Adonis nasciam na borda de
+  cima, onde mora o HUD de HP do `HealthDisplay` V9.
+- **`HelpButton` → `false`**: nascia no canto inferior direito, sobre a UI do
+  jogo.
+- **`Console_AdminsOnly` → `true`**, **`G_API` → `false`**, `G_Access_Key`
+  sorteada, `WarnDangerousCommand` → `true`, capas e comandos de doador
+  desligados.
+- **Plugin de exemplo do servidor**: registrava `:example` com
+  `AdminLevel = "Players"` — qualquer jogador rodava e cada uso imprimia no
+  Output. Comentado.
+- **`Ranks.Creators`** recebe `1595442496`, o mesmo `OWNER_ID` de
+  `AdminRegistryServer`. Os outros ranks ficam vazios: admin novo entra por
+  `:admin` dentro do jogo, que persiste no DataStore e **não exige publicação**.
+
+**Anti-exploit ficou todo desligado**, que é o padrão do autor e tem de
+continuar: `AntiSpeed`/`AntiNoclip` num jogo com dash e Despertar matariam
+jogador legítimo. O aviso está em caixa alta no topo do `AntiExploit.lua`.
+`CodeExecution` e `AutoClean` também seguem `false`.
+
+### O Adonis não está no repositório
+
+O que foi publicado é o carregador, 12 KB. O Adonis de verdade é baixado da
+Roblox a cada início de servidor (`require(7510592873)`, com dois fallbacks).
+Auditar o repositório garante a **configuração**, não o código que roda. O dono
+foi informado e decidiu seguir.
+
+### Rede de proteção
+
+`tools/test_adonis.py`, ligado no CI: estrutura da árvore (9 arquivos
+obrigatórios, 4 pastas indexadas direto sem `FindFirstChild`) e 188 checagens
+que rodam os módulos de `Settings` de verdade no Luau. Verificado contra seis
+regressões plantadas e reprovou todas.
+
+
 ## 2026-09-12 16:50 UTC — tutorial V8.3: câmera e movimento
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
