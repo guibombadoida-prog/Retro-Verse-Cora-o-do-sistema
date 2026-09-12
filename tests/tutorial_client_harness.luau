@@ -122,6 +122,7 @@ return function(source, presentation)
 		child(scripts, "ModuleScript", "TutorialPresentation")
 		local character = child(world, "Model", "Character")
 		local humanoid = child(character, "Humanoid", "Humanoid"); humanoid.Health = 100
+		humanoid.MoveDirection, humanoid.Jump = vector(0, 0, 0), false
 		local root = child(character, "Part", "HumanoidRootPart")
 		root.Position, root.CFrame = vector(0, 10, 0), cframe(0, 10, 0)
 		local tag = child(character, "BoolValue", "InSafeZone")
@@ -226,7 +227,7 @@ return function(source, presentation)
 	t.env._G.OpenTutorialMenu()
 	t.step(1 / 60)
 	local completed, heartbeat, rendering, locked, cancelled, rays = t.stats()
-	check(rendering and locked and heartbeat == 1, "uma câmera e um loop ao abrir")
+	check(rendering and not locked and heartbeat == 1, "uma câmera e um loop sem consumir movimento ao abrir")
 	check(rays > 0, "enquadramento usa raycast")
 	check(t.camera.CameraType == enums.CameraType.Scriptable, "câmera cinematográfica")
 	local dialogue = t.find("DialogText")
@@ -250,7 +251,7 @@ return function(source, presentation)
 	check(h2 == 1, "20 reaberturas não duplicam Heartbeat")
 	t.find("Motion").Activated:Fire()
 	local _, _, render2, lock2 = t.stats()
-	check(not render2 and not lock2, "movimento reduzido devolve câmera")
+	check(not render2 and not lock2, "botão da câmera devolve os controles")
 	t.find("Motion").Activated:Fire()
 	t.tag.Parent = nil
 	t.step(1 / 60)
@@ -312,9 +313,89 @@ return function(source, presentation)
 	local replacement = child(replaced.world, "Camera", "Replacement")
 	replacement.ViewportSize = vector(800, 360)
 	replacement.CameraType, replacement.FieldOfView = enums.CameraType.Custom, 81
+	replacement.CFrame, replacement.Focus = cframe(2, 14, 18), cframe(2, 10, 0)
+	replacement.CameraSubject = replaced.humanoid
 	replaced.world.CurrentCamera = replacement
 	local _, _, replaceRender, replaceLock = replaced.stats()
 	check(not replaceRender and not replaceLock, "troca de câmera remove render e trava")
 	check(replacement.FieldOfView == 81, "nova câmera permanece intacta")
+	replaced.step(0.7)
+	local _, _, retryRender = replaced.stats()
+	check(not retryRender and replacement.FieldOfView == 81,
+		"retentativa não captura uma câmera substituída")
+
+	-- V8.1/V8.2: a retentativa reativava a câmera depois de ela já ter
+	-- sido devolvida por uma interrupção. Esperar mais de 0,5 s é essencial.
+	local damaged = setup(); damaged.env._G.OpenTutorialMenu()
+	damaged.humanoid.Health = 90
+	damaged.step(0.02); damaged.step(0.6)
+	local _, _, damageRender, damageLock = damaged.stats()
+	check(not damageRender and not damageLock, "dano mantém câmera e controles livres após retentativa")
+	check(damaged.camera.CameraType == enums.CameraType.Custom, "dano não retoma Scriptable sozinho")
+
+	local late = setup({ unsafe = true }); late.env._G.OpenTutorialMenu()
+	late.step(0.6)
+	check(late.camera.CameraType == enums.CameraType.Custom, "espera a tag sem travar controles")
+	late.tag.Parent = late.player.Character; late.step(0.6)
+	check(late.camera.CameraType == enums.CameraType.Scriptable, "tag atrasada ainda inicia a câmera")
+	late.tag.Parent = nil; late.step(0.02)
+	late.tag.Parent = late.player.Character; late.step(0.6)
+	check(late.camera.CameraType == enums.CameraType.Custom, "reentrar na base não retoma cena interrompida")
+	late.find("Motion").Activated:Fire()
+	check(late.camera.CameraType == enums.CameraType.Scriptable, "um toque retoma explicitamente a câmera suspensa")
+	late.env._G.CloseTutorialMenu(true)
+
+	local walking = setup(); walking.env._G.OpenTutorialMenu()
+	walking.humanoid.MoveDirection = vector(1, 0, 0)
+	walking.step(0.02)
+	local _, _, walkRender, walkLock = walking.stats()
+	check(not walkRender and not walkLock, "movimento do personagem devolve câmera sem bloquear o joystick")
+	walking.humanoid.MoveDirection = vector(0, 0, 0); walking.step(0.6)
+	check(walking.camera.CameraType == enums.CameraType.Custom, "parar de andar não prende novamente")
+
+	local toggled = setup(); toggled.env._G.OpenTutorialMenu()
+	local textBeforeToggle = toggled.find("DialogText").MaxVisibleGraphemes
+	toggled.find("Motion").Activated:Fire()
+	check(toggled.find("DialogText").MaxVisibleGraphemes == textBeforeToggle,
+		"desligar câmera preserva a digitação e as animações da UI")
+	toggled.step(0.6)
+	check(toggled.camera.CameraType == enums.CameraType.Custom, "câmera desligada permanece livre")
+	toggled.find("Motion").Activated:Fire()
+	check(toggled.camera.CameraType == enums.CameraType.Scriptable, "botão religa a câmera em um toque")
+	toggled.find("AnimationMotion").Activated:Fire()
+	check(toggled.camera.CameraType == enums.CameraType.Custom
+		and toggled.find("DialogText").MaxVisibleGraphemes == -1, "ANIM. reduz movimento e revela o texto")
+	toggled.find("AnimationMotion").Activated:Fire(); toggled.step(0.6)
+	check(toggled.camera.CameraType == enums.CameraType.Custom, "reativar ANIM. não toma a câmera suspensa")
+	toggled.find("Motion").Activated:Fire()
+	check(toggled.camera.CameraType == enums.CameraType.Scriptable, "CÂMERA permite retomar após reativar ANIM.")
+
+	local canceled = setup({ unsafe = true }); canceled.env._G.OpenTutorialMenu()
+	canceled.find("Motion").Activated:Fire()
+	canceled.tag.Parent = canceled.player.Character; canceled.step(0.6)
+	check(canceled.camera.CameraType == enums.CameraType.Custom, "desligar cancela espera pela tag atrasada")
+	canceled.env._G.CloseTutorialMenu(true); canceled.env._G.OpenTutorialMenu(); canceled.step(0.6)
+	check(canceled.camera.CameraType == enums.CameraType.Custom, "reabrir respeita opção de câmera desligada")
+
+	local teleport = setup(); teleport.env._G.OpenTutorialMenu()
+	teleport.root.Position = vector(50, 10, 0); teleport.step(0.02); teleport.step(0.7)
+	check(teleport.camera.CameraType == enums.CameraType.Custom, "teleporte não retoma a câmera depois de 0,5 s")
+	local jumping = setup(); jumping.env._G.OpenTutorialMenu()
+	jumping.humanoid.Jump = true; jumping.step(0.02)
+	check(jumping.camera.CameraType == enums.CameraType.Custom, "pedido de pulo também devolve a câmera")
+	local alreadyMoving = setup(); alreadyMoving.humanoid.MoveDirection = vector(0, 0, 1)
+	alreadyMoving.env._G.OpenTutorialMenu()
+	alreadyMoving.humanoid.MoveDirection = vector(0, 0, 0); alreadyMoving.step(0.7)
+	check(alreadyMoving.camera.CameraType == enums.CameraType.Custom, "abrir andando mantém controle ao parar")
+
+	foreign.camera:SetAttribute("RetroVerseCameraOwner", nil)
+	foreign.camera.CameraType = enums.CameraType.Custom; foreign.step(0.7)
+	check(foreign.camera.FieldOfView == 82 and foreign.camera.CameraType == enums.CameraType.Custom,
+		"encerramento de outra cutscene não autoriza retomar a câmera")
+	local reduced = setup({ reduced = true }); reduced.env._G.OpenTutorialMenu()
+	reduced.find("Motion").Activated:Fire(); reduced.find("Motion").Activated:Fire(); reduced.step(0.7)
+	check(reduced.camera.CameraType == enums.CameraType.Custom, "botão respeita movimento reduzido do Roblox")
+	check(reduced.find("CameraStatus").Text:find("Roblox") ~= nil,
+		"preferência do sistema tem explicação visível")
 	print(string.format("TutorialMenuClient V8: %d regressões de ciclo de vida passaram", checks))
 end

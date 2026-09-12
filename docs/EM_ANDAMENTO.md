@@ -21,7 +21,6 @@ combine com o dono. Ao terminar, tire a linha.
 
 | Arquivo | Agente | PR | Situação |
 | --- | --- | --- | --- |
-| `src/StarterPlayer/StarterPlayerScripts/TutorialMenuClient_V2.client.lua`, `tests/tutorial_client_harness.luau` | Codex | nova PR | Revisão sobre V8.2 já publicada pelo Claude: reproduzir retomada indevida após interrupção e corrigir comando da câmera; iniciado 2026-09-12 |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
