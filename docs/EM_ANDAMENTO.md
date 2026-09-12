@@ -29,7 +29,7 @@ combine com o dono. Ao terminar, tire a linha.
 | `src/ServerScriptService/DuelSystemServer.server.lua` | Claude | #5 | **PRONTO** — V3, arena + arquibancada |
 | `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | ~~Codex~~ livre | ~~#7~~ mesclado | Entrada velha: o PR #7 foi mesclado em 02/09. O Claude fez o V9 (HUD pequeno no canto superior direito) direto na main. |
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
-| `tasks/apply_code_payload.luau` (lista `REMOVER`), `tools/test_publish.py`, `tests/publish_removal_harness.luau` | Claude | direto na main | **PRONTO** — a publicação aprendeu a REMOVER instância, com lista explícita e teste de integração. Foi o que permitiu tirar o Adonis. |
+| `tasks/apply_code_payload.luau` (lista `REMOVER`), `tools/test_publish.py`, `tests/publish_removal_harness.luau` | Claude | ~~#15~~ mesclado | **NO AR** — a publicação aprendeu a REMOVER instância (execução #52 tirou o Adonis: 1 removido, 0 atualizados). Ver o recado abaixo. |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
 | `.github/workflows/validate-code.yml` (etapa de testes) | Claude | direto na main | ⚠️ Conferido antes de mexer: o PR #6 altera este arquivo mas **não toca a etapa de testes** — só o `find` e o bloco reutilizável. A etapa passou a rodar os três testes do repositório. Se o #6 for mesclado, os dois trechos convivem. |
 

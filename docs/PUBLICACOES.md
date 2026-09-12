@@ -11,6 +11,79 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-12 19:32 UTC — Adonis REMOVIDO do jogo
+
+`[PUBLICAÇÃO] 0 atualizados, 0 renomeados, 0 criados, 0 pastas criadas, 1 removidos`
+Retorno: `["published", 62, 62, 0, 0, 0, 0]` — execução #52, `main` em `6365087`
+
+`Resumo: 62 scripts; 62 iguais; 0 diferentes; 0 renomeados; 0 novos; 0 pastas
+novas; 1 removidos; 9 só no place; 0 problemas`
+
+Merge do PR #15. **Primeira publicação da história do projeto que REMOVE uma
+instância.** `ServerScriptService > Adonis_Loader` saiu, com os 4 descendentes
+diretos e tudo abaixo. Nenhum script do jogo foi tocado — **0 atualizados**.
+
+> A contagem de remoções **não aparece no `Retorno`**, só na linha
+> `[PUBLICAÇÃO]` e no `Resumo`. A tupla de retorno tem aridade fixa e o cliente
+> Python confere o formato; mexer nela por causa disto não pagava o risco.
+
+### Só tirar os arquivos do `src/` NÃO removeria nada
+
+A publicação fazia rename, criava pasta, criava script e trocava `Source` —
+**nunca apagava**. E o `Adonis_Loader` é uma `Folder`, então nem apareceria na
+lista `?`, que só lista scripts. O Adonis continuaria **rodando no jogo e
+invisível nos dois relatórios**.
+
+### A lista `REMOVER`, e as quatro travas
+
+`tasks/apply_code_payload.luau` ganhou uma lista explícita de remoção:
+
+1. **Por caminho completo, com a classe esperada.** Nunca "apague o que não está
+   no repositório": há 9 scripts legítimos só no place (`PlayerModule`,
+   `RbxCharacterSounds`, `BossConfigServer`…) e uma regra automática levaria
+   todos.
+2. **A classe é conferida antes de remover.** Caminho que caia sobre outra coisa
+   vira **problema** e bloqueia a publicação inteira. É a única defesa contra
+   erro de digitação numa place de produção.
+3. **A remoção acontece por último**, depois de todas as outras escritas darem
+   certo, e entra no mesmo rollback. Remover primeiro e falhar depois deixaria o
+   place sem o objeto mesmo com a publicação abortada.
+4. **Caminho que já não existe não é problema** — fica inerte, igual às entradas
+   de `LEGACY_NAMES`. Esta entrada já está inerte a partir de agora.
+
+Remover uma pasta leva os descendentes: o Adonis inteiro foi **uma linha** em vez
+de dezessete.
+
+### Teste, porque remoção não tem desfazer
+
+É a **única** operação da publicação sem desfazer do lado do jogo. As outras
+sobrescrevem `Source`, e o histórico de versões do Creator Dashboard devolve.
+
+`tools/test_publish.py` (novo, no CI) roda a tarefa **real** num Roblox falso, em
+modo `check`, e cobre os quatro desfechos de um caminho de remoção — existe, já
+não existe, classe diferente, nome duplicado — mais a ordem das escritas. **27
+verificações.** Verificado contra quatro regressões plantadas: sem a trava de
+classe, com caminho ausente virando problema, com duplicidade escolhendo o
+primeiro, e com a remoção antes das criações. **Reprovou todas as quatro.**
+
+### O que o jogo perdeu
+
+Ban que persiste entre sessões, mute, slowmode, log de comandos no DataStore e
+comandos entre servidores. O console do RetroVerse
+([`CONSOLE_ADMIN.md`](CONSOLE_ADMIN.md)) não faz nada disso, e **não há comando
+para expulsar ninguém** — `;kick` não existe.
+
+### Saiu junto
+
+Os 17 arquivos, o `tools/test_adonis.py` e o `tests/adonis_settings_harness.luau`;
+a linha deles no `validate-code.yml` foi trocada pela do `test_publish.py`. A
+mecânica de "área de terceiros" do `validar.sh` ficou no lugar apontando para uma
+pasta que não existe, de propósito: o motivo de cada exclusão foi caro de
+descobrir e vale para o próximo código de terceiros. [`ADONIS.md`](ADONIS.md)
+virou histórico — as restrições do pipeline que ele revelou continuam valendo
+para qualquer `Model` de terceiros.
+
+
 ## 2026-09-12 19:18 UTC — console de comandos retro
 
 `[PUBLICAÇÃO] 2 atualizados, 0 renomeados, 1 criados, 0 pastas criadas`
