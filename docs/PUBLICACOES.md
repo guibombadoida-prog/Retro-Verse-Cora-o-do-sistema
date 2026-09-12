@@ -11,6 +11,24 @@ Entrada nova vai no topo. Copie os números da linha `[PUBLICAÇÃO]` do log.
 
 ---
 
+## 2026-09-12 16:50 UTC — tutorial V8.3: câmera e movimento
+
+`[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
+Retorno: `["published", 61, 60, 1, 0, 0, 0]` — execução [#46](https://github.com/guibombadoida-prog/Retro-Verse-Cora-o-do-sistema/actions/runs/34706417880), `main` em `6a00d54`.
+
+**`TutorialMenuClient_V2` V8.2 → V8.3**, pela [PR #12](https://github.com/guibombadoida-prog/Retro-Verse-Cora-o-do-sistema/pull/12).
+
+- A câmera não é retomada automaticamente após dano, movimento, teleporte, troca de câmera ou saída da base. A retentativa de 0,5 s atende somente um pedido pendente, inclusive enquanto a tag `InSafeZone` inicial ainda não chegou.
+- O tutorial não consome mais os comandos de andar/pular. Mover o personagem devolve a câmera normal.
+- `CÂMERA` liga/desliga somente a cena, preservando texto animado e efeitos. `ANIM.` controla a redução de movimento; os motivos de indisponibilidade aparecem abaixo das opções.
+- Mantidos a espera pela zona segura da V8.1 e o `CFrame.lookAt` direto da V8.2 do Claude.
+
+**Validação:** retomada após dano reproduzida no código antes da correção; 54 regressões do LocalScript em ambiente simulado, 520 verificações de apresentação, parser Luau, build Rojo e CI aprovados. Não houve validação visual ou de toque no cliente Roblox neste ambiente.
+
+**Comparação prévia:** execução #45 retornou `["check", 61, 60, 1, 0, 0, 0]` (um diferente, zero renomeações/criações/problemas); o serviço não devolveu as mensagens detalhadas nessa execução. A execução #46 confirmou no log que somente `TutorialMenuClient_V2` foi atualizado.
+
+**Coordenação:** revisão concluída pelo Codex sobre a V8.2 publicada pelo Claude. A reserva foi liberada; os testes novos já rodam no CI existente. Detalhes em `docs/TUTORIAL_V8.md`.
+
 ## 2026-09-10 22:06 UTC — câmera do tutorial parou de tremer
 
 `[PUBLICAÇÃO] 1 atualizados, 0 renomeados, 0 criados, 0 pastas criadas`
