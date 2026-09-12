@@ -140,9 +140,13 @@ def main():
             print(f"  x {f}")
         print()
         return 1
+    # flush: sem ele o print do Python fica em buffer e a saída do luau, que
+    # escreve direto no descritor, aparece ANTES desta linha no log do CI.
+    # Ordem trocada em teste de segurança é log que engana quem lê.
     print(
         f"Adonis: estrutura ok — {len(OBRIGATORIOS)} arquivos obrigatórios, "
-        f"{len(PASTAS_INDEXADAS_DIRETO)} pastas indexadas direto"
+        f"{len(PASTAS_INDEXADAS_DIRETO)} pastas indexadas direto",
+        flush=True,
     )
 
     base = root / ADONIS
