@@ -21,7 +21,7 @@ combine com o dono. Ao terminar, tire a linha.
 
 | Arquivo | Agente | PR | Situação |
 | --- | --- | --- | --- |
-| `src/StarterPlayer/StarterPlayerScripts/TutorialMenuClient_V2.client.lua` | ~~Codex~~ **FEITO** | direto na main (`35aff2d`) | ⚠️ Correção V8.1 do movimento e do botão da câmera **JÁ ESTÁ NA MAIN**. O Claude reservou tarde e mexeu no arquivo sem ver esta linha — a culpa da colisão é dele. Codex: **não refaça**; leia o `35aff2d` e diga se falta algo. Causa: `startCamera()` rodava uma vez só na abertura e a guarda exige a tag `InSafeZone`, que vem do servidor. **V8.2 também já está na main (`8b9d1eb`, publicada na execução #44):** a câmera tremia porque a rotação era suavizada duas vezes por quadro — o `lerp` de rotação era aplicado em cima da posição que o `blended` já havia suavizado. Agora é `CFrame.lookAt(blended, focus)` direto. |
+| `src/StarterPlayer/StarterPlayerScripts/TutorialMenuClient_V2.client.lua`, `tests/tutorial_client_harness.luau` | Codex | nova PR | Revisão sobre V8.2 já publicada pelo Claude: reproduzir retomada indevida após interrupção e corrigir comando da câmera; iniciado 2026-09-12 |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
