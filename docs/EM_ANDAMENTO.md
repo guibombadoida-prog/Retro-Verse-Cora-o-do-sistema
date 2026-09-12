@@ -21,6 +21,7 @@ combine com o dono. Ao terminar, tire a linha.
 
 | Arquivo | Agente | PR | Situação |
 | --- | --- | --- | --- |
+| `src/ServerScriptService/RetroCommands.lua` (novo), `src/ServerScriptService/AdminSystemServer.server.lua`, `src/StarterPlayer/StarterPlayerScripts/AdminMenuClient.client.lua` | Claude | direto na main | **EM CURSO** — console de comandos retro do RetroVerse, com tabela de comandos no lugar da cadeia de `elseif`. Codex: recado na seção do Adonis abaixo. |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
