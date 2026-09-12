@@ -121,11 +121,11 @@ jobs:
           # devolvida, movimento que fica bloqueado, conexão que vaza.
           python3 tools/test_tutorial.py --luau luau
 
-          # Instalação do Adonis: estrutura da árvore que o carregador exige
-          # (inclusive pasta que ficaria de fora da publicação por estar
-          # vazia) e as configurações de segurança de docs/ADONIS.md. Roda os
-          # módulos de Settings de verdade, não confere texto.
-          python3 tools/test_adonis.py --luau luau
+          # A REMOÇÃO de instâncias na publicação. É a única operação que não
+          # tem desfazer do lado do jogo — as outras sobrescrevem Source, e o
+          # histórico de versões devolve. Este roda a tarefa REAL num Roblox
+          # falso, em modo check.
+          python3 tools/test_publish.py --luau luau
 
       - name: Montar o place e o pacote de código
         shell: bash

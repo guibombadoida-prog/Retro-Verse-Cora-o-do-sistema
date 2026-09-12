@@ -40,17 +40,14 @@ Interpolação Luau (`` `texto {var}` ``) **não passa** na checagem 7 do
 `string.format`. Todo backtick que existe em `src/` hoje está dentro de
 comentário, e é por isso.
 
-## Código de terceiros: `src/ServerScriptService/Adonis_Loader/`
+## Código de terceiros
 
-Essa pasta é o Adonis, versionado **como vem do autor**. As regras de estilo
-deste documento **não se aplicam a ela**, e o `tools/validar.sh` a trata como
-área de terceiros — de propósito, para que atualizar o Adonis siga sendo uma
-troca de arquivo e não um merge manual.
-
-Não reescreva nada lá, não apague arquivo que pareça inútil (há dois que só
-existem para manter pastas vivas) e leia [`docs/ADONIS.md`](docs/ADONIS.md)
-antes de tocar em qualquer coisa. O que garante aquela instalação é
-`tools/test_adonis.py`, ligado no CI.
+Não há nenhum no repositório agora. O Adonis esteve em
+`src/ServerScriptService/Adonis_Loader/` e foi removido — mas a mecânica de
+"área de terceiros" do `tools/validar.sh` continua lá, com o motivo de cada
+exclusão, porque foi caro de descobrir. Se entrar outro código de terceiros,
+aponte o `TERCEIROS` para ele em vez de reescrever a análise. Histórico e
+armadilhas em [`docs/ADONIS.md`](docs/ADONIS.md).
 
 ## Adicionar ou alterar script
 

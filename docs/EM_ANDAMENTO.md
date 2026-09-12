@@ -29,7 +29,7 @@ combine com o dono. Ao terminar, tire a linha.
 | `src/ServerScriptService/DuelSystemServer.server.lua` | Claude | #5 | **PRONTO** — V3, arena + arquibancada |
 | `src/StarterPlayer/StarterPlayerScripts/HealthDisplay.client.lua` | ~~Codex~~ livre | ~~#7~~ mesclado | Entrada velha: o PR #7 foi mesclado em 02/09. O Claude fez o V9 (HUD pequeno no canto superior direito) direto na main. |
 | `src/ServerScriptService/EnergySystemServer.server.lua` | Codex | #7 | física de energia |
-| `src/ServerScriptService/Adonis_Loader/**`, `docs/ADONIS.md`, `tools/test_adonis.py`, `tests/adonis_settings_harness.luau` | Claude | ~~#13~~ mesclado | **NO AR** — Adonis publicado na execução #48 (17 criados, 7 pastas, 0 atualizados). Ver o recado ao Codex abaixo. |
+| `tasks/apply_code_payload.luau` (lista `REMOVER`), `tools/test_publish.py`, `tests/publish_removal_harness.luau` | Claude | direto na main | **PRONTO** — a publicação aprendeu a REMOVER instância, com lista explícita e teste de integração. Foi o que permitiu tirar o Adonis. |
 | `.github/workflows/*`, `tools/run_code_publish.py` | Codex | #6 | Environments e trava de main |
 | `.github/workflows/validate-code.yml` (etapa de testes) | Claude | direto na main | ⚠️ Conferido antes de mexer: o PR #6 altera este arquivo mas **não toca a etapa de testes** — só o `find` e o bloco reutilizável. A etapa passou a rodar os três testes do repositório. Se o #6 for mesclado, os dois trechos convivem. |
 
@@ -76,55 +76,52 @@ O admin do jogo ganhou motor de comandos próprio:
    de testes — a terceira linha que eu adiciono nesse arquivo, e o PR #6
    continua não tocando essa etapa.
 
-O Adonis segue instalado e no ar, sem mexida. O dono pediu "nosso próprio
-admin, com base do Adonis": o que veio do Adonis é o **formato** (comando como
-dado, com nível, argumentos e descrição), não o código. Se for para tirar o
-Adonis depois, é decisão do dono e outra publicação.
+O Adonis foi **removido do jogo** na publicação #51. O que veio dele para o
+console próprio é o **formato** (comando como dado, com nível, argumentos e
+descrição), não o código. Histórico e armadilhas: [`ADONIS.md`](ADONIS.md).
 
-## Recado ao Codex — Adonis (lido antes de mexer, por favor)
+## Recado ao Codex — a publicação agora REMOVE instância
 
-O **Adonis** entrou em `src/ServerScriptService/Adonis_Loader/`, endurecido.
-Decisões e justificativas: [`ADONIS.md`](ADONIS.md). O que te afeta:
+O dono pediu para tirar o Adonis do jogo. A publicação não sabia apagar nada
+(fazia rename, criava pasta, criava script e trocava `Source`), e o
+`Adonis_Loader` é uma `Folder` — então nem apareceria na lista `?`, que só lista
+scripts. Tirar os arquivos do `src/` deixaria o Adonis **rodando e invisível nos
+dois relatórios**.
 
-1. **`tools/validar.sh` ganhou uma área de terceiros** (`TERCEIROS`), que tira
-   aquela pasta das checagens 1, 2, 3, 5, 6 e 7. Não é preguiça: o
-   `Descriptions.lua` do Adonis cita `_G.Adonis` dentro de uma string `[[ ]]`
-   (que o `somente_codigo` não corta, porque não é comentário) e o `Loader` usa
-   backtick e anotação de tipo, que o `luac` do Lua 5.4 não parseia. A sintoma
-   fica coberta pelo `luau-compile --only-parse` do CI. Se o #6 tocar o
-   `validar.sh`, esses dois trechos precisam conviver.
+Então `tasks/apply_code_payload.luau` ganhou a lista **`REMOVER`**. O que você
+precisa saber antes de tocar nela:
 
-2. **`validate-code.yml` ganhou uma linha** na etapa "Rodar os testes do
-   repositório": `python3 tools/test_adonis.py --luau luau`. É o mesmo arquivo
-   que o #6 altera — mas o #6 **não** toca essa etapa (só o `find` e o bloco
-   reutilizável), então convivem, igual ao que já aconteceu com a etapa de
-   testes.
+1. **É lista explícita, por caminho completo, com a classe esperada.** Nunca
+   "apague o que não está no repositório": há 9 scripts legítimos que só existem
+   no place (`PlayerModule`, `RbxCharacterSounds`, `BossConfigServer`...) e uma
+   regra automática levaria todos.
 
-3. **Não ligue o Adonis no `_G.AdminRegistry`.** Parece uma boa integração e
-   não é: hoje admin de funcionalidade (painéis, catálogo, conquistas) e admin
-   de moderação (`:kick`, `:ban`, `:shutdown`) são listas separadas. Unir faria
-   `;addadmin` entregar `:shutdown` de brinde. `tools/test_adonis.py` trava
-   isso de propósito.
+2. **A classe é conferida antes de remover.** Um caminho que caia sobre outra
+   coisa vira **problema** e bloqueia a publicação inteira, em vez de apagar o
+   objeto errado. É a única defesa contra erro de digitação numa place de
+   produção.
 
-4. **Não "limpe" o `Themes/README` nem os plugins de exemplo.** Parecem
-   arquivos inúteis e são o que mantém as pastas `Themes/` e `Plugins/`
-   existindo: a publicação só cria pasta no caminho de um script, e o
-   carregador indexa as duas **direto**, sem `FindFirstChild`. Pasta ausente é
-   erro na hora de subir o servidor.
+3. **A remoção acontece por último**, depois de todas as outras escritas darem
+   certo, e entra no mesmo rollback. Remover primeiro e falhar depois deixaria o
+   place sem o objeto mesmo com a publicação abortada.
 
-5. **Anti-exploit fica DESLIGADO.** `AntiSpeed`/`AntiNoclip` num jogo com dash
-   e Despertar mata jogador legítimo. O aviso é do próprio autor do Adonis.
+4. **Caminho que já não existe NÃO é problema** — a entrada fica inerte depois
+   da primeira publicação, igual às de `LEGACY_NAMES`.
 
-### Pendência que é boa para você, se quiser
+5. **É a única operação da publicação sem desfazer do lado do jogo.** As outras
+   sobrescrevem `Source`, e o histórico de versões do Creator Dashboard devolve.
+   Por isso é o único caminho com teste de integração dedicado:
+   `tools/test_publish.py` roda a tarefa **real** num Roblox falso, em modo
+   `check`, e cobre os quatro desfechos de um caminho de remoção (existe, já não
+   existe, classe diferente, nome duplicado) mais a ordem das escritas.
+   Verificado contra quatro regressões plantadas. **Se mexer na remoção, rode
+   esse teste.**
 
-Tirar a `DataStoreKey` do repositório. Hoje ela é uma string sorteada e
-comitada, e o repositório é **público** — o que é aceitável (ela é só o sal do
-DataStore do Adonis, não dá acesso a nada, e abusar dela exigiria já ter acesso
-de leitura ao DataStore), mas dá para fazer melhor: a publicação substituir um
-marcador pelo valor de um GitHub Secret ao montar o pacote. Não fiz agora
-justamente porque o #6 está mexendo nos arquivos do pipeline e eu ia colidir
-com você. Se pegar, cuidado com o caso do segredo ausente — o marcador não
-pode ir ao ar literal e em silêncio.
+O `tools/test_adonis.py` e o `tests/adonis_settings_harness.luau` saíram junto
+com o Adonis, e a linha deles no `validate-code.yml` foi trocada pela do
+`test_publish.py`. A mecânica de "área de terceiros" do `validar.sh` ficou no
+lugar, apontando para uma pasta que não existe, de propósito — o motivo de cada
+exclusão está lá e vai valer para o próximo código de terceiros.
 
 ## Livre e com trabalho pendente
 
