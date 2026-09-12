@@ -21,7 +21,7 @@ combine com o dono. Ao terminar, tire a linha.
 
 | Arquivo | Agente | PR | Situação |
 | --- | --- | --- | --- |
-| `src/ServerScriptService/RetroCommands.lua` (novo), `src/ServerScriptService/AdminSystemServer.server.lua`, `src/StarterPlayer/StarterPlayerScripts/AdminMenuClient.client.lua` | Claude | direto na main | **EM CURSO** — console de comandos retro do RetroVerse, com tabela de comandos no lugar da cadeia de `elseif`. Codex: recado na seção do Adonis abaixo. |
+| `src/ServerScriptService/RetroCommands.lua` (novo), `src/ServerScriptService/AdminSystemServer.server.lua` (V9), `src/StarterPlayer/StarterPlayerScripts/AdminMenuClient.client.lua` (V13) | Claude | #14 | **PRONTO, NÃO PUBLICADO** — console de comandos retro. Ver o recado abaixo. Doc: [`CONSOLE_ADMIN.md`](CONSOLE_ADMIN.md). |
 | `tasks/apply_code_payload.luau` | Claude | #5 | pipeline de publicação |
 | `AGENTS.md`, `CLAUDE.md`, `docs/ADICIONAR_SCRIPT.md` | Claude | #5 | instruções de agente |
 | `src/ReplicatedFirst/LoadingScreen.client.lua` | Claude | #5 | **PRONTO** — V3, preload + botão de pular |
@@ -38,6 +38,48 @@ combine com o dono. Ao terminar, tire a linha.
 > `DamageIndicatorClient`, versionados e registrados em `LEGACY_NAMES`. Faltam
 > `BossConfigServer`, `Boss_CatalogGate_V1`, `Death`, `PassiveVFXServer`,
 > `PassiveVFXClient` e `SystemDiagnostic`.
+
+## Recado ao Codex — console de comandos (V9 / V13)
+
+O admin do jogo ganhou motor de comandos próprio:
+[`CONSOLE_ADMIN.md`](CONSOLE_ADMIN.md). O que te afeta:
+
+1. **`AdminSystemServer` foi para V9 e `AdminMenuClient` para V13.** Eles agora
+   dependem um do outro: o V13 usa os remotes `AdminListCommands` e
+   `AdminRunCommand`, que só existem no V9. **Publique os dois juntos.** O
+   client degrada com aviso na tela se o servidor for antigo, mas não o
+   contrário.
+
+2. **A cadeia de `elseif` do V8 não existe mais.** Comando novo vai em
+   `RetroCommands.lua`, na tabela, via `RetroCommands.registrar` — que é
+   público de propósito e é o gancho de plugin. Não recrie o `elseif`: o painel
+   lê a lista **do servidor**, então comando fora da tabela fica invisível no
+   painel mesmo funcionando no chat.
+
+3. **Se usar API `_G` nova num comando, declare em `DEPENDENCIAS`** (no
+   `AdminSystemServer`). O contexto lê `_G` na hora do comando via metatable,
+   porque a ordem de carga não é garantida — mas indexação dinâmica é invisível
+   para a checagem 3 do `validar.sh`. Aquela tabela devolve a checagem e ainda
+   alimenta o diagnóstico de boot que diz quais APIs não subiram.
+
+4. **Nada de backtick em `src/`.** Descobri isso quebrando: o `luac` da checagem
+   7 não parseia interpolação Luau, e todo backtick que existe em `src/` hoje
+   está dentro de comentário. Pior: `string.format("achei "%s" aqui", x)` com
+   aspas sem escape **passa** pelo `luac` (lê como `"achei " % s("aqui")`) e
+   estoura em runtime. Quem pegou foi o teste, não o validador.
+
+5. **`;reset` subiu para DONO.** É a única mudança de permissão; está
+   justificada no doc. `addadmin`/`deladmin` ficaram em CHEFE por paridade com
+   o V8 e com a aba ADMINS.
+
+6. **`validate-code.yml` ganhou `luau tests/RetroCommands.spec.luau`** na etapa
+   de testes — a terceira linha que eu adiciono nesse arquivo, e o PR #6
+   continua não tocando essa etapa.
+
+O Adonis segue instalado e no ar, sem mexida. O dono pediu "nosso próprio
+admin, com base do Adonis": o que veio do Adonis é o **formato** (comando como
+dado, com nível, argumentos e descrição), não o código. Se for para tirar o
+Adonis depois, é decisão do dono e outra publicação.
 
 ## Recado ao Codex — Adonis (lido antes de mexer, por favor)
 
