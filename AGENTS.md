@@ -26,6 +26,18 @@ Isso não é burocracia: Claude e Codex já reescreveram o mesmo
 trabalhos foi descartado. O arquivo também lista o que está livre e precisa de
 alguém.
 
+## Código de terceiros: `src/ServerScriptService/Adonis_Loader/`
+
+Essa pasta é o Adonis, versionado **como vem do autor**. As regras de estilo
+deste documento **não se aplicam a ela**, e o `tools/validar.sh` a trata como
+área de terceiros — de propósito, para que atualizar o Adonis siga sendo uma
+troca de arquivo e não um merge manual.
+
+Não reescreva nada lá, não apague arquivo que pareça inútil (há dois que só
+existem para manter pastas vivas) e leia [`docs/ADONIS.md`](docs/ADONIS.md)
+antes de tocar em qualquer coisa. O que garante aquela instalação é
+`tools/test_adonis.py`, ligado no CI.
+
 ## Adicionar ou alterar script
 
 O procedimento completo está em [`docs/ADICIONAR_SCRIPT.md`](docs/ADICIONAR_SCRIPT.md).

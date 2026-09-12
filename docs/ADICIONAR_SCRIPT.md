@@ -33,6 +33,12 @@ caminho**. Fora do alcance: `ReplicatedStorage`, `StarterGui`, `Workspace`,
 `Lighting`, qualquer `RemoteEvent`, `Model`, `Sound` ou `ScreenGui` como
 instância, e a place do chefão (`boss-place/`, outro DataModel).
 
+> Um `Model` de terceiros pode ser **remontado** como pastas e scripts e passar
+> pelo pipeline, desde que nada dentro dele dependa da classe `Model`. O caso
+> trabalhado é o Adonis, em [`ADONIS.md`](ADONIS.md) — vale ler antes de tentar
+> com outro, porque a parte que surpreende é esta: **pasta vazia não chega ao
+> jogo**, já que a publicação só cria pasta no caminho de um script.
+
 Na prática isso quase nunca trava nada, porque o projeto **cria essas coisas em
 tempo de execução**: o `MainSystemInitializer` monta as pastas de
 `ReplicatedStorage` e todos os Remotes, e as GUIs são construídas por código. Um

@@ -23,6 +23,27 @@ CENTRAL="$RAIZ/central"
 # Entra na checagem de sintaxe, mas NÃO na de duplicata de família — um
 # script pode legitimamente existir nas duas places.
 BOSS="$RAIZ/boss-place"
+# Código de TERCEIROS, versionado como vem do autor (hoje: o carregador do
+# Adonis). Fica fora das checagens 1, 2, 3, 5, 6 e 7 por três motivos que são
+# de fato distintos:
+#
+#   • Estilo (5) e cabeçalho (6): reescrever para o padrão do RetroVerse
+#     transformaria cada atualização do Adonis num merge manual. O valor de
+#     vendorizar é justamente o arquivo ser igual ao do autor.
+#   • _G (2, 3): o Descriptions.lua do Adonis documenta `_G.Adonis` dentro de
+#     uma string `[[ ]]` — que não é comentário, então o somente_codigo não
+#     corta. Viraria "API _G consumida sem dono" para um texto de ajuda.
+#   • Família (1): o Adonis traz dois módulos chamados README, em pastas
+#     diferentes. No jogo convivem; aqui bateriam como duplicata.
+#   • Sintaxe (7): o luac do Lua 5.4 não parseia Luau. O Loader usa
+#     interpolação com backtick e anotação de tipo. Isso NÃO fica sem rede:
+#     o CI roda `luau-compile --only-parse` em todo .lua de src/, com o
+#     parser Luau de verdade (.github/workflows/validate-code.yml).
+#
+# As invariantes que o Adonis precisa para subir são checadas por um teste
+# dedicado, tools/test_adonis.py, que também trava as configurações de
+# segurança contra regressão.
+TERCEIROS="$RAIZ/src/ServerScriptService/Adonis_Loader"
 
 ERROS=0
 AVISOS=0
@@ -88,9 +109,19 @@ familia_de() {
 	echo "${arquivo%$suf}" | sed -E 's/_[Vv][0-9]+(\.[0-9]+)?$//'
 }
 
-mapfile -t ATIVOS < <(find "$SRC" -type f -name "*.lua" | sort)
+mapfile -t ATIVOS < <(find "$SRC" -type f -name "*.lua" -not -path "$TERCEIROS/*" | sort)
+mapfile -t DE_TERCEIROS < <(find "$TERCEIROS" -type f -name "*.lua" 2>/dev/null | sort)
 
 printf '\033[1mRetroVerse — validação do repositório\033[0m\n'
+
+# Dito em voz alta de propósito: exclusão silenciosa é como um validador
+# perde a confiança de quem lê. Quem quiser saber por que, tem o comentário
+# do TERCEIROS no topo deste arquivo.
+if ((${#DE_TERCEIROS[@]} > 0)); then
+	printf '  \033[2m%d arquivo(s) de terceiros fora das regras de estilo: %s\033[0m\n' \
+		"${#DE_TERCEIROS[@]}" "${TERCEIROS#$RAIZ/}"
+	printf '  \033[2msintaxe deles: CI, com luau-compile. Invariantes: tools/test_adonis.py\033[0m\n'
+fi
 
 # ---------------------------------------------------------------
 titulo "1. Duplicata de família em src/"
