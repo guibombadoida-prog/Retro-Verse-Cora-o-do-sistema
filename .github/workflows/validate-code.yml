@@ -109,6 +109,12 @@ jobs:
           # Matemática de mola e paginação do tutorial.
           luau tests/TutorialPresentation.spec.luau
 
+          # Motor de comandos do admin: parse, casamento de alvos (me/all/
+          # others/prefixo), níveis e o contrato de que TODO caminho devolve
+          # mensagem — o defeito que o V8 tinha era comando que não fazia
+          # nada e não dizia nada.
+          luau tests/RetroCommands.spec.luau
+
           # Regressões de ciclo de vida: este roda o LocalScript REAL do
           # tutorial dentro de um Roblox falso, então pega coisa que
           # nenhum teste de módulo puro pegaria — câmera que não é

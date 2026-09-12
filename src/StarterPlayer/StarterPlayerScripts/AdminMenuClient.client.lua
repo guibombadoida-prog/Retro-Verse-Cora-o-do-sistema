@@ -1,8 +1,26 @@
 -- ============================================
--- ADMIN MENU CLIENT V12 — WIZARD DO DESPERTAR EM ETAPAS
+-- ADMIN MENU CLIENT V13 — ABA CONSOLE
 -- Coloque em StarterPlayer > StarterPlayerScripts
 -- Nome: "AdminMenuClient"
--- SUBSTITUI: AdminMenuClient V11
+-- SUBSTITUI: AdminMenuClient V12
+-- DEPENDE DE: AdminSystemServer V9 (remotes AdminListCommands e
+--             AdminRunCommand) e RetroCommands
+-- ============================================
+-- (V13) ABA CONSOLE — A LISTA DE COMANDOS VEM DO SERVIDOR
+--
+-- O ;help do V8 imprimia a lista de comandos no console do Studio (F9).
+-- O dono joga no CELULAR: não existe F9 ali, então a lista de comandos
+-- era, na prática, invisível para quem mais precisava dela.
+--
+-- A aba CONSOLE resolve isso e mais uma coisa: a lista NÃO está escrita
+-- aqui. Ela é pedida ao servidor (AdminListCommands), que a devolve da
+-- MESMA tabela que executa os comandos, já filtrada pelo seu nível. Não
+-- há como o painel mostrar comando que não existe, esconder comando
+-- novo, ou oferecer botão que o servidor vai recusar — que era o que
+-- acontecia quando a lista vivia duplicada à mão nos dois lados.
+--
+-- Tocar num comando da lista preenche a linha com o modelo dele; o
+-- resultado de cada execução aparece na tela, nunca no F9.
 -- ============================================
 -- (V12) DOIS PROBLEMAS DO PAINEL DE DESPERTAR:
 --
@@ -102,6 +120,13 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local isAdminCheck = remotes:WaitForChild("IsAdminCheck", 30)
+
+-- (V13) Remotes do console. Opcionais de propósito: se o servidor ainda
+-- estiver no AdminSystemServer V8, o painel abre e as outras seis abas
+-- funcionam — a aba CONSOLE explica na tela o que falta, em vez de o
+-- script morrer num WaitForChild sem fim e levar o painel inteiro.
+local adminListCommands = remotes:FindFirstChild("AdminListCommands")
+local adminRunCommand = remotes:FindFirstChild("AdminRunCommand")
 
 if not isAdminCheck then
 	warn("[ADMIN MENU V9] IsAdminCheck não encontrado — AdminRegistryServer_V1 está no ServerScriptService?")
@@ -318,13 +343,17 @@ local function createAdminInterface()
 	contentCorner.CornerRadius = UDim.new(0, 4)
 	contentCorner.Parent = contentFrame
 
-	-- (V9) 6 abas agora
-	local tabNames = { "Moedas", "Personagens", "Catalogo", "Admins", "Jogadores", "Acoes" }
+	-- (V13) 7 abas: entrou CONSOLE
+	local tabNames = { "Moedas", "Personagens", "Catalogo", "Admins", "Jogadores", "Acoes", "Console" }
 	local tabContents = {}
 	local tabButtons = {}
 	local activeTab = 1
-	local tabWidth = 0.155
-	local tabStep = 0.165
+	-- (V13) DERIVADO, não fixo. Com os 0.155/0.165 fixos do V9, a sétima
+	-- aba passava de 1.0 (7 x 0.165 = 1.155) e saía fora do painel. Quem
+	-- adicionar a oitava não precisa lembrar de recalcular.
+	local tabMargem = 0.005
+	local tabStep = (1 - tabMargem * 2) / #tabNames
+	local tabWidth = tabStep * 0.94
 
 	local function setActiveTab(index)
 		activeTab = index
@@ -340,7 +369,7 @@ local function createAdminInterface()
 	for i, tabName in ipairs(tabNames) do
 		local tabButton = Instance.new("TextButton")
 		tabButton.Size = UDim2.new(tabWidth, 0, 0.9, 0)
-		tabButton.Position = UDim2.new(0.005 + (i - 1) * tabStep, 0, 0.05, 0)
+		tabButton.Position = UDim2.new(tabMargem + (i - 1) * tabStep, 0, 0.05, 0)
 		tabButton.BackgroundColor3 = i == 1 and COLORS.warning or COLORS.panel
 		tabButton.BorderColor3 = COLORS.border
 		tabButton.BorderSizePixel = 1
@@ -1777,6 +1806,300 @@ local function createAdminInterface()
 	-- LOGICA DE ABRIR/FECHAR
 	-- ============================
 
+	-- ============================
+	-- (V13) TAB 7: CONSOLE
+	-- ============================
+	-- Nada da lista de comandos está escrito aqui: vem do servidor, da
+	-- mesma tabela que executa. Ver o cabeçalho deste arquivo.
+
+	local consoleContent = tabContents[7]
+
+	local consoleTitle = Instance.new("TextLabel")
+	consoleTitle.Size = UDim2.new(0.62, 0, 0.07, 0)
+	consoleTitle.Position = UDim2.new(0.02, 0, 0.01, 0)
+	consoleTitle.BackgroundTransparency = 1
+	consoleTitle.Text = "[ CONSOLE RETRO ]"
+	consoleTitle.TextColor3 = COLORS.warning
+	consoleTitle.TextXAlignment = Enum.TextXAlignment.Left
+	consoleTitle.TextScaled = true
+	consoleTitle.Font = Enum.Font.Arcade
+	consoleTitle.Parent = consoleContent
+
+	local consoleLevel = Instance.new("TextLabel")
+	consoleLevel.Size = UDim2.new(0.34, 0, 0.07, 0)
+	consoleLevel.Position = UDim2.new(0.64, 0, 0.01, 0)
+	consoleLevel.BackgroundTransparency = 1
+	consoleLevel.Text = "NIVEL: ..."
+	consoleLevel.TextColor3 = COLORS.catalog
+	consoleLevel.TextXAlignment = Enum.TextXAlignment.Right
+	consoleLevel.TextScaled = true
+	consoleLevel.Font = Enum.Font.Arcade
+	consoleLevel.Parent = consoleContent
+
+	-- Lista de comandos (toque preenche a linha)
+	local cmdScroll = Instance.new("ScrollingFrame")
+	cmdScroll.Size = UDim2.new(0.96, 0, 0.44, 0)
+	cmdScroll.Position = UDim2.new(0.02, 0, 0.09, 0)
+	cmdScroll.BackgroundColor3 = COLORS.background
+	cmdScroll.BorderColor3 = COLORS.border
+	cmdScroll.BorderSizePixel = 1
+	cmdScroll.ScrollBarThickness = 6
+	cmdScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	cmdScroll.Parent = consoleContent
+
+	-- Saída
+	local outScroll = Instance.new("ScrollingFrame")
+	outScroll.Size = UDim2.new(0.96, 0, 0.28, 0)
+	outScroll.Position = UDim2.new(0.02, 0, 0.55, 0)
+	outScroll.BackgroundColor3 = COLORS.background
+	outScroll.BorderColor3 = COLORS.border
+	outScroll.BorderSizePixel = 1
+	outScroll.ScrollBarThickness = 6
+	outScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	outScroll.Parent = consoleContent
+
+	local outLayout = Instance.new("UIListLayout")
+	outLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	outLayout.Padding = UDim.new(0, 2)
+	outLayout.Parent = outScroll
+
+	-- Linha de comando
+	local cmdInput = Instance.new("TextBox")
+	cmdInput.Size = UDim2.new(0.74, 0, 0.1, 0)
+	cmdInput.Position = UDim2.new(0.02, 0, 0.85, 0)
+	cmdInput.BackgroundColor3 = COLORS.background
+	cmdInput.BorderColor3 = COLORS.warning
+	cmdInput.BorderSizePixel = 2
+	cmdInput.Text = ""
+	cmdInput.PlaceholderText = "coins me 500"
+	cmdInput.PlaceholderColor3 = Color3.fromRGB(140, 140, 140)
+	cmdInput.TextColor3 = COLORS.border
+	cmdInput.TextScaled = true
+	cmdInput.ClearTextOnFocus = false
+	cmdInput.Font = Enum.Font.Arcade
+	cmdInput.Parent = consoleContent
+
+	local runButton = Instance.new("TextButton")
+	runButton.Size = UDim2.new(0.2, 0, 0.1, 0)
+	runButton.Position = UDim2.new(0.78, 0, 0.85, 0)
+	runButton.BackgroundColor3 = COLORS.success
+	runButton.BorderColor3 = COLORS.border
+	runButton.BorderSizePixel = 2
+	runButton.Text = "RODAR"
+	runButton.TextColor3 = COLORS.background
+	runButton.TextScaled = true
+	runButton.Font = Enum.Font.Arcade
+	runButton.Parent = consoleContent
+
+	local MAX_LINHAS = 40
+	local linhasSaida = {}
+
+	local function escrever(texto, cor)
+		local linha = Instance.new("TextLabel")
+		linha.Size = UDim2.new(1, -8, 0, 18)
+		linha.BackgroundTransparency = 1
+		linha.Text = texto
+		linha.TextColor3 = cor or COLORS.border
+		linha.TextXAlignment = Enum.TextXAlignment.Left
+		linha.TextWrapped = true
+		linha.Font = Enum.Font.Code
+		linha.TextSize = 13
+		linha.LayoutOrder = #linhasSaida + 1
+		linha.Parent = outScroll
+		table.insert(linhasSaida, linha)
+
+		-- Teto de linhas: sem isto, uma sessão longa de comandos vira
+		-- milhares de TextLabel vivos dentro do ScrollingFrame.
+		-- `.Parent = nil` em vez de `:Destroy()`, regra do projeto.
+		while #linhasSaida > MAX_LINHAS do
+			local velha = table.remove(linhasSaida, 1)
+			velha.Parent = nil
+		end
+
+		local altura = outLayout.AbsoluteContentSize.Y
+		outScroll.CanvasSize = UDim2.new(0, 0, 0, altura + 4)
+		outScroll.CanvasPosition = Vector2.new(0, math.max(0, altura))
+	end
+
+	local aguardando = false
+
+	local function rodar(texto)
+		texto = (texto or ""):match("^%s*(.-)%s*$")
+		if texto == "" then
+			escrever("> escreva um comando (toque num da lista acima)", COLORS.warning)
+			return
+		end
+		if aguardando then
+			return
+		end
+		if not adminRunCommand then
+			escrever("! AdminRunCommand nao existe — AdminSystemServer V9 esta instalado?", COLORS.error)
+			return
+		end
+
+		aguardando = true
+		runButton.Text = "..."
+		escrever("> " .. texto, COLORS.catalog)
+
+		task.spawn(function()
+			local ok, resposta = pcall(function()
+				return adminRunCommand:InvokeServer(texto)
+			end)
+			aguardando = false
+			runButton.Text = "RODAR"
+
+			-- Falha de remote tambem fala. O defeito que este console
+			-- existe para matar e o comando que nao diz nada.
+			if not ok then
+				escrever("! o servidor nao respondeu: " .. tostring(resposta), COLORS.error)
+				return
+			end
+			if type(resposta) ~= "table" then
+				escrever("! resposta inesperada do servidor", COLORS.error)
+				return
+			end
+			local mensagem = tostring(resposta.mensagem or "")
+			if mensagem == "" then
+				mensagem = resposta.ok and "feito" or "nao deu"
+			end
+			escrever((resposta.ok and "  ok: " or "  x: ") .. mensagem, resposta.ok and COLORS.success or COLORS.error)
+		end)
+	end
+
+	runButton.MouseButton1Click:Connect(function()
+		playSound(sounds.click)
+		rodar(cmdInput.Text)
+	end)
+
+	-- FocusLost com enterPressed cobre teclado fisico; o botao RODAR cobre
+	-- o toque. MouseEnter/MouseLeave nao existem no celular, entao nao ha
+	-- nenhum efeito preso a eles aqui.
+	cmdInput.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			rodar(cmdInput.Text)
+		end
+	end)
+
+	local consoleCarregado = false
+
+	local function montarListaDeComandos()
+		for _, filho in ipairs(cmdScroll:GetChildren()) do
+			if filho:IsA("GuiObject") then
+				filho.Parent = nil
+			end
+		end
+
+		if not adminListCommands then
+			consoleLevel.Text = "NIVEL: ?"
+			local aviso = Instance.new("TextLabel")
+			aviso.Size = UDim2.new(1, -8, 0, 40)
+			aviso.Position = UDim2.new(0, 4, 0, 4)
+			aviso.BackgroundTransparency = 1
+			aviso.Text = "AdminListCommands nao existe.\nAdminSystemServer V9 esta instalado?"
+			aviso.TextColor3 = COLORS.error
+			aviso.TextWrapped = true
+			aviso.TextScaled = true
+			aviso.Font = Enum.Font.Arcade
+			aviso.Parent = cmdScroll
+			return
+		end
+
+		local ok, dados = pcall(function()
+			return adminListCommands:InvokeServer()
+		end)
+		if not ok or type(dados) ~= "table" or type(dados.comandos) ~= "table" then
+			consoleLevel.Text = "NIVEL: ?"
+			escrever("! nao consegui pegar a lista de comandos do servidor", COLORS.error)
+			return
+		end
+
+		consoleLevel.Text = "NIVEL: " .. tostring(dados.nivelNome or dados.nivel or "?")
+		local prefixo = tostring(dados.prefixo or ";")
+
+		local y = 4
+		local categoriaAtual = nil
+		for _, def in ipairs(dados.comandos) do
+			if def.categoria ~= categoriaAtual then
+				categoriaAtual = def.categoria
+				local cab = Instance.new("TextLabel")
+				cab.Size = UDim2.new(1, -8, 0, 18)
+				cab.Position = UDim2.new(0, 4, 0, y)
+				cab.BackgroundTransparency = 1
+				cab.Text = "-- " .. tostring(categoriaAtual)
+				cab.TextColor3 = COLORS.warning
+				cab.TextXAlignment = Enum.TextXAlignment.Left
+				cab.Font = Enum.Font.Arcade
+				cab.TextSize = 13
+				cab.Parent = cmdScroll
+				y += 20
+			end
+
+			local modelo = prefixo .. tostring(def.nome)
+			if def.argumentos and def.argumentos ~= "" then
+				modelo = modelo .. " " .. tostring(def.argumentos)
+			end
+
+			local linha = Instance.new("TextButton")
+			linha.Size = UDim2.new(1, -8, 0, 34)
+			linha.Position = UDim2.new(0, 4, 0, y)
+			linha.BackgroundColor3 = COLORS.panel
+			linha.BorderColor3 = COLORS.border
+			linha.BorderSizePixel = 1
+			linha.Text = ""
+			linha.Parent = cmdScroll
+
+			local nome = Instance.new("TextLabel")
+			nome.Size = UDim2.new(1, -6, 0.5, 0)
+			nome.Position = UDim2.new(0, 4, 0, 1)
+			nome.BackgroundTransparency = 1
+			nome.Text = modelo
+			nome.TextColor3 = COLORS.success
+			nome.TextXAlignment = Enum.TextXAlignment.Left
+			nome.Font = Enum.Font.Code
+			nome.TextSize = 13
+			nome.Parent = linha
+
+			local desc = Instance.new("TextLabel")
+			desc.Size = UDim2.new(1, -6, 0.5, 0)
+			desc.Position = UDim2.new(0, 4, 0.5, 0)
+			desc.BackgroundTransparency = 1
+			desc.Text = tostring(def.descricao or "")
+			desc.TextColor3 = Color3.fromRGB(170, 170, 170)
+			desc.TextXAlignment = Enum.TextXAlignment.Left
+			desc.TextTruncate = Enum.TextTruncate.AtEnd
+			desc.Font = Enum.Font.Arcade
+			desc.TextSize = 12
+			desc.Parent = linha
+
+			-- Toque preenche a linha com o modelo, SEM os <...>: assim o
+			-- admin edita em cima em vez de digitar tudo no celular.
+			local semPlaceholders = prefixo .. tostring(def.nome) .. " "
+			linha.MouseButton1Click:Connect(function()
+				playSound(sounds.click)
+				cmdInput.Text = semPlaceholders
+				escrever("  " .. modelo .. "  —  " .. tostring(def.descricao or ""), COLORS.catalog)
+			end)
+
+			y += 36
+		end
+
+		cmdScroll.CanvasSize = UDim2.new(0, 0, 0, y + 4)
+
+		if #dados.comandos == 0 then
+			escrever("! nenhum comando disponivel no seu nivel", COLORS.warning)
+		elseif not consoleCarregado then
+			consoleCarregado = true
+			escrever("RetroVerse console — " .. #dados.comandos .. " comandos no seu nivel.", COLORS.success)
+			escrever("Use me / all / others, ou so o comeco do nome do jogador.", Color3.fromRGB(170, 170, 170))
+		end
+	end
+
+	-- Recarrega ao abrir a aba: o nivel pode ter mudado no meio da sessao
+	-- (o dono te promoveu), e a lista depende dele.
+	tabButtons[7].MouseButton1Click:Connect(function()
+		task.spawn(montarListaDeComandos)
+	end)
+
 	local function toggleMenu()
 		isOpen = not isOpen
 		mainFrame.Visible = isOpen
@@ -1845,22 +2168,19 @@ end)
 
 print([[
 ╔════════════════════════════════════════════════════╗
-║  ✅ ADMIN MENU CLIENT V9 CARREGADO                ║
+║  ✅ ADMIN MENU CLIENT V13 CARREGADO               ║
 ╠════════════════════════════════════════════════════╣
-║  SUBSTITUI: AdminMenuClient V8                    ║
-║  REMOVER:   AdminMenuClient V8                    ║
+║  SUBSTITUI: AdminMenuClient V12                   ║
 ║  DEPENDE DE: AdminRegistryServer_V1               ║
+║              AdminSystemServer V9 + RetroCommands ║
 ╠════════════════════════════════════════════════════╣
-║  NOVIDADES V9:                                     ║
-║  • ADMIN_IDS removida → IsAdminCheck (servidor)    ║
-║    Admin novo vê o painel SEM relogar              ║
-║  • ✏️ EDITAR personagem: wizard pré-preenchido     ║
-║    (nome travado) — sobrescreve em todos os        ║
-║    servidores ("✏️ atualizou")                     ║
-║  • ✏️ EDITAR Despertar: formulário pré-preenchido  ║
-║  • Nova aba ADMINS: add por username/ID, lista e   ║
-║    REMOVER (dono 🔑 irremovível)                   ║
-║  • 6 abas: Moedas/Personagens/Catálogo/Admins/     ║
-║    Jogadores/Ações                                 ║
+║  NOVIDADES V13:                                    ║
+║  • Aba CONSOLE: comandos com descrição na TELA,    ║
+║    não no F9 — o dono joga no celular              ║
+║  • A lista vem DO SERVIDOR, da mesma tabela que    ║
+║    executa, já filtrada pelo seu nível             ║
+║  • Toque num comando preenche a linha              ║
+║  • Régua das abas derivada de #tabNames: a sétima  ║
+║    aba passava de 1.0 com os valores fixos do V9   ║
 ╚════════════════════════════════════════════════════╝
 ]])

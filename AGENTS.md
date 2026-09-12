@@ -26,6 +26,20 @@ Isso não é burocracia: Claude e Codex já reescreveram o mesmo
 trabalhos foi descartado. O arquivo também lista o que está livre e precisa de
 alguém.
 
+## Comando de admin novo
+
+Vai na tabela de `src/ServerScriptService/RetroCommands.lua`, nunca num `elseif`
+solto — o painel lê a lista **do servidor**, então comando fora da tabela fica
+invisível no painel mesmo funcionando no chat. Procedimento e regras em
+[`docs/CONSOLE_ADMIN.md`](docs/CONSOLE_ADMIN.md).
+
+## Não use backtick em `src/`
+
+Interpolação Luau (`` `texto {var}` ``) **não passa** na checagem 7 do
+`tools/validar.sh`: ela usa o `luac` do Lua 5.4, que não parseia Luau. Use
+`string.format`. Todo backtick que existe em `src/` hoje está dentro de
+comentário, e é por isso.
+
 ## Código de terceiros: `src/ServerScriptService/Adonis_Loader/`
 
 Essa pasta é o Adonis, versionado **como vem do autor**. As regras de estilo

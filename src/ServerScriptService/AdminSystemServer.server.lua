@@ -1,10 +1,36 @@
 -- ============================================
--- ADMIN SYSTEM SERVER V8 — ADMINS DINÂMICOS (SEM STUDIO)
+-- ADMIN SYSTEM SERVER V9 — CONSOLE RETRO COM TABELA DE COMANDOS
 -- Coloque em ServerScriptService
 -- Nome: "AdminSystemServer"
--- SUBSTITUI: AdminSystemServer V7 (ou V6/V5, se não instalados)
--- REMOVER:   AdminSystemServer V7 / V6 / V5
--- DEPENDE DE: AdminRegistryServer_V1 (novo, no ServerScriptService)
+-- SUBSTITUI: AdminSystemServer V8 (ou V7/V6/V5, se não instalados)
+-- REMOVER:   AdminSystemServer V8 / V7 / V6 / V5
+-- DEPENDE DE: AdminRegistryServer_V1 (ServerScriptService)
+--             RetroCommands (ModuleScript, ServerScriptService) ← NOVO
+-- ============================================
+-- (V9) A CADEIA DE `elseif` VIROU TABELA DE COMANDOS
+--
+-- A cadeia do V8 tinha quatro defeitos que não eram de estilo:
+--
+--   1. SILÊNCIO. `Players:FindFirstChild(args[2])` devolvendo nil caía no
+--      fim do `if` e NADA acontecia — nem erro, nem aviso. O admin não
+--      sabia se errou o nome, se o jogador saiu, ou se o comando existe.
+--   2. NOME EXATO OBRIGATÓRIO. Sem `me`, `all`, `others` ou prefixo
+--      parcial. O dono joga no CELULAR: digitar o username inteiro com a
+--      capitalização certa é a diferença entre o comando existir e não.
+--   3. `;help` IMPRIMIA NO CONSOLE (F9). No celular não há F9 — a lista
+--      de comandos era invisível para quem mais precisava dela.
+--   4. COMANDO ERA CÓDIGO, não dado. O painel não tinha como listar o
+--      que existe, então a lista vivia duplicada à mão aqui e no client.
+--
+-- Agora os comandos moram em `RetroCommands` (tabela + dispatcher), e
+-- este script só monta o contexto e entrega o resultado na tela. Todo
+-- caminho devolve mensagem: é o contrato que mata o defeito 1.
+--
+-- O formato "comando como dado, com nível e argumentos" vem do Adonis
+-- (docs/ADONIS.md); o código e os comandos são do RetroVerse.
+--
+-- COMPATIBILIDADE: os 10 comandos do V8 continuam com o mesmo nome e o
+-- mesmo efeito. Nada que você já digitava parou de funcionar.
 -- ============================================
 -- (V8) ALTERAÇÕES:
 -- • LISTA "ADMIN_IDS" REMOVIDA DO CÓDIGO: quem é admin agora vem
@@ -43,7 +69,7 @@ until _G.PlayerDataManager
 
 print([[
 ╔════════════════════════════════════════════╗
-║   ADMIN SYSTEM SERVER V8 - CARREGADO      ║
+║   ADMIN SYSTEM SERVER V9 - CARREGADO      ║
 ╚════════════════════════════════════════════╝
 ]])
 
@@ -401,141 +427,246 @@ getPlayerList.OnServerInvoke = function(admin)
 end
 
 -- =====================================
+-- (V9) COMANDOS: TABELA + DISPATCHER
+-- =====================================
+
+local RetroCommands = require(script.Parent:WaitForChild("RetroCommands"))
+
+-- NÍVEIS
+-- O V8 era binário: ou você era admin e podia tudo, ou não era nada.
+-- Agora há escala. O mapeamento é conservador de propósito, para NÃO
+-- rebaixar quem já era admin:
+--
+--   dono (OWNER_ID)          -> DONO  (900)
+--   admin do _G.AdminRegistry -> CHEFE (300)
+--   resto                     -> JOGADOR (0)
+--
+-- Com CHEFE, todo comando que um admin já tinha no V8 continua na mão
+-- dele. A ÚNICA restrição nova é `;reset`, que subiu para DONO: ele apaga
+-- os dados do jogador e não tem desfazer, e "qualquer admin apaga
+-- qualquer conta" é poder demais para um atalho de chat.
+local function nivelDe(player)
+	if player == nil then
+		return RetroCommands.NIVEIS.JOGADOR
+	end
+	if player.UserId == FALLBACK_OWNER_ID then
+		return RetroCommands.NIVEIS.DONO
+	end
+	if isAdmin(player) then
+		return RetroCommands.NIVEIS.CHEFE
+	end
+	return RetroCommands.NIVEIS.JOGADOR
+end
+
+-- DEPENDÊNCIAS `_G` DOS COMANDOS
+-- Escritas uma por uma, como código, de propósito. O contexto lê `_G` na
+-- HORA do comando (via metatable, mais abaixo) porque a ordem de carga
+-- dos scripts não é garantida — um snapshot no boot pegaria nil e ficaria
+-- nil para sempre. Mas indexação dinâmica é invisível para a checagem 3
+-- do `tools/validar.sh`, que é quem garante que nenhuma API `_G` é
+-- consumida sem dono. Esta tabela devolve a checagem: os nomes aparecem
+-- literalmente, e ainda servem para o diagnóstico de boot logo abaixo.
+local DEPENDENCIAS = {
+	PlayerDataManager = function()
+		return _G.PlayerDataManager
+	end,
+	CharacterCatalog = function()
+		return _G.CharacterCatalog
+	end,
+	AwakeningSystem = function()
+		return _G.AwakeningSystem
+	end,
+	AwakeningMeter = function()
+		return _G.AwakeningMeter
+	end,
+	CharacterLevel = function()
+		return _G.CharacterLevel
+	end,
+	StatService = function()
+		return _G.StatService
+	end,
+	StatusEffect = function()
+		return _G.StatusEffect
+	end,
+	EnergySystem = function()
+		return _G.EnergySystem
+	end,
+	PassiveSystem = function()
+		return _G.PassiveSystem
+	end,
+	WantedSystem = function()
+		return _G.WantedSystem
+	end,
+	AdminRegistry = function()
+		return _G.AdminRegistry
+	end,
+	SimulateDamage = function()
+		return _G.SimulateDamage
+	end,
+	ResetTutorial = function()
+		return _G.ResetTutorial
+	end,
+	CheckAchievements = function()
+		return _G.CheckAchievements
+	end,
+	TeleportToSafeZone = function()
+		return _G.TeleportToSafeZone
+	end,
+	SetSpectatorMode = function()
+		return _G.SetSpectatorMode
+	end,
+	GetPlayerTeam = function()
+		return _G.GetPlayerTeam
+	end,
+	ReloadMapSpawnPoints = function()
+		return _G.ReloadMapSpawnPoints
+	end,
+}
+
+-- Leitura tardia: o comando pede `ctx.api.X` e recebe o valor de agora.
+local APIS_AO_VIVO = setmetatable({}, {
+	__index = function(_, nome)
+		local buscar = DEPENDENCIAS[nome]
+		return buscar and buscar() or nil
+	end,
+})
+
+local function contextoDe(player)
+	return {
+		autor = player,
+		nivel = nivelDe(player),
+		jogadores = Players:GetPlayers(),
+		api = APIS_AO_VIVO,
+		personagemDe = function(alvo)
+			return alvo and alvo.Character or nil
+		end,
+		humanoideDe = function(alvo)
+			local personagem = alvo and alvo.Character
+			return personagem and personagem:FindFirstChildOfClass("Humanoid") or nil
+		end,
+		raizDe = function(alvo)
+			local personagem = alvo and alvo.Character
+			return personagem and personagem:FindFirstChild("HumanoidRootPart") or nil
+		end,
+	}
+end
+
+-- Uma execução só, usada pelo chat E pelo console do painel — para as
+-- duas portas não divergirem em permissão nem em mensagem.
+local function executarComando(player, texto)
+	local resultado = RetroCommands.executar(texto, contextoDe(player))
+	if resultado == nil then
+		return nil
+	end
+
+	-- Jogador comum que acerta um comando por acaso não recebe aula de
+	-- quais comandos existem: silêncio no chat, sem vazar a lista.
+	if resultado.negado and nivelDe(player) <= RetroCommands.NIVEIS.JOGADOR then
+		return { ok = false, mensagem = "" }
+	end
+
+	notifyAdmin(player, resultado.mensagem, resultado.ok)
+	logAction(
+		player,
+		"Cmd:" .. tostring(resultado.comando),
+		nil,
+		string.format("%s — %s", resultado.ok and "ok" or "falhou", resultado.mensagem)
+	)
+	return resultado
+end
+
+-- =====================================
+-- (V9) REMOTES DO CONSOLE DO PAINEL
+-- =====================================
+-- A lista de comandos vem DO SERVIDOR, da mesma tabela que executa. É o
+-- que impede o painel de mostrar comando que não existe mais, ou de
+-- esconder comando novo — o defeito 4 do V8 era justamente a lista
+-- duplicada à mão nos dois lados.
+local listarComandos = getOrCreateRemote("AdminListCommands", "Function")
+local rodarComando = getOrCreateRemote("AdminRunCommand", "Function")
+
+listarComandos.OnServerInvoke = function(player)
+	local nivel = nivelDe(player)
+	return {
+		nivel = nivel,
+		nivelNome = RetroCommands.NOME_DO_NIVEL[nivel] or tostring(nivel),
+		prefixo = RetroCommands.PREFIXO,
+		comandos = RetroCommands.listarPara(nivel),
+	}
+end
+
+-- Freio simples: o remote é público (qualquer cliente chama), e a recusa
+-- por nível é barata mas não é de graça. Sem freio, um cliente hostil
+-- transforma isto num laço de log no servidor.
+local ultimoUso = {}
+local INTERVALO_MINIMO = 0.25
+
+Players.PlayerRemoving:Connect(function(player)
+	ultimoUso[player] = nil
+end)
+
+rodarComando.OnServerInvoke = function(player, texto)
+	if type(texto) ~= "string" or #texto > 300 then
+		return { ok = false, mensagem = "comando inválido" }
+	end
+
+	local agora = os.clock()
+	local anterior = ultimoUso[player]
+	if anterior and agora - anterior < INTERVALO_MINIMO then
+		return { ok = false, mensagem = "devagar" }
+	end
+	ultimoUso[player] = agora
+
+	-- O painel manda sem prefixo ("coins me 100"); o chat manda com.
+	-- Normaliza aqui para o dispatcher ver sempre a mesma coisa.
+	local normalizado = texto
+	if string.sub(texto, 1, #RetroCommands.PREFIXO) ~= RetroCommands.PREFIXO then
+		normalizado = RetroCommands.PREFIXO .. texto
+	end
+
+	local resultado = executarComando(player, normalizado)
+	if resultado == nil then
+		return { ok = false, mensagem = "não é um comando" }
+	end
+	return { ok = resultado.ok, mensagem = resultado.mensagem }
+end
+
+-- =====================================
 -- COMANDOS DE CHAT
--- (V8) Conecta pra TODO jogador e checa admin NA HORA da mensagem —
--- assim, quem virar admin com o servidor já aberto usa os comandos
--- sem precisar relogar.
--- (mantido V5: não lowercasear nome do jogador/personagem)
+-- (V8) Conecta pra TODO jogador e checa o nível NA HORA da mensagem —
+-- assim, quem virar admin com o servidor já aberto usa os comandos sem
+-- precisar relogar.
 -- =====================================
 
 local function onPlayerChatted(player, message)
-	if not isAdmin(player) then
-		return
-	end
-
-	-- Dividir sem forcar lowercase no comando inteiro
-	local args = string.split(message, " ")
-	local cmd = args[1] and args[1]:lower() or ""
-
-	if cmd == ";coins" and args[2] and args[3] then
-		local target = Players:FindFirstChild(args[2])
-		local amount = tonumber(args[3])
-		if target and amount then
-			_G.PlayerDataManager.updateCoins(target, amount)
-			_G.PlayerDataManager.savePlayerData(target)
-			logAction(player, "ChatCmd:Coins", target, tostring(amount))
-		end
-	elseif cmd == ";bounty" and args[2] and args[3] then
-		local target = Players:FindFirstChild(args[2])
-		local amount = tonumber(args[3])
-		if target and amount then
-			_G.PlayerDataManager.updateBounty(target, amount)
-			_G.PlayerDataManager.savePlayerData(target)
-			logAction(player, "ChatCmd:Bounty", target, tostring(amount))
-		end
-	elseif cmd == ";char" and args[2] and args[3] then
-		-- Nome do personagem preserva capitalização original (ex: "Gui Bomba")
-		local target = Players:FindFirstChild(args[2])
-		local charName = table.concat(args, " ", 3)
-		if target and charName ~= "" then
-			_G.PlayerDataManager.addCharacterToInventory(target, charName)
-			_G.PlayerDataManager.savePlayerData(target)
-			logAction(player, "ChatCmd:Character", target, charName)
-		end
-	elseif cmd == ";allchars" and args[2] then
-		local target = Players:FindFirstChild(args[2])
-		if target then
-			-- (V7) Somente personagens do catálogo dinâmico
-			local allNames = getAllCharacterNames()
-			if #allNames == 0 then
-				print("[ADMIN V8] Catalogo vazio — nada para conceder.")
-				notifyAdmin(player, "Catalogo vazio! Adicione personagens pelo painel primeiro.", false)
-			else
-				for _, charName in ipairs(allNames) do
-					_G.PlayerDataManager.addCharacterToInventory(target, charName)
-				end
-				_G.PlayerDataManager.savePlayerData(target)
-				logAction(player, "ChatCmd:AllChars", target, #allNames .. " do catalogo")
-			end
-		end
-	elseif cmd == ";addadmin" and args[2] then
-		-- (V8) Novo admin por username ou id — salvo no DataStore e
-		-- sincronizado em todos os servidores (AdminRegistryServer_V1)
-		if _G.AdminRegistry then
-			local input = table.concat(args, " ", 2)
-			local ok, msg = _G.AdminRegistry.addAdmin(player, input)
-			notifyAdmin(player, msg, ok)
-			logAction(player, "ChatCmd:AddAdmin", nil, input .. " → " .. tostring(msg))
-		else
-			notifyAdmin(player, "AdminRegistryServer_V1 nao instalado!", false)
-		end
-	elseif cmd == ";deladmin" and args[2] then
-		if _G.AdminRegistry then
-			local input = table.concat(args, " ", 2)
-			local ok, msg = _G.AdminRegistry.removeAdmin(player, input)
-			notifyAdmin(player, msg, ok)
-			logAction(player, "ChatCmd:DelAdmin", nil, input .. " → " .. tostring(msg))
-		else
-			notifyAdmin(player, "AdminRegistryServer_V1 nao instalado!", false)
-		end
-	elseif cmd == ";admins" then
-		if _G.AdminRegistry then
-			local list = _G.AdminRegistry.listAll()
-			print("\n[ADMIN V8] LISTA DE ADMINS:")
-			for _, entry in ipairs(list) do
-				print(
-					string.format(
-						"  %s | ID: %d | por: %s%s",
-						entry.name,
-						entry.userId,
-						entry.addedBy,
-						entry.isOwner and " | 🔑 DONO" or ""
-					)
-				)
-			end
-			notifyAdmin(player, #list .. " admin(s) — lista no console (F9)", true)
-		else
-			notifyAdmin(player, "AdminRegistryServer_V1 nao instalado!", false)
-		end
-	elseif cmd == ";reset" and args[2] then
-		local target = Players:FindFirstChild(args[2])
-		if target then
-			_G.PlayerDataManager.resetPlayerData(target)
-			logAction(player, "ChatCmd:Reset", target, "Resetado")
-		end
-	elseif cmd == ";kill" and args[2] then
-		local target = Players:FindFirstChild(args[2])
-		if target and target.Character then
-			local humanoid = target.Character:FindFirstChild("Humanoid")
-			if humanoid then
-				humanoid.Health = 0
-				logAction(player, "ChatCmd:Kill", target, "Eliminado")
-			end
-		end
-	elseif cmd == ";tp" and args[2] then
-		local target = Players:FindFirstChild(args[2])
-		if target and target.Character and player.Character then
-			local hrp = target.Character:FindFirstChild("HumanoidRootPart")
-			local adminHrp = player.Character:FindFirstChild("HumanoidRootPart")
-			if hrp and adminHrp then
-				hrp.CFrame = adminHrp.CFrame
-				logAction(player, "ChatCmd:Teleport", target, "Para admin")
-			end
-		end
-	elseif cmd == ";help" then
-		print("\n[ADMIN V8 COMMANDS]")
-		print("  ;coins [jogador] [quantidade]")
-		print("  ;bounty [jogador] [quantidade]")
-		print("  ;char [jogador] [personagem]")
-		print("  ;allchars [jogador]  (somente catalogo)")
-		print("  ;addadmin [username ou id]  (salvo sem Studio)")
-		print("  ;deladmin [username ou id]  (dono e irremovivel)")
-		print("  ;admins  (lista no console)")
-		print("  ;reset [jogador]")
-		print("  ;kill [jogador]")
-		print("  ;tp [jogador]")
-	end
+	executarComando(player, message)
 end
+
+-- Diagnóstico de boot: diz quais APIs de comando não subiram neste
+-- servidor. Sem isto, a primeira notícia de que um sistema não carregou
+-- seria um comando respondendo "X não está carregado" no meio de uma
+-- partida.
+task.spawn(function()
+	task.wait(10)
+	local ausentes = {}
+	for nome, buscar in DEPENDENCIAS do
+		if buscar() == nil then
+			table.insert(ausentes, nome)
+		end
+	end
+	if #ausentes > 0 then
+		table.sort(ausentes)
+		warn(
+			string.format(
+				"[ADMIN V9] %d API(s) de comando fora do ar: %s — os comandos que dependem delas vão avisar em vez de falhar calados.",
+				#ausentes,
+				table.concat(ausentes, ", ")
+			)
+		)
+	else
+		print(string.format("[ADMIN V9] %d comandos prontos, todas as APIs no ar.", #RetroCommands.COMANDOS))
+	end
+end)
 
 Players.PlayerAdded:Connect(function(player)
 	if isAdmin(player) then
