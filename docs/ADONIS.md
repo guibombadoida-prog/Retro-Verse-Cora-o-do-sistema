@@ -1,17 +1,33 @@
-# Adonis — como está instalado e por quê
+# Adonis — instalado e removido
 
-Sistema de administração/moderação de terceiros, do autor Epix Incorporated,
-carregador oficial [asset 7510622625](https://create.roblox.com/store/asset/7510622625/).
-Vive em `src/ServerScriptService/Adonis_Loader/`.
-
-Este documento existe porque quase toda decisão aqui foi tomada contra uma
-restrição do RetroVerse, e nenhuma delas se explica sozinha olhando o arquivo.
+> ## ⚠️ REMOVIDO DO JOGO
+>
+> O Adonis entrou na publicação **#48** (12/09/2026 17:00 UTC) e saiu na
+> publicação **#51**. O dono pediu a remoção depois de o console próprio do
+> RetroVerse entrar no ar — ver [`CONSOLE_ADMIN.md`](CONSOLE_ADMIN.md).
+>
+> **O que se perdeu com ele:** ban que persiste entre sessões, mute, slowmode,
+> log de comandos no DataStore e comandos entre servidores. O console do
+> RetroVerse não faz nada disso. `;kick` não existe: para expulsar alguém hoje
+> não há comando.
+>
+> **Como ele saiu, já que a publicação não apagava nada:** a tarefa
+> `tasks/apply_code_payload.luau` ganhou uma lista `REMOVER` — caminhos
+> explícitos, com a classe esperada conferida antes de remover. Nunca "apague o
+> que não está no repositório": há 9 scripts legítimos que só existem no place.
+> A remoção é a única operação da publicação sem desfazer do lado do jogo, e por
+> isso é o único caminho com teste de integração dedicado
+> (`tools/test_publish.py`, que roda a tarefa real num Roblox falso).
+>
+> **O resto deste documento é histórico**, e vale ler antes de vendorizar
+> qualquer outro código de terceiros: as restrições do pipeline que ele
+> descobriu continuam valendo.
 
 ---
 
-## Leia isto primeiro: o Adonis não está neste repositório
+## Leia isto primeiro: o Adonis não estava neste repositório
 
-O que está versionado aqui é o **carregador**, 12 KB. O Adonis de verdade é
+O que ficou versionado aqui foi o **carregador**, 12 KB. O Adonis de verdade era
 baixado da Roblox a cada início de servidor:
 
 ```lua
@@ -19,23 +35,18 @@ ModuleID = 7510592873;
 local success, module = pcall(require, moduleId)
 ```
 
-Se aquele `require` falhar, o carregador tenta `InsertService:LoadAsset` no
-mesmo ID e, depois, um MainModule de backup (`17438792001`) — três assets
-remotos, não um.
+Com dois fallbacks em cascata (`:LoadAsset` no mesmo ID e um MainModule de
+backup, `17438792001`) — três assets remotos, não um.
 
-Consequência honesta: **auditar este repositório garante a configuração, não o
-código que roda.** Cada servidor que sobe confia na Epix Incorporated e em
-quem controla aqueles assets. Se uma daquelas contas for comprometida, código
-de terceiros roda no servidor do RetroVerse com acesso total. Isso é inerente
-ao Adonis e não tem conserto do nosso lado.
+Consequência que vale para o próximo: **auditar o repositório garante a
+configuração, não o código que roda.** Cada servidor que subia confiava na Epix
+Incorporated e em quem controla aqueles assets.
 
-O dono foi informado disso e decidiu seguir. A mitigação possível é a que está
-aplicada: **menor privilégio na configuração**, para que o que chega encontre o
-mínimo de superfície.
 
----
+## Por que virou pasta, e não o Model original
 
-## Por que é uma pasta, e não o Model original
+*Esta é a parte reaproveitável: vale para qualquer `Model` de terceiros que
+precise entrar pelo pipeline.*
 
 O modelo do autor é `Model` → `Configuration` → `Folder`, e traz um
 `NumberValue` chamado `Version` e uma `Camera` de miniatura.
@@ -89,7 +100,7 @@ autor — o valor de vendorizar é o arquivo ser igual ao dele.
 
 ---
 
-## O que foi mudado da configuração original
+## O que foi mudado da configuração original (histórico)
 
 Todo desvio está marcado no código com `[RETROVERSE]` e um comentário
 explicando. Assim uma atualização do Adonis é um diff legível, não uma
@@ -146,7 +157,7 @@ comando é a chave da casa.
 
 ---
 
-## Quem é admin
+## Quem era admin
 
 Só o dono, `1595442496` — o mesmo `OWNER_ID` de
 `AdminRegistryServer.server.lua:47`. Não é segredo; é um UserId público da
@@ -183,7 +194,7 @@ explicitamente. `tools/test_adonis.py` trava isso.
 
 ---
 
-## Onde o Adonis fica fora das regras do projeto
+## Como ele ficava fora das regras do projeto
 
 `tools/validar.sh` trata `src/ServerScriptService/Adonis_Loader/` como **área de
 terceiros** e o anuncia na saída (exclusão silenciosa é como um validador perde
@@ -214,7 +225,7 @@ comum, e o dono saindo dos Creators — e reprovou todas.
 
 ---
 
-## Como atualizar o Adonis depois
+## Se algum dia voltar (ou entrar outro código de terceiros)
 
 1. Baixe o carregador novo do autor e extraia os fontes.
 2. Substitua os arquivos que **não** têm `[RETROVERSE]` no diff — eles são

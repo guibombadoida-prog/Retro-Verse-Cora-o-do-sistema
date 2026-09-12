@@ -29,6 +29,24 @@ local LEGACY_NAMES = {
 	["StarterPlayer > StarterPlayerScripts > DamageIndicatorClient"] = "dmgindicator",
 }
 
+-- Instâncias a REMOVER do place. Lista explícita, nunca "apague o que não está
+-- no repositório": há 9 scripts legítimos que só existem no place (PlayerModule,
+-- RbxCharacterSounds, BossConfigServer...) e uma regra automática os levaria.
+--
+-- A chave é o caminho completo e o valor é a CLASSE esperada. A classe é
+-- conferida antes de remover, para que um erro de digitação que caia sobre
+-- outro objeto falhe em vez de apagar a coisa errada.
+--
+-- Remover uma pasta leva os descendentes com ela — é por isso que o Adonis
+-- inteiro é uma linha só em vez de dezessete.
+--
+-- A remoção é `.Parent = nil`, igual ao resto do projeto, e entra no mesmo
+-- rollback das outras escritas: se qualquer passo seguinte falhar, o pai é
+-- devolvido.
+local REMOVER = {
+	["ServerScriptService > Adonis_Loader"] = "Folder",
+}
+
 local runArguments = ({ ... })[1]
 assert(type(runArguments) == "table" and runArguments.BinaryInput, "pacote binário de código ausente")
 assert(RETROVERSE_MODE == "check" or RETROVERSE_MODE == "publish", "modo inválido")
@@ -232,6 +250,48 @@ for _ in plannedFolders do
 	plannedFolderCount += 1
 end
 
+-- Remoções pedidas em REMOVER. Resolvidas por caminho literal a partir de
+-- `game`, sem passar pelo resolveParent: nada aqui deve criar pasta.
+local removals = {}
+for path, expectedClass in REMOVER do
+	local parts = {}
+	for part in string.gmatch(path, "[^>]+") do
+		table.insert(parts, (string.match(part, "^%s*(.-)%s*$")))
+	end
+
+	local current = game
+	local missing = false
+	for index = 1, #parts do
+		local found = findChildrenByName(current, parts[index])
+		if #found > 1 then
+			local detalhe = `há {#found} objetos chamados {parts[index]} no caminho de remoção`
+			table.insert(problems, `{path}: {detalhe}`)
+			print(`! {path} — {detalhe}`)
+			missing = true
+			break
+		elseif #found == 0 then
+			-- Já não existe. Não é problema: depois da primeira publicação a
+			-- entrada fica inerte, igual às de LEGACY_NAMES.
+			print(`- {path} — já não existe no place`)
+			missing = true
+			break
+		end
+		current = found[1]
+	end
+
+	if not missing then
+		if current.ClassName ~= expectedClass then
+			local detalhe = `no place é {current.ClassName}, a lista de remoção espera {expectedClass}`
+			table.insert(problems, `{path}: {detalhe}`)
+			print(`! {path} — {detalhe}`)
+		else
+			local descendentes = #current:GetDescendants()
+			table.insert(removals, { path = path, instance = current, parent = current.Parent })
+			print(`- {path} ({expectedClass}, {descendentes} descendente(s)) — SERÁ REMOVIDO`)
+		end
+	end
+end
+
 -- Scripts que existem no place e não no repositório. Quase sempre são o mesmo
 -- sistema salvo com outro nome: cruzar esta lista com as linhas + revela se um
 -- "script novo" na verdade já está no jogo e seria duplicado.
@@ -263,7 +323,7 @@ end
 print(
 	`Resumo: {#scripts} scripts; {unchanged} iguais; {#changes} diferentes; `
 		.. `{#renames} renomeados; {#creations} novos; {plannedFolderCount} pastas novas; `
-		.. `{#orphans} só no place; {#problems} problemas`
+		.. `{#removals} removidos; {#orphans} só no place; {#problems} problemas`
 )
 
 if #problems > 0 then
@@ -283,7 +343,7 @@ assert(
 	`{#problems} problema(s) impedem a publicação; nada foi alterado (veja as linhas com !)`
 )
 
-if #changes == 0 and #creations == 0 and #renames == 0 then
+if #changes == 0 and #creations == 0 and #renames == 0 and #removals == 0 then
 	print("[PUBLICAÇÃO] nada mudou; nenhuma versão nova foi criada")
 	return "unchanged", #scripts, unchanged, 0, 0, 0, 0
 end
@@ -298,6 +358,8 @@ local function rollback()
 		pcall(function()
 			if previous.created then
 				previous.instance.Parent = nil
+			elseif previous.removed then
+				previous.instance.Parent = previous.parent
 			elseif previous.renamed then
 				previous.target.Name = previous.oldName
 			else
@@ -358,6 +420,20 @@ for _, change in changes do
 	table.insert(applied, { created = false, target = change.target, oldSource = change.oldSource })
 end
 
+-- Remoção por último, de propósito: se uma escrita anterior falhar, o rollback
+-- roda com tudo ainda no lugar. Remover primeiro e falhar depois deixaria o
+-- place sem o objeto removido mesmo com a publicação abortada.
+for _, removal in removals do
+	local ok, problem = pcall(function()
+		removal.instance.Parent = nil
+	end)
+	if not ok then
+		rollback()
+		error(`falha ao remover {removal.path}; alterações desta tarefa foram revertidas: {problem}`)
+	end
+	table.insert(applied, { removed = true, instance = removal.instance, parent = removal.parent })
+end
+
 local saved, saveProblem = pcall(function()
 	-- false publica uma nova versão jogável. O place carregado é a versão atual;
 	-- somente os Source acima foram tocados, então mapa e demais instâncias ficam.
@@ -367,6 +443,6 @@ assert(saved, `SavePlaceAsync falhou: {saveProblem}`)
 
 print(
 	`[PUBLICAÇÃO] {#changes} atualizados, {#renames} renomeados, {#creations} criados, `
-		.. `{plannedFolderCount} pastas criadas`
+		.. `{plannedFolderCount} pastas criadas, {#removals} removidos`
 )
 return "published", #scripts, unchanged, #changes, #renames, #creations, 0

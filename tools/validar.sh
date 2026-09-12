@@ -23,9 +23,16 @@ CENTRAL="$RAIZ/central"
 # Entra na checagem de sintaxe, mas NÃO na de duplicata de família — um
 # script pode legitimamente existir nas duas places.
 BOSS="$RAIZ/boss-place"
-# Código de TERCEIROS, versionado como vem do autor (hoje: o carregador do
-# Adonis). Fica fora das checagens 1, 2, 3, 5, 6 e 7 por três motivos que são
-# de fato distintos:
+# Código de TERCEIROS, versionado como vem do autor.
+#
+# HOJE ESTA PASTA NÃO EXISTE: o Adonis, que a ocupava, foi removido (ver
+# docs/ADONIS.md). A mecânica fica no lugar de propósito — o `find` num
+# caminho ausente devolve vazio e tudo degrada em silêncio — porque o motivo
+# de cada exclusão abaixo foi caro de descobrir e vai valer igual para o
+# próximo código de terceiros que entrar.
+#
+# Fica fora das checagens 1, 2, 3, 5, 6 e 7 por motivos que são de fato
+# distintos:
 #
 #   • Estilo (5) e cabeçalho (6): reescrever para o padrão do RetroVerse
 #     transformaria cada atualização do Adonis num merge manual. O valor de
@@ -40,10 +47,7 @@ BOSS="$RAIZ/boss-place"
 #     o CI roda `luau-compile --only-parse` em todo .lua de src/, com o
 #     parser Luau de verdade (.github/workflows/validate-code.yml).
 #
-# As invariantes que o Adonis precisa para subir são checadas por um teste
-# dedicado, tools/test_adonis.py, que também trava as configurações de
-# segurança contra regressão.
-TERCEIROS="$RAIZ/src/ServerScriptService/Adonis_Loader"
+TERCEIROS="$RAIZ/src/ServerScriptService/__terceiros"
 
 ERROS=0
 AVISOS=0
@@ -120,7 +124,7 @@ printf '\033[1mRetroVerse — validação do repositório\033[0m\n'
 if ((${#DE_TERCEIROS[@]} > 0)); then
 	printf '  \033[2m%d arquivo(s) de terceiros fora das regras de estilo: %s\033[0m\n' \
 		"${#DE_TERCEIROS[@]}" "${TERCEIROS#$RAIZ/}"
-	printf '  \033[2msintaxe deles: CI, com luau-compile. Invariantes: tools/test_adonis.py\033[0m\n'
+	printf '  \033[2msintaxe deles: CI, com luau-compile --only-parse\033[0m\n'
 fi
 
 # ---------------------------------------------------------------
